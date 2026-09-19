@@ -219,38 +219,104 @@ def normalize_series(values: Sequence[Any], *, symbol: str = "",
             "normalization": "ASSET_P95_ABS"}
 
 
-def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
-                     clip: float = 1.0) -> Dict[str, Any]:
-    """Igual que `normalize_series` pero para la matriz del Interval Map.
+# Por debajo de este percentil la celda se considera fondo y no se pinta. Es un
+# suelo de RUIDO, no un umbral de magnitud: se expresa en percentil para que valga
+# igual en un activo con cola pesada y en uno con el campo repartido.
+NOISE_PERCENTILE = 0.35
 
-    La escala es ÚNICA para toda la matriz. Normalizar cada columna por su cuenta
-    haría que un minuto sin exposición se viera tan intenso como el máximo del día,
-    y el mapa dejaría de contar cómo migra la exposición, que es para lo que está.
+
+def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
+                     clip: float = 1.0, mode: str = "RANK") -> Dict[str, Any]:
+    """Matriz del Interval Map llevada a [-1, 1] de forma legible en CUALQUIER activo.
+
+    POR QUÉ NO BASTA DIVIDIR POR EL PERCENTIL 95
+    --------------------------------------------
+    La versión lineal (`x / p95`) funciona cuando el campo está repartido. El campo
+    de exposición NO lo está: tiene cola pesadísima —unos pocos strikes concentran
+    casi todo— así que la inmensa mayoría de las celdas caía por debajo del suelo
+    de opacidad del renderizador y el mapa se veía VACÍO. No le faltaban datos: le
+    sobraba dinámica para una escala lineal.
+
+    Y el defecto no era igual en todos los activos: cuanto más concentrada la
+    cadena, más vacío el mapa. Eso es precisamente un parámetro implícito por
+    ticker, que es lo que no queremos.
+
+    LA CORRECCIÓN: NORMALIZACIÓN POR RANGO
+    --------------------------------------
+    Cada celda se sustituye por el PERCENTIL que ocupa |valor| dentro de la matriz,
+    conservando el signo. La salida se reparte por construcción entre 0 y 1
+    independientemente de la forma de la distribución, así que un activo con cola
+    pesada y otro con el campo plano producen mapas igual de legibles sin tocar
+    ninguna constante.
+
+    Lo que se conserva y lo que no: el ORDEN de las celdas es exacto —si A tiene
+    más exposición que B, se ve más intensa— pero la intensidad ya no es
+    proporcional a la magnitud. Para eso está la matriz cruda, que viaja aparte, y
+    el tooltip. Un mapa de calor sirve para ver DÓNDE y CÓMO SE MUEVE la
+    concentración; leer magnitudes en él nunca fue fiable.
+
+    `mode="LINEAR"` conserva el comportamiento anterior para quien necesite
+    proporcionalidad estricta.
     """
     rows = [list(r) if isinstance(r, (list, tuple)) else [] for r in (matrix or [])]
-    flat = [v for r in rows for v in r]
-    norm = normalize_series(flat, symbol=symbol, clip=clip)
-    if not norm.get("ready"):
-        return {"ready": False, "matrix": [], "scale": None,
-                "symbol": str(symbol).upper(), "reason": norm.get("reason")}
-    scale = float(norm["scale"] or 0.0)
-    out: List[List[float]] = []
+    flat: List[float] = []
     for r in rows:
-        line: List[float] = []
         for v in r:
             try:
                 x = float(v)
             except (TypeError, ValueError):
                 x = 0.0
-            if not math.isfinite(x):
-                x = 0.0
-            line.append(0.0 if scale <= 1e-12 else round(max(-abs(clip), min(abs(clip), x / scale)), 6))
+            flat.append(x if math.isfinite(x) else 0.0)
+
+    if not flat:
+        return {"ready": False, "matrix": [], "scale": None,
+                "symbol": str(symbol).upper(), "reason": "MATRIZ VACÍA"}
+
+    arr = np.asarray(flat, dtype=float)
+    mag = np.abs(arr)
+    nonzero = mag[mag > 0]
+    if nonzero.size == 0:
+        # Todo ceros REALES. Se declara en vez de fabricar contraste.
+        return {"ready": True, "matrix": [[0.0] * len(r) for r in rows], "scale": 0.0,
+                "symbol": str(symbol).upper(), "normalization": "ALL_ZERO_OBSERVED",
+                "reason": "todas las celdas observadas son cero"}
+
+    if str(mode).upper() == "LINEAR":
+        scale = float(np.percentile(nonzero, 95)) or float(nonzero.max())
+        norm = np.clip(arr / max(scale, 1e-12), -abs(clip), abs(clip))
+        normalization = "ASSET_P95_ABS"
+    else:
+        # Percentil de cada celda dentro de las celdas NO nulas. Las nulas quedan en
+        # cero: son ausencia de exposición, no el extremo inferior de la escala.
+        order = np.argsort(np.argsort(nonzero))
+        ranks = (order + 0.5) / nonzero.size          # (0, 1), sin 0 ni 1 exactos
+        lookup = dict(zip(nonzero.tolist(), ranks.tolist()))
+        graded = np.array([lookup.get(m, 0.0) for m in mag], dtype=float)
+        # Se reescala el rango útil por encima del suelo de ruido para que la parte
+        # baja de la distribución no ocupe la mitad de la paleta.
+        graded = np.clip((graded - NOISE_PERCENTILE) / (1.0 - NOISE_PERCENTILE), 0.0, 1.0)
+        norm = np.sign(arr) * graded * abs(clip)
+        scale = float(np.percentile(nonzero, 95))
+        normalization = "ASSET_RANK_PERCENTILE"
+
+    out: List[List[float]] = []
+    i = 0
+    for r in rows:
+        line: List[float] = []
+        for _ in r:
+            line.append(round(float(norm[i]), 6))
+            i += 1
         out.append(line)
-    return {"ready": True, "matrix": out, "scale": round(scale, 6),
-            "symbol": str(symbol).upper(),
-            "normalization": norm.get("normalization", "ASSET_P95_ABS")}
+    filled = float(np.mean(np.abs(norm) > 0.02)) if norm.size else 0.0
+    return {"ready": True, "matrix": out, "scale": round(float(scale), 6),
+            "symbol": str(symbol).upper(), "normalization": normalization,
+            # Proporción de celdas que de verdad se van a ver. Si es ~0, el mapa se
+            # verá vacío y hay que saberlo AQUÍ, no descubrirlo mirando la pantalla.
+            "filled_ratio": round(filled, 4),
+            "cells": int(norm.size)}
 
 
 __all__ = ["AssetScale", "ConcentrationThreshold", "asset_scale",
            "concentration_threshold", "normalize_series", "normalize_matrix",
-           "DEFAULT_QUANTILE", "DEFAULT_PEAK_SHARE", "DEFAULT_ROBUST_Z", "MIN_SAMPLES"]
+           "DEFAULT_QUANTILE", "DEFAULT_PEAK_SHARE", "DEFAULT_ROBUST_Z", "MIN_SAMPLES",
+           "NOISE_PERCENTILE"]

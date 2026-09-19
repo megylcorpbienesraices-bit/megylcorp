@@ -254,11 +254,17 @@
         const a = Math.abs(v);
         const c = v >= 0 ? pos : neg;
         const o = (yi * W + xi) * 4;
-        // Por debajo del umbral el campo es ruido: dejarlo transparente evita que
-        // el fondo entero se tiña y permite ver dónde hay concentración real.
-        const k = a < 0.07 ? 0 : Math.pow((a - 0.07) / 0.93, 0.78);
+        // v1.45.0 · El suelo de ruido ya lo aplica el normalizador por RANGO
+        // (percentil dentro de la matriz), así que aquí no hace falta recortar otra
+        // vez: hacerlo era recortar dos veces y dejaba el mapa casi vacío en las
+        // cadenas concentradas, que son la mayoría.
+        //
+        // La curva gamma 0.62 (antes 0.78) levanta la parte media de la
+        // distribución, que es donde vive la estructura que hay que ver; el techo
+        // sube de 240 a 252 para que la concentración real destaque.
+        const k = a < 0.02 ? 0 : Math.pow(a, 0.62);
         img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
-        img.data[o + 3] = Math.round(k * 240);
+        img.data[o + 3] = Math.round(k * 252);
       }
     }
     ictx.putImageData(img, 0, 0);

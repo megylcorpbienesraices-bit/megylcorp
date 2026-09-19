@@ -16,10 +16,10 @@ La intención real de esos asserts era "esta funcionalidad existe desde 1.26.2".
 Eso se expresa con una comparación monótona, no con igualdad.
 """
 
+import pytest
 import json
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -89,3 +89,39 @@ def assert_dashboard_uses_runtime_version(html: str) -> None:
 def assert_source_uses_runtime_version(source: str) -> None:
     """Código operativo debe referenciar APP_VERSION en vez de literales de release."""
     assert 'APP_VERSION' in source
+
+
+@pytest.fixture(autouse=True)
+def _reset_per_symbol_runtime():
+    """Estado por símbolo limpio entre pruebas.
+
+    v1.45.0 · El Last Known Good, el registro de procedencia y los muros vigentes
+    viven en memoria del proceso y sobreviven a una prueba. Eso es correcto en
+    ejecución —es justo lo que sostiene TRACE cuando el mercado cierra— pero entre
+    pruebas convierte el resultado de una en la entrada de la siguiente: una que
+    guarda un Interval Map válido hace que la siguiente, que comprueba el caso
+    «sin datos», reciba el mapa de la anterior y pase o falle por el motivo
+    equivocado.
+
+    Se limpia antes y después para que ninguna prueba dependa del orden.
+    """
+    def _clear():
+        try:
+            from app.core.data_hub_runtime import HUB_RUNTIME
+            HUB_RUNTIME.reset()
+        except Exception:
+            pass
+        try:
+            from app.core.data_lineage import LINEAGE
+            LINEAGE.reset()
+        except Exception:
+            pass
+        try:
+            from app.core.wall_engine import WALLS
+            WALLS.reset()
+        except Exception:
+            pass
+
+    _clear()
+    yield
+    _clear()

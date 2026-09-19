@@ -1288,6 +1288,22 @@ def _invalidate_symbol_state(previous: str, target: str) -> dict:
     return report
 
 
+@app.get("/__visual_harness", include_in_schema=False)
+async def __visual_harness():
+    """Banco visual multi-activo. Herramienta de desarrollo, no ruta de producto.
+
+    Carga los módulos de render REALES y los alimenta con perfiles de cinco activos
+    de escalas incomparables. Es la única forma de comprobar que la legibilidad de
+    las barras no depende de un ticker cuando el universo se descubre en runtime y
+    el entorno de desarrollo sólo tiene credenciales de uno.
+    """
+    from fastapi.responses import FileResponse, JSONResponse as _J
+    p = Path(__file__).resolve().parent.parent / "tools" / "visual_harness.html"
+    if not p.is_file():
+        return _J({"detail": "banco visual no empaquetado"}, status_code=404)
+    return FileResponse(str(p), media_type="text/html")
+
+
 @app.get("/api/replay/sessions")
 async def api_replay_sessions(start: str | None = None, end: str | None = None):
     return JSONResponse(_jsonable(await asyncio.to_thread(STATE.replay_sessions, start, end)))

@@ -350,10 +350,29 @@ def interval_map(symbol: str, intel: Dict[str, Any], greek: str = "GAMMA", *,
             "note": ("Interval Map del proveedor: cómo se mueve la exposición durante "
                      "la sesión, no una foto del final."),
         }
+        # Se conserva como última sesión válida: es lo que sostiene el fondo de
+        # TRACE cuando el mercado cierra.
+        try:
+            from .data_hub_runtime import HUB_RUNTIME
+            HUB_RUNTIME.lkg.put(f"interval_map:{key}", sym, payload)
+        except Exception as exc:   # noqa: BLE001 — guardar el respaldo nunca falla la vista
+            from .obs import note as _obs_note
+            _obs_note("quant_data_hub:interval_map_lkg", exc, severity="DEGRADED")
         return _envelope(metric, sym, tool=tool, block=block, cadence="MEDIUM",
                          source_mode=DIRECT_PROVIDER, payload=payload)
 
-    # ── respaldo declarado: la matriz del motor ───────────────────────────────
+    # ── sin dato fresco del proveedor: dos respaldos, en este orden ──────────
+    #
+    # 1 · La matriz del MOTOR, si tiene historia de ESTA sesión. Es un cálculo
+    #     propio —va marcado FALLBACK— pero describe lo que está pasando ahora.
+    # 2 · La ÚLTIMA SESIÓN VÁLIDA del proveedor. Mercado cerrado o fin de semana
+    #     explica que no haya datos nuevos; no explica que TRACE se quede sin
+    #     fondo. El posicionamiento del viernes sigue describiendo el libro del
+    #     sábado, y va marcado por su edad.
+    #
+    # El orden importa: un dato propio de ahora vale más que uno ajeno de hace dos
+    # días, y al revés cuando no hay nada de ahora. Lo que no vale nunca es dejar
+    # el gráfico vacío teniendo cualquiera de los dos.
     healthy = cls["state"] == DATA_OK
     DL.guard_primary_source(metric, sym, publishing_mode=FALLBACK,
                             provider_healthy=healthy,
@@ -363,6 +382,22 @@ def interval_map(symbol: str, intel: Dict[str, Any], greek: str = "GAMMA", *,
         return _envelope(metric, sym, tool=tool, block=block, cadence="MEDIUM",
                          source_mode=FALLBACK, payload=engine, fallback_used=True,
                          derivation="heatmap_history del motor (respaldo declarado)")
+
+    if cls["state"] in (STALE, NO_PROVIDER_DATA, PROVIDER_ERROR):
+        from .data_hub_runtime import HUB_RUNTIME
+        lkg = HUB_RUNTIME.lkg.read(f"interval_map:{key}", sym,
+                                   accept=("FRESH", "DEGRADED", "STALE"))
+        cached = lkg.get("payload") if lkg.get("payload") else None
+        if isinstance(cached, dict) and cached.get("ready") and cached.get("strikes"):
+            payload = dict(cached)
+            payload["last_known_good"] = True
+            payload["age_seconds"] = lkg.get("age_seconds")
+            payload["session_note"] = ("última sesión válida · el dato no es de ahora "
+                                       "y se marca como tal")
+            return _envelope(metric, sym, tool=tool, block=block, cadence="MEDIUM",
+                             source_mode=DIRECT_PROVIDER, payload=payload,
+                             fallback_used=False,
+                             derivation="última sesión válida del proveedor")
 
     empty = {
         "ready": False, "greek": key, "label": label, "strikes": [], "times": [],

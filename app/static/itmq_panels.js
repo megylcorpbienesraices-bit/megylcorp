@@ -38,6 +38,121 @@
     return v >= 0 ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
   }
 
+  /* ---------------------------------------- legibilidad de las barras
+   *
+   * Tres defectos compartidos por `bars` y `hbars`, universales para todos los
+   * activos, que hacían que una barra «existiera» sin verse:
+   *
+   *   1 · GROSOR MÍNIMO 1 px.  `Math.max(1, slot * 0.66)` deja slivers de un píxel
+   *       en cuanto hay muchas categorías. Una cadena de 60 strikes en un panel de
+   *       300 px daba 3.3 px de hueco y ~2 px de barra; a alta densidad, 1 px.
+   *
+   *   2 · ALTURA MÍNIMA 1 px.  Un valor real pero pequeño se dibujaba con un píxel,
+   *       indistinguible de la línea de cero. El dato estaba; no se veía.
+   *
+   *   3 · ESCALA POR EL MÁXIMO.  `peak = max(|v|)`: un único strike dominante —que
+   *       es lo NORMAL en un perfil de exposición— aplastaba el resto del perfil
+   *       contra cero. Se veía una barra enorme y cuarenta invisibles, cuando la
+   *       forma del perfil es justamente lo que hay que leer.
+   *
+   * La corrección es de PRESENTACIÓN y no toca el dato: la escala se comprime sólo
+   * cuando la distribución está dominada por un atípico, y la barra que se sale se
+   * marca como recortada en lugar de truncarse en silencio.
+   */
+
+  // Grosor mínimo de una barra. Por debajo de esto deja de leerse como barra.
+  const MIN_BAR_PX = 3;
+  // Extensión mínima de un valor NO nulo. Es un suelo de visibilidad, no un
+  // redondeo del dato: un valor pequeño se ve, y su magnitud real sigue en el eje
+  // y en el tooltip. Un valor exactamente cero sigue midiendo cero.
+  const MIN_EXTENT_PX = 2.5;
+  // A partir de esta razón máx/p90, la distribución está dominada por un atípico y
+  // escalar por el máximo esconde todo lo demás.
+  const OUTLIER_RATIO = 8.0;
+
+  function quantileAbs(values, q) {
+    const v = values.filter(x => Number.isFinite(x)).map(Math.abs).sort((a, b) => a - b);
+    if (!v.length) return 0;
+    const i = Q.clamp((v.length - 1) * q, 0, v.length - 1);
+    const lo = Math.floor(i), hi = Math.ceil(i);
+    return lo === hi ? v[lo] : v[lo] + (v[hi] - v[lo]) * (i - lo);
+  }
+
+  /** Escala robusta: respeta el máximo salvo que un atípico aplaste al resto. */
+  function robustPeak(values) {
+    const finite = values.filter(Number.isFinite).map(Math.abs);
+    const peak = finite.length ? Math.max.apply(null, finite) : 0;
+    if (!(peak > 0)) return { peak: 1, clipped: false, raw: peak };
+    const p90 = quantileAbs(finite, 0.90);
+    if (p90 > 0 && peak / p90 > OUTLIER_RATIO) {
+      // Se deja headroom sobre el p90 para que el perfil se lea, y lo que se sale
+      // se marca. Comprimir sin avisar sería mentir sobre la magnitud.
+      return { peak: p90 * 2.2, clipped: true, raw: peak };
+    }
+    return { peak, clipped: false, raw: peak };
+  }
+
+  /** Agrupa cuando NO caben barras legibles, en vez de solaparlas.
+   *
+   * Forzar un grosor mínimo sin mirar el hueco disponible es cambiar un defecto
+   * por otro: 390 buckets en 330 px dan 0.85 px de hueco, y dibujar barras de 3 px
+   * las solapa hasta convertir el carril en un bloque sólido donde ya no se
+   * distingue un bucket de otro. La información se pierde igual, sólo que ahora
+   * parece llena en vez de vacía.
+   *
+   * Lo honesto cuando no caben es AGRUPAR: menos barras, cada una legible, cada una
+   * cubriendo un intervalo real. Se conserva el valor EXTREMO del grupo —no la
+   * media— porque un pico aplanado por el promedio es justo lo que hay que ver en
+   * un carril de flujo; y porque el extremo es un valor que existió de verdad,
+   * mientras que una media es un número que nadie observó.
+   */
+  function fitBars(data, widthPx) {
+    const n = data.length;
+    if (!n) return { rows: data, grouped: 0 };
+    const maxBars = Math.max(1, Math.floor(widthPx / MIN_BAR_PX));
+    if (n <= maxBars) return { rows: data, grouped: 0 };
+    const group = Math.ceil(n / maxBars);
+    const rows = [];
+    for (let i = 0; i < n; i += group) {
+      const chunk = data.slice(i, i + group);
+      let best = chunk[0];
+      for (const d of chunk) {
+        if (Math.abs(Q.num(d.value)) > Math.abs(Q.num(best.value))) best = d;
+      }
+      rows.push({
+        label: chunk.length > 1 ? `${chunk[0].label}…${chunk[chunk.length - 1].label}` : chunk[0].label,
+        value: Q.num(best.value),
+        color: best.color,
+        key: `g${i}`,
+        grouped: chunk.length,
+      });
+    }
+    return { rows, grouped: group };
+  }
+
+  /** Grosor de barra legible dentro de un hueco, con suelo. */
+  function barThickness(slot, maxBar) {
+    return Math.max(MIN_BAR_PX, Math.min(maxBar || 34, slot * 0.82));
+  }
+
+  /** Extensión con suelo de visibilidad: cero sigue siendo cero. */
+  function visibleExtent(px, value) {
+    if (!Number.isFinite(value) || value === 0) return 0;
+    return Math.max(MIN_EXTENT_PX, Math.abs(px));
+  }
+
+  /** Marca de barra recortada: dice que el valor se sale de la escala. */
+  function clipMark(ctx, x, y, w, h, vertical, color) {
+    ctx.save();
+    ctx.fillStyle = Q.alpha(color, 0.95);
+    if (vertical) {
+      for (let i = 0; i < 3; i++) ctx.fillRect(x, y + i * 3, w, 1.5);
+    } else {
+      for (let i = 0; i < 3; i++) ctx.fillRect(x - i * 3 - 1.5, y, 1.5, h);
+    }
+    ctx.restore();
+  }
+
   /* ------------------------------------------------ barras verticales */
 
   /** data: [{label, value, color?}] */
@@ -50,9 +165,14 @@
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!data.length) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin);
-      let peak = 0, hasNeg = false;
-      for (const d of data) { peak = Math.max(peak, Math.abs(Q.num(d.value))); if (Q.num(d.value) < 0) hasNeg = true; }
-      maxG.set(peak > 0 ? peak : 1);
+      // Se agrupa ANTES de escalar: si no, la escala se calcula sobre puntos que
+      // no se van a dibujar y el eje no corresponde a lo que se ve.
+      const fit = fitBars(data, b.w);
+      const draw = fit.rows;
+      let hasNeg = false;
+      const values = draw.map(d => { const v = Q.num(d.value); if (v < 0) hasNeg = true; return v; });
+      const scale = robustPeak(values);
+      maxG.set(scale.peak);
       const mx = Math.max(maxG.get(), 1e-9);
       const centered = o.zeroCenter && hasNeg;
       const sy = centered ? Q.scale(-mx * 1.1, mx * 1.1, b.y + b.h, b.y) : Q.scale(0, mx * 1.12, b.y + b.h, b.y);
@@ -60,17 +180,33 @@
       Q.gridY(ctx, b, sy, Q.niceTicks(sy.domain[0], sy.domain[1], 5), o.fmt, { labelSide: 'left' });
 
       const y0 = sy(0);
-      const slot = b.w / data.length;
-      const bw = Math.max(1, Math.min(o.maxBar || 34, slot * 0.66));
+      const slot = b.w / draw.length;
+      const bw = barThickness(slot, o.maxBar);
 
       ctx.save();
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
-      data.forEach((d, i) => {
-        const v = glide.get(d.key !== undefined ? d.key : i);
+      draw.forEach((d, i) => {
+        // Los grupos no llevan transición: su clave cambia con el zoom y animar
+        // entre agrupaciones distintas produce un barrido que no significa nada.
+        const v = fit.grouped ? Q.num(d.value) : glide.get(d.key !== undefined ? d.key : i);
         const cx = b.x + slot * (i + 0.5);
         const y = sy(v);
-        ctx.fillStyle = Q.alpha(d.color || colorFor(v, o), 0.9);
-        ctx.fillRect(cx - bw / 2, Math.min(y, y0), bw, Math.max(1, Math.abs(y - y0)));
+        const col = d.color || colorFor(v, o);
+        const h = visibleExtent(y - y0, v);
+        const top = v >= 0 ? y0 - h : y0;
+        // Relleno más opaco y un borde del mismo color: a grosor pequeño el borde
+        // es lo que separa una barra de la de al lado.
+        ctx.fillStyle = Q.alpha(col, 0.95);
+        ctx.fillRect(cx - bw / 2, top, bw, h);
+        if (bw >= 4) {
+          ctx.strokeStyle = Q.alpha(col, 1);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(Math.round(cx - bw / 2) + 0.5, Math.round(top) + 0.5,
+                         Math.round(bw) - 1, Math.max(1, Math.round(h) - 1));
+        }
+        if (scale.clipped && Math.abs(v) > mx) {
+          clipMark(ctx, cx - bw / 2, v >= 0 ? b.y + 2 : b.y + b.h - 10, bw, 1.5, true, col);
+        }
       });
       ctx.restore();
 
@@ -79,8 +215,8 @@
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      const skip = Math.max(1, Math.ceil(data.length / Math.max(1, Math.floor(b.w / 46))));
-      data.forEach((d, i) => {
+      const skip = Math.max(1, Math.ceil(draw.length / Math.max(1, Math.floor(b.w / 46))));
+      draw.forEach((d, i) => {
         if (i % skip) return;
         ctx.fillText(String(d.label), b.x + slot * (i + 0.5), b.y + b.h + 6);
       });
@@ -89,14 +225,14 @@
       // valor bajo el cursor
       if (panel.pointer.inside) {
         const i = Math.floor((panel.pointer.x - b.x) / slot);
-        if (i >= 0 && i < data.length) {
-          const d = data[i];
+        if (i >= 0 && i < draw.length) {
+          const d = draw[i];
           ctx.save();
           ctx.fillStyle = Q.alpha(Q.token('--text', '#e6edf7'), 0.07);
           ctx.fillRect(b.x + slot * i, b.y, slot, b.h);
           ctx.restore();
           Q.chip(ctx, Q.clamp(b.x + slot * (i + .5), b.x + 60, b.x + b.w - 60), b.y + 10,
-            `${d.label} · ${o.fmt(Q.num(d.value))}`,
+            `${d.label} · ${o.fmt(Q.num(d.value))}${d.grouped > 1 ? ` · máx de ${d.grouped}` : ''}`,
             { align: 'center', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
         }
       }
@@ -126,36 +262,51 @@
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!data.length) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin || { l: 62, r: 16, t: 10, b: 24 });
-      let peak = 0, hasNeg = false;
-      for (const d of data) { peak = Math.max(peak, Math.abs(Q.num(d.value))); if (Q.num(d.value) < 0) hasNeg = true; }
-      maxG.set(peak > 0 ? peak : 1);
+      const fit = fitBars(data, b.h);
+      const draw = fit.rows;
+      let hasNeg = false;
+      const values = draw.map(d => { const v = Q.num(d.value); if (v < 0) hasNeg = true; return v; });
+      const scale = robustPeak(values);
+      maxG.set(scale.peak);
       const mx = Math.max(maxG.get(), 1e-9);
       const sx = hasNeg ? Q.scale(-mx * 1.05, mx * 1.05, b.x, b.x + b.w) : Q.scale(0, mx * 1.05, b.x, b.x + b.w);
       const zero = sx(0);
-      const slot = b.h / data.length;
-      const bh = Math.max(1, Math.min(o.maxBar || 22, slot * 0.72));
+      const slot = b.h / draw.length;
+      const bh = barThickness(slot, o.maxBar || 22);
 
       ctx.save();
       ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.9);
       ctx.beginPath(); ctx.moveTo(Math.round(zero) + .5, b.y); ctx.lineTo(Math.round(zero) + .5, b.y + b.h); ctx.stroke();
       ctx.restore();
 
-      const skip = Math.max(1, Math.ceil(data.length / Math.max(1, Math.floor(b.h / 15))));
+      const skip = Math.max(1, Math.ceil(draw.length / Math.max(1, Math.floor(b.h / 15))));
       ctx.save();
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
-      data.forEach((d, i) => {
+      draw.forEach((d, i) => {
         const cy = b.y + slot * (i + 0.5);
-        const v = glide.get(d.key !== undefined ? d.key : i);
+        const v = fit.grouped ? Q.num(d.value) : glide.get(d.key !== undefined ? d.key : i);
         const x = Q.clamp(sx(v), b.x, b.x + b.w);
-        ctx.fillStyle = Q.alpha(d.color || colorFor(v, o), 0.9);
-        ctx.fillRect(Math.min(zero, x), cy - bh / 2, Math.max(1, Math.abs(x - zero)), bh);
+        const col = d.color || colorFor(v, o);
+        const w = visibleExtent(x - zero, v);
+        const left = v >= 0 ? zero : zero - w;
+        ctx.fillStyle = Q.alpha(col, 0.95);
+        ctx.fillRect(left, cy - bh / 2, w, bh);
+        if (bh >= 4) {
+          ctx.strokeStyle = Q.alpha(col, 1);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(Math.round(left) + 0.5, Math.round(cy - bh / 2) + 0.5,
+                         Math.max(1, Math.round(w) - 1), Math.round(bh) - 1);
+        }
+        if (scale.clipped && Math.abs(v) > mx) {
+          clipMark(ctx, v >= 0 ? b.x + b.w - 2 : b.x + 8, cy - bh / 2, 1.5, bh, false, col);
+        }
       });
       ctx.restore();
       ctx.save();
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      data.forEach((d, i) => {
+      draw.forEach((d, i) => {
         if (i % skip) return;
         ctx.fillText(String(d.label), b.x - 6, b.y + slot * (i + 0.5));
       });
@@ -171,8 +322,8 @@
 
       if (panel.pointer.inside) {
         const i = Math.floor((panel.pointer.y - b.y) / slot);
-        if (i >= 0 && i < data.length) {
-          const d = data[i];
+        if (i >= 0 && i < draw.length) {
+          const d = draw[i];
           Q.chip(ctx, b.x + b.w - 4, b.y + slot * (i + .5), `${d.label} · ${o.fmt(Q.num(d.value))}`,
             { align: 'right', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7') });
         }

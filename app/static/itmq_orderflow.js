@@ -28,6 +28,29 @@
     STALE: 'DATO ANTIGUO',
   };
 
+  /* -------------------------------------------- legibilidad de los carriles
+   *
+   * Los cuatro histogramas inferiores usaban `Math.max(1, …)` para el grosor y
+   * para la altura, y alfa 0.62. A la densidad real de una sesión —390 buckets de
+   * un minuto en un carril de 1500 px— eso daba barras de uno o dos píxeles a
+   * media opacidad: existían en el dato y no en la pantalla.
+   *
+   * Los mismos suelos que `itmq_panels.js`, aquí porque este módulo dibuja a mano
+   * sobre su propio lienzo. Son suelos de VISIBILIDAD: un cero sigue midiendo
+   * cero, y la magnitud real sigue en el eje y en el tooltip.
+   */
+  const MIN_BAR_PX = 3;
+  const MIN_EXTENT_PX = 2.5;
+
+  function laneBarWidth(slotPx, maxPx) {
+    return Math.max(MIN_BAR_PX, Math.min(maxPx || 14, Math.abs(slotPx) * 0.82));
+  }
+
+  function laneExtent(px, value) {
+    if (!Number.isFinite(value) || value === 0) return 0;
+    return Math.max(MIN_EXTENT_PX, Math.abs(px));
+  }
+
   function estadoDato(state) {
     return ESTADO_DATO[String(state || '')] || 'SIN DATOS';
   }
@@ -457,10 +480,11 @@
       if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
       if (!b.net) continue;
       const x0 = sx(b.t), x1 = sx(b.t + S.bucketMs);
-      const bw = Math.max(1, (x1 - x0) * 0.7);
+      const bw = laneBarWidth(x1 - x0);
       const y = sy(symlog(b.net, lin));
-      ctx.fillStyle = Q.alpha(b.net >= 0 ? posC : negC, 0.9);
-      ctx.fillRect(x0 + (x1 - x0 - bw) / 2, Math.min(y, y0), bw, Math.max(1, Math.abs(y - y0)));
+      const h = laneExtent(y - y0, b.net);
+      ctx.fillStyle = Q.alpha(b.net >= 0 ? posC : negC, 0.95);
+      ctx.fillRect(x0 + (x1 - x0 - bw) / 2, b.net >= 0 ? y0 - h : y0, bw, h);
     }
     ctx.restore();
 
@@ -556,12 +580,16 @@
       if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
       if (b.total <= 0) continue;
       const x0 = sx(b.t), x1 = sx(b.t + S.bucketMs);
-      const bw = Math.max(1, (x1 - x0) * 0.62);
+      const bw = laneBarWidth(x1 - x0);
       const bx = x0 + (x1 - x0 - bw) / 2;
       const y = sy(b.total);
       const big = b.prints.length > 0 || b.total >= floor;
-      ctx.fillStyle = big ? gold : Q.alpha(dim, 0.35);
-      ctx.fillRect(bx, y, bw, Math.max(1, y0 - y));
+      const h = laneExtent(y0 - y, b.total);
+      // El contraste del bucket «pequeño» sube de 0.35 a 0.55: a 0.35 sobre el
+      // fondo del panel la barra se perdía, y entonces el carril parecía vacío
+      // cuando en realidad estaba lleno de actividad normal.
+      ctx.fillStyle = big ? gold : Q.alpha(dim, 0.55);
+      ctx.fillRect(bx, y0 - h, bw, h);
       if (big) tall.push({ x: bx + bw / 2, y, total: b.total });
     }
     // sólo los picos llevan cifra: etiquetar todo haría ilegible el carril
@@ -735,16 +763,18 @@
       ctx.fillText(Q.compact(t, 1), box.x + box.w + 6, y);
     }
 
-    const bw = Math.max(1, Math.min(9, (box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs)) * 0.62));
+    const bw = laneBarWidth(box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs));
     const pos = Q.token('--pos', '#22c55e'), neg = Q.token('--neg', '#ef4444'), flat = Q.token('--text-dim', '#8494ad');
     for (const b of S.buckets) {
       if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
       const v = Math.abs(Q.num(b.vol, 0));
       if (!(v > 0)) continue;
       const signed = Q.num(b.underlyingNet, 0);
-      const x = sx(b.t), y = sy(v), h = Math.max(1, (box.y + box.h) - y);
-      ctx.fillStyle = Q.alpha(signed > 0 ? pos : signed < 0 ? neg : flat, 0.62);
-      ctx.fillRect(Math.round(x - bw / 2), Math.round(y), Math.max(1, Math.round(bw)), Math.round(h));
+      const x = sx(b.t), y = sy(v);
+      const h = laneExtent((box.y + box.h) - y, v);
+      ctx.fillStyle = Q.alpha(signed > 0 ? pos : signed < 0 ? neg : flat, 0.9);
+      ctx.fillRect(Math.round(x - bw / 2), Math.round(box.y + box.h - h),
+                   Math.max(MIN_BAR_PX, Math.round(bw)), Math.max(1, Math.round(h)));
     }
 
     ctx.globalAlpha = 0.72;
@@ -952,7 +982,7 @@
     ctx.beginPath(); ctx.moveTo(box.x, zy); ctx.lineTo(box.x + box.w, zy);
     ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.9); ctx.stroke();
 
-    const bw = Math.max(1, Math.min(9, (box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs)) * 0.62));
+    const bw = laneBarWidth(box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs));
     const posC = Q.token('--pos', '#22c55e'), negC = Q.token('--neg', '#ef4444');
     // El volumen de puts llega YA firmado por el proveedor. No se le cambia el
     // signo: se dibuja donde cae, que es la lectura que publica Quant Data.
@@ -961,9 +991,10 @@
       for (const [val, col] of [[v.cv, posC], [v.pv, negC]]) {
         if (!val) continue;
         const y0 = sy(0), y1 = sy(val);
-        ctx.fillStyle = Q.alpha(col, 0.62);
-        ctx.fillRect(Math.round(x - bw / 2), Math.round(Math.min(y0, y1)),
-          Math.max(1, Math.round(bw)), Math.max(1, Math.round(Math.abs(y1 - y0))));
+        const h = laneExtent(y1 - y0, val);
+        ctx.fillStyle = Q.alpha(col, 0.9);
+        ctx.fillRect(Math.round(x - bw / 2), Math.round(val >= 0 ? y0 - h : y0),
+          Math.max(MIN_BAR_PX, Math.round(bw)), Math.max(1, Math.round(h)));
       }
     }
     drawDriftCursor(ctx, box, sx);
