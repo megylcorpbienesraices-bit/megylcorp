@@ -1015,6 +1015,11 @@
     S.heatField = field;
     if (field === 'off') { S.heat = null; S.heatKey = ''; }
     else buildHeatBitmap();
+    // El HUD sólo se redibujaba al llegar datos nuevos, así que tras cambiar de
+    // griega seguía anunciando la anterior hasta el siguiente ciclo. Con cadencias
+    // de varios segundos eso significaba leer «GAMMA» mirando el mapa de DELTA,
+    // que es peor que no rotular nada.
+    if (S.data) { try { renderHud(S.data); } catch (err) { console.warn('[TRACE] hud', err); } }
     invalidateAll();
   }
 

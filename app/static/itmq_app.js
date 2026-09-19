@@ -15,6 +15,27 @@
   const el = id => document.getElementById(id);
   const set = (id, v) => { const x = el(id); if (x) x.textContent = (v === null || v === undefined || v === '') ? '—' : v; };
 
+  // v1.43.0 · Motivo por el que una sección está vacía, en lenguaje de ANÁLISIS.
+  //
+  // La pantalla principal no lleva nombres de proveedor, rutas ni códigos de error:
+  // eso vive en el Auditor. Lo que el operador necesita saber aquí es si mira un
+  // mercado tranquilo o un hueco de datos, y eso se puede decir sin nombrar a nadie.
+  const MOTIVO_VACIO = {
+    QUANT_DATA_SIN_RESPUESTA: 'sin datos de estructura off-exchange en este ciclo',
+    NO_PRINTS: 'la sesión todavía no ha dejado impresiones',
+    SIN_OFF_EXCHANGE_CONFIRMADO: 'sin ejecución fuera de bolsa confirmada',
+    NO_PROVIDER_DATA: 'sin datos en este ciclo',
+    PROVIDER_ERROR: 'datos no disponibles en este ciclo',
+    PARSER_ERROR: 'datos no disponibles en este ciclo',
+    FILTERED_ALL: 'ninguna observación superó la validación',
+    STALE: 'el último dato es demasiado antiguo para operar con él',
+  };
+
+  function motivoVacio(reason, fallback) {
+    return MOTIVO_VACIO[String(reason || '')] || fallback;
+  }
+
+
   const state = {
     view: 'resumen',
     symbol: 'DIA',
@@ -433,7 +454,10 @@
     const ndRows = (nd && nd.ready && Array.isArray(nd.series)) ? nd.series : [];
     chart('chartNetDrift', () => P.lines(el('chartNetDrift'), {
       fmt: v => Q.money(v, 1),
-      empty: nd && !nd.ready ? `SIN DATOS · ${String(nd.state || '')}` : 'SIN DATOS',
+      // El código de estado en crudo es diagnóstico y vive en el Auditor; aquí va
+      // el motivo en lenguaje de análisis, que es lo que el operador necesita para
+      // distinguir un mercado tranquilo de un hueco de datos.
+      empty: nd && !nd.ready ? `SIN DATOS · ${motivoVacio(nd.state, 'sin datos en este ciclo')}` : 'SIN DATOS',
     })).set([
       { name: 'CALL', color: Q.token('--pos', '#22c55e'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_call, 0) })) },
       { name: 'PUT', color: Q.token('--neg', '#ef4444'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_put, 0) })) },
@@ -442,7 +466,9 @@
 
     pill('pillFlow', candles.length ? 'live' : 'off', candles.length ? `${candles.length} barras` : 'esperando');
     pill('pillDrift', ndRows.length ? 'live' : 'off',
-      ndRows.length ? `${ndRows.length} buckets · Quant Data` : (nd ? String(nd.state || 'SIN DATOS') : 'SIN DATOS'));
+      // El estado de dato sí es útil en pantalla (dice si hay hueco o mercado
+      // tranquilo); el nombre del proveedor no lo es y vive en el Auditor.
+      ndRows.length ? `${ndRows.length} buckets` : motivoVacio(nd && nd.state, 'SIN DATOS'));
     pill('pillPrints', prints.length ? 'live' : 'off', prints.length ? `${prints.length}` : '0');
 
     fillTable('tblLevels', r.levels || [], lv => [
@@ -642,10 +668,16 @@
 
   function renderDarkPool(d) {
     const dp = d.dark_pool || {};
-    set('dpCount', Q.compact(Q.num(dp.count), 0));
-    set('dpNotional', Q.money(Q.num(dp.notional), 1));
+    // Sin datos NO se publica un 0: un cero aquí afirma «hoy no hubo dark pool»,
+    // que es una conclusión, no un hueco. El backend ya manda `null` en ese caso.
+    const cnt = Q.num(dp.count, NaN);
+    const not = Q.num(dp.notional, NaN);
+    set('dpCount', Q.isNum(cnt) ? Q.compact(cnt, 0) : 'SIN DATOS');
+    set('dpNotional', Q.isNum(not) ? Q.money(not, 1) : 'SIN DATOS');
     set('dpLevel', Q.isNum(Q.num(dp.dominant_level, NaN)) ? Q.num(dp.dominant_level).toFixed(2) : '—');
-    set('dpLevelDetail', Q.isNum(Q.num(dp.dominant_notional, NaN)) ? Q.money(Q.num(dp.dominant_notional), 1) : (dp.reason || '—'));
+    set('dpLevelDetail', Q.isNum(Q.num(dp.dominant_notional, NaN))
+      ? Q.money(Q.num(dp.dominant_notional), 1)
+      : motivoVacio(dp.reason || dp.state, '—'));
 
     const candles = dp.candles || [];
     const last = candles.length ? Q.num(candles[candles.length - 1].c, NaN) : NaN;
@@ -663,26 +695,24 @@
     const src = String(dp.off_exchange_share_source || '');
     set('dpShare', Q.isNum(share) ? `${share.toFixed(1)}%` : 'SIN DATOS');
     set('dpShareDetail', !Q.isNum(share)
-      ? (dp.reason === 'QUANT_DATA_SIN_RESPUESTA'
-        ? 'Quant Data no respondió · sin clasificación por venue'
-        : 'sin volumen con el que comparar')
+      ? motivoVacio(dp.reason, 'sin volumen con el que comparar')
       : (src === 'QUANTDATA_DARK_FLOW'
-        ? `Quant Data · ${Q.compact(Q.num(dp.dark_volume, 0), 1)} de ${Q.compact(Q.num(dp.total_volume, 0), 1)} acc`
-        : `clasificación por venue · ${Q.money(Q.num(dp.off_exchange_notional), 1)} de ${Q.money(Q.num(dp.large_print_notional), 1)}`));
+        ? `${Q.compact(Q.num(dp.dark_volume, 0), 1)} de ${Q.compact(Q.num(dp.total_volume, 0), 1)} acc`
+        : `${Q.money(Q.num(dp.off_exchange_notional), 1)} de ${Q.money(Q.num(dp.large_print_notional), 1)} en prints grandes`));
 
     // Auditoría: las dos medidas, una al lado de la otra. Dos vías independientes
     // que coinciden valen más que una sola; si no coinciden, eso es información.
     const dv = Q.num(dp.dark_volume, NaN);
     set('dpDarkVolume', Q.isNum(dv) ? `${Q.compact(dv, 1)} acc` : 'SIN DATOS');
     set('dpDarkVolumeDetail', Q.isNum(dv)
-      ? `Quant Data · dark-flow · ${(dp.flow || []).length} intervalos`
-      : 'Quant Data no publicó dark-flow en este ciclo');
+      ? `${(dp.flow || []).length} intervalos observados`
+      : motivoVacio(dp.reason || dp.state, 'sin volumen oscuro en este ciclo'));
 
     const audit = dp.audit || {};
     const dpp = Q.num(audit.delta_pp, NaN);
     set('dpAudit', Q.isNum(dpp) ? `${dpp >= 0 ? '+' : ''}${dpp.toFixed(1)} pp` : '—');
     set('dpAuditDetail', Q.isNum(dpp)
-      ? `proveedor ${Q.num(audit.provider_dark_share_pct, 0).toFixed(1)}% · venue ${Q.num(audit.venue_classification_share_pct, 0).toFixed(1)}%`
+      ? `estructura ${Q.num(audit.provider_dark_share_pct, 0).toFixed(1)}% · cinta ${Q.num(audit.venue_classification_share_pct, 0).toFixed(1)}%`
       : 'sólo una de las dos vías tiene dato');
 
     const big = dp.off_exchange_largest || null;
@@ -718,7 +748,8 @@
       // `shares` sólo lo publica dark-pool-levels de Quant Data. Las zonas propias
       // no lo tienen, y ahí va vacío: un 0 diría que no hubo acciones, que es falso.
       const sh = Q.num(l.shares, NaN);
-      const origin = String(l.source || '') === 'QUANTDATA_DARK_POOL_LEVELS' ? 'QUANT DATA' : 'VENUE';
+      // Origen en lenguaje de análisis: qué MIDE cada vía, no quién la sirve.
+      const origin = String(l.source || '') === 'QUANTDATA_DARK_POOL_LEVELS' ? 'ESTRUCTURA' : 'CINTA';
       return [
         Q.num(l.price).toFixed(2),
         (Q.isNum(lo) && Q.isNum(hi)) ? `${lo.toFixed(2)}–${hi.toFixed(2)}` : '—',
@@ -731,11 +762,7 @@
           Q.num(l.distance_pct, 0) >= 0 ? 'pos' : 'neg'),
         origin,
       ];
-    }, dp.reason === 'QUANT_DATA_SIN_RESPUESTA'
-      ? 'Quant Data no respondió a dark-flow / dark-pool-levels en este ciclo'
-      : (dp.reason === 'NO_PRINTS' || dp.reason === 'SIN_OFF_EXCHANGE_CONFIRMADO')
-        ? 'Sin prints off-exchange confirmados en la sesión todavía'
-        : 'Sin zonas off-exchange publicadas');
+    }, motivoVacio(dp.reason, 'Sin zonas off-exchange publicadas'));
   }
 
 
@@ -929,13 +956,12 @@
       },
       empty: 'INTERVAL MAP NO DISPONIBLE',
     })).set(im.strikes || [], im.times || [], im.matrix || [], im.price || []);
-    // Cuando el proveedor devuelve algo que no sabemos leer, la forma del payload
-    // viaja a pantalla: es lo que permite corregir el normalizador sin adivinar.
+    // El mapa se describe por lo que MIDE, no por quién lo sirve. La forma del
+    // payload y el nombre del proveedor son diagnóstico y viven en el Auditor.
     set('imNote', im.ready
-      ? (im.note || `Fuente: ${im.source === 'ITM_QUANT' ? 'motor ITM QUANT' : 'Quant Data'} · ${im.cells || 0} celdas`)
-      : (im.payload_keys
-        ? `El proveedor respondió con una forma no reconocida: ${esc(JSON.stringify(im.payload_keys).slice(0, 300))}`
-        : 'El motor publica este mapa en cuanto acumula historia de cadena en la sesión.'));
+      ? `${im.label || 'exposición'} por intervalo · ${im.cells || 0} celdas`
+        + (im.source_mode === 'FALLBACK' ? ' · estructura propia (respaldo)' : '')
+      : 'Sin mapa de intervalos disponible para este activo en este ciclo.');
   }
 
   /**

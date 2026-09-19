@@ -488,3 +488,47 @@ def test_trace_offers_the_four_greeks_of_the_dynamic_map():
     assert "interval_maps" in js
     assert "INTERVAL_GREEKS" in js
     assert "drawQflowMarkers" in js and "drawQflowLevel" in js
+
+
+def test_the_screen_never_prints_a_zero_where_there_is_no_data():
+    """Los tres sitios donde la validación visual encontró `$0.0` con un hueco detrás.
+
+    `Q.money(Q.num(x), 1)` devuelve `$0.0` para `null`, así que publicar el valor sin
+    comprobar antes si existe convierte cualquier hueco en la afirmación «hoy no
+    hubo». Las tres llamadas tienen que pasar por una comprobación explícita.
+    """
+    of = text("app/static/itmq_orderflow.js")
+    assert "const conCinta = S.prints.length > 0 || total > 0;" in of
+    assert "conCinta ? Q.money(v, 1) : 'SIN DATOS'" in of
+
+    app = text("app/static/itmq_app.js")
+    assert "Q.isNum(cnt) ? Q.compact(cnt, 0) : 'SIN DATOS'" in app
+    assert "Q.isNum(not) ? Q.money(not, 1) : 'SIN DATOS'" in app
+
+
+def test_the_empty_reason_is_written_in_the_language_of_analysis():
+    """Un hueco se explica por lo que significa, no por quién falló.
+
+    El operador necesita distinguir «mercado tranquilo» de «hueco de datos»; eso se
+    dice sin nombrar proveedores ni rutas, que es lo que va al Auditor.
+    """
+    app = text("app/static/itmq_app.js")
+    assert "const MOTIVO_VACIO = {" in app
+    assert "function motivoVacio(" in app
+    # Ninguna cadena VISIBLE puede nombrar al proveedor ni a un endpoint.
+    import re
+    visible = re.sub(r"//[^\n]*", "", app)
+    visible = re.sub(r"/\*.*?\*/", "", visible, flags=re.S)
+    for forbidden in ("Quant Data no", "dark-flow", "dark-pool-levels",
+                      "/v1/options/tool/", "/v1/equities/tool/"):
+        assert forbidden not in visible, forbidden
+
+
+def test_switching_the_greek_relabels_the_hud_immediately():
+    """El HUD sólo se redibujaba al llegar datos nuevos, así que tras cambiar de
+    griega seguía anunciando la anterior durante todo un ciclo. Leer «GAMMA»
+    mirando el mapa de DELTA es peor que no rotular nada."""
+    js = text("app/static/itmq_trace.js")
+    i = js.index("function setHeatField(")
+    body = js[i:i + 1200]
+    assert "renderHud(S.data)" in body

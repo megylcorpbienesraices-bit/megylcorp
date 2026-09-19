@@ -22,15 +22,15 @@
     "SIN CAMBIOS: el Scanner sigue siendo la unica autoridad direccional. Net Drift sigue leyendose del endpoint oficial, nunca reconstruido."
   ],
   "tests": {
-    "collected": 1742,
-    "passed": 1742,
+    "collected": 1745,
+    "passed": 1745,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
     "files": 143,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "a397df11e2483cabebe69c3bca6a917fe217fe3d7ae8b2e3b7809121807bd3bb"
+    "plan_sha256": "ae231827b094a76fbb48ee3c654664206c25326850c608ab44978b5392e5ef1b"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_PROVIDER_AUTHORITY",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",

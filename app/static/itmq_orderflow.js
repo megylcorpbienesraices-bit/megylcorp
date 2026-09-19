@@ -1188,17 +1188,27 @@
       const prem = Math.abs(Q.num(p.premium, 0));
       if (!biggest || prem > Math.abs(Q.num(biggest.premium, 0))) biggest = p;
     }
-    set('ofTotalPremium', Q.money(total, 1));
-    set('ofBuyPremium', Q.money(buy, 1));
-    set('ofSellPremium', Q.money(sell, 1));
-    set('ofNetPremium', Q.money(buy - sell, 1));
+    // v1.43.0 · Sin cinta observada NO se publica `$0.0`.
+    //
+    // Un cero aquí afirma «hoy no se negoció prima», y eso es una conclusión, no un
+    // hueco. Cuando la sesión todavía no ha dejado ningún print —arranque, mercado
+    // cerrado, proveedor caído— el panel ya dice SIN FLUJO DIRECCIONAL debajo; que
+    // los KPIs de arriba dijeran `$0.0` a la vez era contradecirse en la misma
+    // pantalla. Un cero sólo se muestra cuando hubo prints y su suma es realmente
+    // cero, que es lo que distingue un dato de un vacío.
+    const conCinta = S.prints.length > 0 || total > 0;
+    const prima = (v) => (conCinta ? Q.money(v, 1) : 'SIN DATOS');
+    set('ofTotalPremium', prima(total));
+    set('ofBuyPremium', prima(buy));
+    set('ofSellPremium', prima(sell));
+    set('ofNetPremium', prima(buy - sell));
     // La cobertura de clasificación explica el sesgo: un 8% clasificado no sostiene
     // la misma lectura que un 95%, y eso tiene que verse junto al número.
     const cov = total > 0 ? (buy + sell) / total * 100 : 0;
     set('ofPrintCount', total > 0
       ? `${S.prints.length} prints · ${cov.toFixed(0)}% con agresor`
         + (unknown > 0 ? ` · ${Q.money(unknown, 1)} sin clasificar` : '')
-      : String(S.prints.length));
+      : (conCinta ? String(S.prints.length) : 'sin cinta observada'));
     set('ofBiggest', biggest ? Q.money(Math.abs(Q.num(biggest.premium)), 1) : '—');
     set('ofBiggestDetail', biggest
       ? `${Q.hhmm(Q.parseTime(biggest.t))} · ${String(biggest.option_type || '').toUpperCase()} ${Q.num(biggest.strike) || ''} · ${biggest.aggressor || ''}`

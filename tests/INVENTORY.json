@@ -2339,7 +2339,7 @@
    ]
   },
   "tests/test_v1430_quant_data_authority.py": {
-   "casos": 45,
+   "casos": 48,
    "tests": [
     "test_a_data_failure_never_reaches_the_screen_as_zero",
     "test_a_divergence_is_reported_not_averaged_away",
@@ -2357,21 +2357,24 @@
     "test_provenance_travels_to_the_auditor_never_to_the_main_screen",
     "test_provider_data_and_own_intelligence_never_share_a_namespace",
     "test_qflow_does_not_stop_at_net_flow",
+    "test_switching_the_greek_relabels_the_hud_immediately",
     "test_the_chain_raw_to_frontend_preserves_value_and_meaning",
     "test_the_concentration_marker_carries_arrow_and_magnitude",
     "test_the_concentration_threshold_is_not_a_fixed_dollar_limit",
     "test_the_dynamic_map_of_trace_comes_from_the_interval_map",
+    "test_the_empty_reason_is_written_in_the_language_of_analysis",
     "test_the_engine_reads_the_hub_instead_of_rebuilding_provider_metrics",
     "test_the_flow_section_carries_the_six_pieces_without_creating_another",
     "test_the_four_greeks_of_the_map_are_selectable",
     "test_the_raw_value_survives_the_normalizer_unchanged",
     "test_the_same_pipeline_runs_for_assets_with_incomparable_scales",
     "test_the_screen_does_not_print_provider_names_or_endpoints",
+    "test_the_screen_never_prints_a_zero_where_there_is_no_data",
     "test_trace_offers_the_four_greeks_of_the_dynamic_map",
     "test_with_quant_data_healthy_the_terminal_really_uses_quant_data"
    ]
   }
  },
- "total_minimo": 1742,
- "version": "1.42.7"
+ "total_minimo": 1745,
+ "version": "1.43.0"
 }
