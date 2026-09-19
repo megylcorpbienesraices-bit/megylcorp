@@ -1,36 +1,35 @@
 {
-  "version": "1.44.0",
-  "release": "ITM_QUANT_v1.44.0_PRE_VPS",
+  "version": "1.45.0",
+  "release": "ITM_QUANT_v1.45.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.43.0",
+  "base_version": "1.44.0",
   "focus": [
-    "AUTORIDAD UNICA de Call Wall y Put Wall: Quant Data -> Data Hub -> Wall Engine.",
-    "Las mismas Walls en TRACE y en FLUJO DE ORDENES, consumidas, no recalculadas.",
-    "Gamma Migration anclada al strike donde se confirmo, sin tarjeta ni panel.",
-    "Concentraciones QFLOW ancladas a la vela exacta, con el detalle en hover.",
-    "Resiliencia del Data Hub: deduplicacion en vuelo, Last Known Good, merge incremental y aislamiento por canal.",
-    "Cambio de simbolo transaccional con epoca: ninguna respuesta atrasada aterriza bajo el ticker nuevo.",
-    "Verificador LIVE de Quant Data para ejecutar con credenciales reales."
+    "El 400 de dark-pool-levels dice ahora QUE campo rechaza el proveedor, y la herramienta repara el cuerpo probando variantes hasta que una pasa.",
+    "CONTRASTE ACTIVO era una etiqueta falsa: la autoridad del canal se deriva de metric_authority en vez de un segundo mapa escrito a mano.",
+    "PROCEDENCIA (quien produjo el dato) separada de CARRIL (que lane lo trajo).",
+    "Dark Pool: off_exchange pasa a tri-estado; un dato ausente ya no se convierte en 'ejecutado en bolsa'.",
+    "Barras legibles y heatmap util en TODOS los activos, sin un solo parametro por ticker.",
+    "Mercado cerrado: el Interval Map cae a la ultima sesion valida, marcada.",
+    "El Auditor queda separado de las pestanas de analisis."
   ],
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "NUEVO: app/core/wall_engine.py — Call/Put Wall como DERIVED ITM QUANT sobre exposicion por strike + interes abierto del proveedor, media geometrica, regla de lado, histeresis y tope de distancia RELATIVO al precio.",
-    "CAMBIO: RESUMEN deja de leer los muros de key_levels_report. Antes habia tres llamadas a structural_walls() con tres frames distintos y el Call Wall de TRACE podia no ser el de RESUMEN sin que nada lo detectara.",
-    "NUEVO: app/core/data_hub_runtime.py — InFlight (deduplicacion), LastKnownGood (degradacion por edad en vez de hueco), merge_time_series (el bucket abierto no se duplica ni se pierde historia) y ChannelIsolator (timeout y cortocircuito por canal; lo que llega tarde alimenta el LKG).",
-    "CAMBIO: los dos carriles de Quant Data pasan por el runtime. Un gather desnudo hacia que el ciclo entero durase lo que el endpoint mas lento.",
-    "CAMBIO: el carril de paginas lleva epoca de simbolo y prioridad de carga; los datasets criticos entran antes que el contexto secundario.",
-    "SIN CAMBIOS: Scanner sigue siendo la unica autoridad direccional. Net Drift sigue leyendose del endpoint oficial. Las marcas derivadas no aprobadas (Confluence, Containment, Break, Divergence, Transition) se calculan pero NO se dibujan en TRACE."
+    "SIN CAMBIOS de formula. Ninguna metrica cambia de valor por esta release.",
+    "CORRECCION: norm_prints publicaba off_exchange=False cuando el proveedor no declaraba el campo, asi que TODAS las impresiones quedaban clasificadas como en bolsa y DARK POOL salia vacio con cientos de prints descargados. Ahora es tri-estado con deduccion por centro de ejecucion y recuento de no clasificadas.",
+    "CORRECCION: la normalizacion del Interval Map pasa de lineal (x/p95) a RANGO (percentil dentro de la matriz). La lineal dejaba la mayoria de celdas bajo el suelo de opacidad, y el efecto era peor cuanto mas concentrada la cadena: un parametro implicito por ticker. El ORDEN de las celdas se conserva exacto; la proporcionalidad de la intensidad no, y se declara.",
+    "CORRECCION: las barras escalaban por el maximo, asi que un strike dominante aplastaba el perfil entero. Escala robusta con marca de recorte, suelo de grosor y de extension, y agrupacion cuando no caben.",
+    "SIN CAMBIOS: Scanner sigue siendo la unica autoridad direccional. Walls, QFLOW, Gamma Migration y Data Hub intactos."
   ],
   "tests": {
-    "collected": 1778,
-    "passed": 1778,
+    "collected": 1812,
+    "passed": 1812,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 144,
+    "files": 145,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "d871306fd601c8ea640ab34de7a9c3bce4112a1420f4e2b282b1bbd8fdf2cbf3"
+    "plan_sha256": "c094d3be6c4e2cf70de4204d6d03b391c7a7f83f9267bb9cc8f57adbbab4533b"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",

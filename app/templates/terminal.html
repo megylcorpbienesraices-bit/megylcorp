@@ -30,8 +30,15 @@
     <button data-view="macro">MACRO</button>
     <button data-view="escenarios">ESCENARIOS</button>
     <button data-view="backtest">BACKTEST</button>
-    <button data-view="fuentes">FUENTES</button>
-    <button data-view="arquitectura">ARQUITECTURA</button>
+    <!-- v1.45.0 · AUDITOR, separado del análisis.
+         Cobertura por canal, herramientas del proveedor, cuotas, rutas,
+         diagnósticos HTTP, orígenes y edades son información de auditoría: útil y
+         por eso no se elimina, pero no es lo que un operador mira para decidir.
+         Va detrás de un separador y con su propia clase para que nunca se lea
+         como una pestaña de análisis más. -->
+    <span class="nav-sep" aria-hidden="true"></span>
+    <button data-view="fuentes" class="nav-audit" title="Auditoría de datos · procedencia, cobertura y diagnóstico">AUDITOR · FUENTES</button>
+    <button data-view="arquitectura" class="nav-audit" title="Auditoría técnica · arquitectura y contratos">AUDITOR · ARQUITECTURA</button>
   </nav>
 
   <div class="topbar-right">
@@ -470,7 +477,7 @@
     <article class="card">
       <header><h2>ZONAS OFF-EXCHANGE</h2></header>
       <div class="body"><div class="table-wrap"><table class="data" id="tblDarkPool">
-        <thead><tr><th>PRECIO</th><th>RANGO</th><th>NOTIONAL</th><th>ACCIONES</th><th>PRINTS</th><th>TIPO</th><th>CONCENTRACIÓN</th><th>DISTANCIA</th><th>ORIGEN</th></tr></thead><tbody></tbody>
+        <thead><tr><th>PRECIO</th><th>RANGO</th><th>NOTIONAL</th><th>ACCIONES</th><th>PRINTS</th><th>TIPO</th><th>CONCENTRACIÓN</th><th>DISTANCIA</th><th>VÍA</th></tr></thead><tbody></tbody>
       </table></div></div>
     </article>
     <article class="card">

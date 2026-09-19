@@ -222,7 +222,10 @@ def test_dark_pool_table_matches_the_published_fields():
     head = head[:head.find("</thead>")]
     # ACCIONES dejó de ser una columna fantasma el día que una fuente real la llenó.
     assert "ACCIONES" in head
-    for col in ("RANGO", "TIPO", "CONCENTRACIÓN", "ORIGEN"):
+    # v1.45.0 · ORIGEN pasa a VÍA: sus valores dicen por qué CAMINO se midió la
+    # zona (estructura del proveedor o cinta propia), no de dónde viene el dato.
+    # «Origen» para eso solapaba dos significados, que es lo que esta release separa.
+    for col in ("RANGO", "TIPO", "CONCENTRACIÓN", "VÍA"):
         assert col in head, col
     app = text("app/static/itmq_app.js")
     # Y se pinta sólo si hay número: nunca un 0 fabricado.

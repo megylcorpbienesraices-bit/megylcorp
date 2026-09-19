@@ -125,6 +125,28 @@ nav.sections button {
 nav.sections button:hover { color: var(--text); background: var(--panel-2); }
 nav.sections button.active { color: var(--text); background: var(--panel-3); box-shadow: inset 0 -2px 0 var(--accent); }
 
+/* v1.45.0 · El AUDITOR no es una pestaña de análisis.
+   Cobertura, herramientas, cuotas, rutas y diagnósticos siguen siendo accesibles
+   —son útiles para auditar— pero se separan visualmente para que el operador no
+   los lea como parte de la lectura de mercado. */
+nav.sections .nav-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 10px;
+  background: var(--grid);
+}
+nav.sections button.nav-audit {
+  color: var(--text-mute);
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+nav.sections button.nav-audit:hover { color: var(--text-dim); }
+nav.sections button.nav-audit.active {
+  color: var(--text-dim);
+  box-shadow: inset 0 -2px 0 var(--text-mute);
+}
+
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .status-dot { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; color: var(--text-dim); }

@@ -1,79 +1,81 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.44.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.45.0
 
-Release: `ITM_QUANT_v1.44.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.45.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. Las secciones de releases anteriores se conservan tal
-> cual. La sección **A8** es la de esta release.
+> Documento acumulativo. La sección **A9** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **1778 casos / 144 ficheros**
-- Particiones: 21 · `plan_sha256`: `d871306fd601c8ea640ab34de7a9c3bce4112a1420f4e2b282b1bbd8fdf2cbf3`
+- Inventario nominal: **1812 casos / 145 ficheros**
+- Particiones: 21 · `plan_sha256`: `c094d3be6c4e2cf70de4204d6d03b391c7a7f83f9267bb9cc8f57adbbab4533b`
 - Resultado: **PASS**
 
 ---
 
-## A8 · v1.44.0 · Wall único, anclaje real y resiliencia del Data Hub
+## A9 · v1.45.0 · Estado real del proveedor y legibilidad multi-activo
 
 ### Qué se certifica
 
-`tests/test_v1440_walls_and_hub_resilience.py` — 33 casos en siete bloques, con
-tres activos de escalas incomparables.
+`tests/test_v1450_provider_state_and_render.py` — 34 casos en siete bloques.
 
-**1 · Autoridad única de Wall.** Se comprueba que el muro sale de exposición ×
-interés abierto, que nunca se coloca del lado equivocado del precio, que la
-histéresis aguanta el ruido pero cede ante un cambio estructural, que un muro
-atravesado se retira al instante, y que **RESUMEN y TRACE no pueden discrepar**:
-se le pasa a `key_levels_report` un Call Wall de 999 a propósito y se verifica que
-no gana.
+**1 · El 400 dice qué falta.** Tres convenciones de error de validación, y que el
+titular no se duplique como si fuera un error de campo. Que un 400/422 sea
+reparable y un 404 no. Que el cuerpo se repare **una vez** y se recuerde: el
+segundo ciclo hace una sola petición. Que el aislador de canal propague la
+excepción original, sin la cual el clasificador no puede distinguir los dos casos.
 
-**2 · Walls compartidas.** El panel de flujo no contiene cálculo de muros: filtra
-los niveles del mismo payload. Se verifica por inspección del código.
+**2 · La etiqueta de autoridad.** Que los cinco canales cuya política es
+`QUANTDATA` se declaren AUTORIDAD PRIMARIA, que la autoridad se **derive** y no se
+escriba por segunda vez, y que los dos registros coincidan sobre
+`dark_pool_prints`.
 
-**3 · Gamma Migration.** Con una matriz donde la exposición se va de 515 y aparece
-en 520, se comprueba que publica `from_strike`, `to_strike` y la etiqueta
-`Γ MIG 515 → 520`, y que se dibuja sobre el eje de precio, no en una tarjeta.
+**3 · Procedencia ≠ carril.** Que GEX, DEX, VEX, CHEX, OI y Net Flow sigan siendo
+`DIRECT_PROVIDER · QUANTDATA` **después** de que el motor los consuma, y que lo
+propio siga siendo `DERIVED`.
 
-**4 · QFLOW anclado.** Se verifica la contención estricta `[t, t+bar)` —un evento
-fuera de su vela NO se asigna a la anterior—, el centro temporal de la vela, la
-altura tomada del máximo/mínimo de esa vela, y el marcado atenuado del huérfano.
+**4 · Dark Pool.** Que un flag ausente sea `None` y no `False`; que el centro de
+ejecución clasifique cuando el proveedor no declara; que el flag del proveedor gane
+sobre la deducción; y que la sección diga **por qué** está vacía en los tres casos
+distintos.
 
-**5 · Marcas no aprobadas.** Se inspecciona el código VISIBLE del renderer (sin
-comentarios) y se rechaza cualquier mención a Confluence, Containment, Break,
-Divergence, Transition o persistence. A la vez se comprueba que el motor las sigue
-calculando.
+**5 · Legibilidad multi-activo.** Suelos que no inventan un cero, escala robusta
+con marca de recorte, agrupación en vez de solape, y —la prueba que más importa—
+que el heatmap llene **lo mismo** con una distribución de cola pesada y con una
+repartida, mientras la lineal se diferencia en más de 25 puntos.
 
-**6 · Resiliencia del Hub.** Seis peticiones simultáneas del mismo dataset
-producen **una** llamada. Un canal de 3 s con timeout de 0.15 s no retiene el
-ciclo ni contagia al canal sano. La respuesta tardía alimenta el Last Known Good y
-sirve en el ciclo siguiente. El cortocircuito deja de llamar tras tres fallos. El
-LKG se degrada por edad en vez de desaparecer. El merge no duplica el bucket
-abierto ni pierde historia.
+**6 · Mercado cerrado.** Que el Interval Map caiga a la última sesión válida
+marcada, y que una matriz fresca del motor gane a una del proveedor de hace días.
 
-**7 · Cambio de símbolo.** Se verifica la época en el carril de páginas, que la
-invalidación limpia muros, procedencia y LKG de **los dos** tickers, que los
-datasets críticos tienen prioridad menor que el contexto secundario, y que un
-fallo de la invalidación no tumba el cambio de activo.
+**7 · El Auditor aparte.** Que los diagnósticos estén separados de las pestañas de
+análisis **sin eliminarse**.
 
-### Verificación de ejecución
+### Verificación visual
 
-Terminal arrancada y renderizada en Chromium. Comprobado sobre la pantalla real:
+Programa en ejecución, renderizado en Chromium sobre `tools/visual_harness.html`,
+que alimenta los renderers reales con SPY (1.4 B), QQQ (900 M), DIA (410 M),
+XLF (6 M) y SOFI (22 K):
 
-- `CALL WALL 534.70` y `PUT WALL 533.70` dibujadas en TRACE **y** en FLUJO DE
-  ÓRDENES con el mismo valor, procedentes de `ITMQ_WALL_ENGINE`.
-- Cero errores de consola en las seis secciones.
-- `/api/nextgen/trace` publica `walls` y `gamma_migration` con su `source_mode`.
+- Perfil por strike: los cinco muestran la forma completa del perfil, no una barra
+  dominante y cuarenta invisibles.
+- Carril de 120 buckets: barras individuales legibles en los cinco.
+- Carril de 390 buckets: agrupado, con etiquetas de rango, separado — no el bloque
+  sólido que producía el suelo de 3 px sin agrupación.
+- Cero errores de consola.
 
-### Límites declarados de esta certificación
+> El universo se descubre desde Alpaca en runtime y este entorno sólo tiene
+> credenciales para DIA. El banco es la única vía de validar la legibilidad
+> multi-activo, que es justo lo que esta release corrige.
 
-1. **La validación LIVE está PENDIENTE.** Sin credenciales de Quant Data, todos
-   los datasets caen a respaldo declarado. El verificador
-   `scripts/verify_live_quantdata.py` existe y su lógica de veredicto está probada,
-   pero **no se ha ejecutado contra la API real**. Hasta entonces esta release es
-   `FUNCTIONAL_VERIFIED_LIVE_PENDING`, no certificación de mercado.
-2. **El artefacto oficial no se ha generado.** Requiere el toolchain pinado.
-3. **Los umbrales de Wall no están calibrados**, sólo adaptados a la escala del
-   activo. La calibración la da la observación en vivo.
+### Límites declarados
+
+1. **La validación LIVE sigue PENDIENTE**, y con un punto nuevo: **la reparación
+   del cuerpo de `dark-pool-levels` no se ha confirmado contra el proveedor**. El
+   egress a su documentación está bloqueado en este entorno, así que las variantes
+   son candidatas razonadas, no el contrato leído. Si ninguna encaja, el Auditor
+   dirá qué campo pide — pero eso sólo se sabrá ejecutándolo.
+2. **Que Dark Pool tenga datos** no se puede afirmar: se corrigió la clasificación
+   que los perdía; si hay prints off-exchange sólo lo dice una sesión real.
+3. **El artefacto oficial no se ha generado.** Requiere el toolchain pinado.
 
 ---
 

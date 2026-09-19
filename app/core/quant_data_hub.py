@@ -705,7 +705,11 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
                     notional += n
                     notional_seen = True
 
+    # Tri-estado: confirmadas fuera de bolsa, confirmadas en bolsa, y las que no se
+    # pudieron clasificar. Las terceras NO son cero dark pool: son desconocidas, y
+    # contarlas como ceros es lo que dejaba la sección vacía teniendo prints.
     dark_prints = [r for r in prints if r.get("off_exchange") is True]
+    unknown_prints = [r for r in prints if r.get("off_exchange") is None]
     level_notional = sum(_f(r.get("notional"), 0.0) or 0.0 for r in levels)
     if not notional_seen and level_notional > 0:
         notional = level_notional
@@ -721,6 +725,17 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
         "dark_share_pct": (round(100.0 * dark_vol / total_vol, 2)
                            if total_vol > 0 else None),
         "level_count": len(levels),
+        "prints_total": len(prints),
+        "prints_unclassified": len(unknown_prints),
+        # Por qué la sección está como está, en términos que distinguen un mercado
+        # sin dark pool de una clasificación que no pudimos hacer.
+        "coverage_reason": (
+            "" if dark_prints or flow or levels
+            else ("las impresiones llegaron sin clasificar: el proveedor no declara "
+                  "off-exchange y no hay centro de ejecución que interpretar"
+                  if unknown_prints else
+                  "no llegaron impresiones en este ciclo" if not prints else
+                  "todas las impresiones se ejecutaron en bolsa")),
         "source": "QUANTDATA_DARK_POOL",
         "audit_channel": "ITM_QUANT_VENUE_CLASSIFICATION",
         "summary": {"levels": len(levels), "prints": len(dark_prints),

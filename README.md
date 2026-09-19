@@ -1,5 +1,35 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.45.0 · Un dato ausente deja de ser una afirmación
+
+Cinco defectos, un mismo patrón: **cuando no había dato, se escribía el valor más
+cómodo en vez de admitir que no se sabía** — y el valor más cómodo siempre resultaba
+ser una afirmación.
+
+- **El 400 ya dice qué falta.** El proveedor nombraba el campo que rechazaba y el
+  cliente lo tiraba (leía sólo `detail`, recortado a 180 caracteres). Ahora se
+  extrae, y la herramienta **repara el cuerpo** probando variantes hasta que una
+  pasa, recordando la aceptada.
+- **«CONTRASTE ACTIVO» era una etiqueta falsa.** Había un **segundo** mapa de
+  autoridad escrito a mano que no se movió cuando v1.43.0 cambió la política. Ahora
+  se **deriva** de `metric_authority`: EXPOSURE, OPEN_INTEREST, IMPLIED_VOLATILITY,
+  OPTION_FLOW y DARK_POOL salen como AUTORIDAD PRIMARIA.
+- **PROCEDENCIA ≠ CARRIL.** `MOTOR` en una columna llamada ORIGEN se leía como
+  autoría cuando era transporte. Dos columnas, dos preguntas.
+- **Dark Pool: ausencia ≠ cero.** `off_exchange` devolvía `False` cuando el
+  proveedor no publicaba el campo, así que **todas** las impresiones quedaban
+  clasificadas como en bolsa. Ahora es tri-estado, con deducción por centro de
+  ejecución, y la sección dice **por qué** está vacía.
+- **Barras legibles en todos los activos.** Suelos de grosor y extensión (un cero
+  sigue midiendo cero), escala robusta que marca lo que recorta, y agrupación
+  cuando no caben — forzar 3 px con 390 buckets los solapaba en un bloque sólido.
+- **El heatmap tenía un parámetro por ticker sin estar escrito.** `x / p95` con un
+  campo de cola pesada deja casi todo bajo el suelo de opacidad, y la cola es más
+  pesada cuanto más concentrada la cadena. Normalización **por rango**: llena el
+  64 % del rango visual sea cual sea la distribución, frente al 45–97 % de la lineal.
+- **Mercado cerrado** cae a la última sesión válida, marcada.
+- **El Auditor** queda separado de las pestañas de análisis, sin eliminarse.
+
 ## v1.44.0 · Autoridad única de Wall, anclaje real y resiliencia del Data Hub
 
 - **Un solo Call Wall y un solo Put Wall.** Antes `structural_walls()` se llamaba

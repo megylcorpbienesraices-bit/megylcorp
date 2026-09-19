@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import math
 import time
 
@@ -706,23 +706,83 @@ def norm_dark_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ready": bool(out), "rows": out, "count": len(out), "source": "QUANTDATA_DARK_FLOW"}
 
 
+# Códigos de centro de ejecución que identifican una operación FUERA de bolsa.
+# Los TRF/ADF de FINRA son donde se reportan las ejecuciones off-exchange de EE.UU.
+_OFF_EXCHANGE_VENUES = ("TRF", "FINRA", "ADF", "OTC", "DARK", "D ", "FNRA")
+
+
+def _off_exchange_flag(row: Dict[str, Any], venue: str) -> tuple[Optional[bool], str]:
+    """¿Fue esta operación fuera de bolsa? True / False / None (no se sabe).
+
+    v1.45.0 · Antes esto era:
+
+        "off_exchange": bool(_pick(r, "offExchange", "darkPool", "isDarkPool") or False)
+
+    y ahí estaba el defecto que dejaba DARK POOL en SIN DATOS con cientos de prints
+    descargados: si la cuenta no publica esos tres campos exactos, `_pick` devuelve
+    None, `bool(None or False)` es False, y **todas** las impresiones quedaban
+    marcadas como ejecutadas en bolsa. Un dato ausente se convertía en una
+    afirmación negativa, que es la forma más silenciosa de perder una sección
+    entera.
+
+    Ahora son tres estados. Cuando el proveedor no lo declara se intenta deducir del
+    centro de ejecución —que es la vía de auditoría— y si tampoco hay venue, se
+    admite que NO SE SABE en vez de decir que no.
+    """
+    declared = _pick(row, "offExchange", "darkPool", "isDarkPool", "off_exchange",
+                     "isOffExchange", "dark")
+    if isinstance(declared, bool):
+        return declared, "PROVIDER_FLAG"
+    if isinstance(declared, (int, float)):
+        return bool(declared), "PROVIDER_FLAG"
+    if isinstance(declared, str) and declared.strip():
+        v = declared.strip().lower()
+        if v in ("true", "yes", "y", "1", "dark", "off", "offexchange"):
+            return True, "PROVIDER_FLAG"
+        if v in ("false", "no", "n", "0", "lit", "on", "onexchange"):
+            return False, "PROVIDER_FLAG"
+    code = str(venue or "").strip().upper()
+    if code:
+        if any(tag in code for tag in _OFF_EXCHANGE_VENUES):
+            return True, "VENUE_CODE"
+        return False, "VENUE_CODE"
+    return None, "UNKNOWN"
+
+
 def norm_prints(payload: Dict[str, Any]) -> Dict[str, Any]:
     out = []
+    by_method: Dict[str, int] = {}
     for r in _rows(payload, "prints", "trades", "executions"):
         t = _pick(r, "timestamp", "time", "t", "executedAt")
         price = _f(_pick(r, "price", "tradePrice", "executionPrice"))
         if t is None or price is None:
             continue
         size = _f(_pick(r, "size", "shares", "quantity", "volume"), 0.0) or 0.0
+        venue = str(_pick(r, "venue", "exchange", "market") or "")
+        off, method = _off_exchange_flag(r, venue)
+        by_method[method] = by_method.get(method, 0) + 1
         out.append({
             "t": str(t), "price": price, "size": size,
             "notional": _f(_pick(r, "notional", "value", "premium"), price * size) or (price * size),
             "side": str(_pick(r, "side", "aggressor", "direction") or "UNKNOWN").upper(),
-            "venue": str(_pick(r, "venue", "exchange", "market") or ""),
-            "off_exchange": bool(_pick(r, "offExchange", "darkPool", "isDarkPool") or False),
+            "venue": venue,
+            # Tres estados. `None` = el proveedor no lo dice y no hay venue que
+            # interpretar; tratarlo como False era inventar una clasificación.
+            "off_exchange": off,
+            "off_exchange_method": method,
         })
     out.sort(key=lambda x: x["t"])
-    return {"ready": bool(out), "rows": out, "count": len(out)}
+    confirmed = sum(1 for r in out if r["off_exchange"] is True)
+    unknown = sum(1 for r in out if r["off_exchange"] is None)
+    return {"ready": bool(out), "rows": out, "count": len(out),
+            # Con esto la sección puede distinguir «no hubo dark pool» de «no
+            # supimos clasificar», que no son lo mismo y antes se veían igual.
+            "off_exchange_confirmed": confirmed,
+            "off_exchange_unknown": unknown,
+            "classification": by_method,
+            "classification_note": ("`off_exchange` es tri-estado: True/False/None. "
+                                    "None significa que no se pudo clasificar, no "
+                                    "que la operación fuera en bolsa.")}
 
 
 def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:

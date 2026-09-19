@@ -2409,8 +2409,41 @@
     "test_the_wall_levels_carry_the_engine_authority_tag",
     "test_there_is_exactly_one_wall_authority_for_the_whole_terminal"
    ]
+  },
+  "tests/test_v1450_provider_state_and_render.py": {
+   "casos": 34,
+   "tests": [
+    "test_a_fresh_engine_matrix_beats_a_stale_provider_one",
+    "test_a_missing_off_exchange_flag_is_unknown_not_false",
+    "test_a_provider_dataset_stays_direct_provider_after_the_engine_reads_it",
+    "test_a_rejected_body_is_repairable_while_a_missing_route_is_not",
+    "test_a_validation_error_keeps_the_field_the_provider_named",
+    "test_an_all_zero_field_stays_empty_instead_of_manufacturing_contrast",
+    "test_bars_aggregate_instead_of_overlapping_when_they_do_not_fit",
+    "test_bars_have_a_visibility_floor_that_does_not_invent_a_zero",
+    "test_dark_pool_says_why_it_is_empty",
+    "test_no_ticker_is_hardcoded_in_the_render_path",
+    "test_one_dominant_strike_no_longer_flattens_the_whole_profile",
+    "test_open_interest_does_not_fall_back_to_alpaca_silently",
+    "test_quant_data_is_the_authority_of_the_channels_it_owns",
+    "test_the_body_is_repaired_once_and_then_remembered",
+    "test_the_channel_authority_is_derived_never_declared_twice",
+    "test_the_channel_isolator_carries_the_original_exception",
+    "test_the_diagnosis_tells_a_rejected_body_from_a_missing_route",
+    "test_the_diagnostic_panels_are_separated_from_the_analysis_tabs",
+    "test_the_flow_datasets_leave_a_provenance_record",
+    "test_the_flow_lanes_share_the_same_floors",
+    "test_the_heatmap_fills_the_same_regardless_of_the_asset_distribution",
+    "test_the_interval_map_falls_back_to_the_last_valid_session",
+    "test_the_provider_flag_wins_over_the_venue_guess",
+    "test_the_screen_calls_it_primary_authority_not_contrast",
+    "test_the_tools_table_separates_provenance_from_the_lane_that_fetched_it",
+    "test_the_two_registries_agree_about_dark_pool_prints",
+    "test_the_venue_code_classifies_when_the_provider_does_not_declare",
+    "test_the_visual_harness_covers_incomparable_scales"
+   ]
   }
  },
- "total_minimo": 1778,
- "version": "1.44.0"
+ "total_minimo": 1812,
+ "version": "1.45.0"
 }
