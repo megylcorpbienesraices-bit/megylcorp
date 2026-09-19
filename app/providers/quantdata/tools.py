@@ -385,6 +385,108 @@ def norm_net_drift(payload: Dict[str, Any]) -> Dict[str, Any]:
             "source": "QUANTDATA_NET_DRIFT_OFFICIAL", "aggregation": "1m"}
 
 
+def norm_interval_map(payload: Dict[str, Any], greek: str = "GAMMA") -> Dict[str, Any]:
+    """INTERVAL MAP de Quant Data: exposición por INSTANTE y por STRIKE.
+
+    Ésta es la fuente del mapa de calor dinámico de TRACE. No es un heat map
+    estático de fondo: cada columna es un intervalo real de la sesión, así que se
+    ve cómo la exposición APARECE, CRECE, SE REDUCE y MIGRA entre strikes a lo
+    largo del día. Un perfil por strike sólo sabe decir dónde está la exposición
+    AHORA; el interval map dice de dónde viene.
+
+    Forma real del proveedor (la misma que ya leía el carril del motor para
+    detectar migración de gamma):
+
+        {"data": {"<instante_ms>": {"<vencimiento>": {"<strike>": {"CALL": x, "PUT": y}}}}}
+
+    La clave superior es la época en milisegundos; se convierte a ISO-8601 UTC en
+    un único punto para que ningún consumidor tenga que adivinar la unidad. Los
+    vencimientos se SUMAN dentro de cada instante: el mapa es del subyacente, no
+    de un vencimiento concreto, y separarlos aquí obligaría a la interfaz a
+    reagregarlos.
+
+    Se publican tres matrices —neta, call y put— porque la pregunta «¿el muro es
+    de calls o de puts?» no se puede responder desde el neto, y responderla es
+    justo lo que distingue un techo de un suelo.
+
+    Matriz orientada [strike][instante]: la fila es el eje Y del gráfico (precio)
+    y la columna es el eje X (tiempo), que es como se dibuja.
+    """
+    key = str(greek or "GAMMA").upper()
+    data = payload.get("data") if isinstance(payload, dict) else None
+
+    cells: Dict[float, Dict[str, Dict[str, float]]] = {}
+    times_ms: Dict[str, int] = {}
+
+    def _add(strike: Any, t_iso: str, call: float, put: float) -> None:
+        k = _f(strike)
+        if k is None:
+            return
+        slot = cells.setdefault(k, {}).setdefault(t_iso, {"call": 0.0, "put": 0.0})
+        slot["call"] += call
+        slot["put"] += put
+
+    if isinstance(data, dict) and data:
+        for raw_t, bucket in data.items():
+            t_iso = _ts_iso(raw_t)
+            if t_iso is None or not isinstance(bucket, dict):
+                continue
+            ms = _epoch_ms(raw_t)
+            if ms is not None:
+                times_ms[t_iso] = ms
+            for _expiry, strikes in bucket.items():
+                if not isinstance(strikes, dict):
+                    continue
+                for strike_raw, cell in strikes.items():
+                    if not isinstance(cell, dict):
+                        continue
+                    call = _f(_pick(cell, "CALL", "call", "callExposure", "calls"), 0.0) or 0.0
+                    put = _f(_pick(cell, "PUT", "put", "putExposure", "puts"), 0.0) or 0.0
+                    if call == 0.0 and put == 0.0:
+                        # Algunas cuentas publican un único valor ya neto en vez del
+                        # desglose. Se conserva como neto y el desglose queda vacío,
+                        # que es honesto: no se inventa un reparto call/put.
+                        net = _f(_pick(cell, "value", "exposure", "gamma", "delta",
+                                       "vanna", "charm", "net"), None)
+                        if net is None:
+                            continue
+                        _add(strike_raw, t_iso, float(net), 0.0)
+                        continue
+                    _add(strike_raw, t_iso, call, put)
+
+    if not cells:
+        return {"ready": False, "greek": key, "strikes": [], "times": [], "matrix": [],
+                "call_matrix": [], "put_matrix": [], "cells": 0,
+                "reason": "PAYLOAD DE INTERVAL MAP SIN CELDAS RECONOCIBLES",
+                "source": "QUANTDATA_INTERVAL_MAP"}
+
+    strikes = sorted(cells)
+    times = sorted({t for row in cells.values() for t in row})
+
+    def _grid(field: str) -> List[List[float]]:
+        return [[round(float(cells.get(k, {}).get(t, {}).get(field, 0.0)), 6) for t in times]
+                for k in strikes]
+
+    call_grid = _grid("call")
+    put_grid = _grid("put")
+    # callExposure y putExposure llegan YA firmadas: el neto es la SUMA. Restar una
+    # magnitud que ya es negativa duplicaría el signo y el mapa saldría invertido.
+    net_grid = [[round(c + p, 6) for c, p in zip(cr, pr)] for cr, pr in zip(call_grid, put_grid)]
+
+    return {
+        "ready": True, "greek": key, "strikes": strikes, "times": times,
+        "times_ms": [times_ms.get(t) for t in times],
+        "matrix": net_grid, "call_matrix": call_grid, "put_matrix": put_grid,
+        "cells": sum(len(r) for r in cells.values()),
+        "rows": len(strikes), "columns": len(times),
+        "count": len(strikes) * len(times),
+        "strike_low": strikes[0], "strike_high": strikes[-1],
+        "orientation": "MATRIX_STRIKE_BY_TIME",
+        "expiration_aggregation": "SUM_ACROSS_EXPIRATIONS",
+        "source": "QUANTDATA_INTERVAL_MAP",
+    }
+
+
 def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Order Flow de OPCIONES de Quant Data, con el contrato entero.
 
@@ -428,6 +530,29 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "direction": 1 if side.startswith(("BUY", "ASK", "A")) else -1 if side.startswith(("SELL", "BID", "B")) else 0,
             "execution": str(_pick(r, "executionType", "execution", "tradeType", "condition") or "").upper(),
             "spot": _f(_pick(r, "stockPrice", "underlyingPrice", "spot")),
+            # v1.43.0 · Greeks POR CONTRATO tal y como los publica el proveedor.
+            # Quant Data es la fuente primaria de los Greeks; recalcularlos aquí
+            # cuando ya vienen en la fila sería duplicar trabajo y, peor, producir
+            # dos Deltas distintos para el mismo contrato en la misma pantalla.
+            # Ausente ≠ cero: lo que no venga queda en None.
+            "greeks": {
+                "delta": _f(_pick(r, "delta", "optionDelta")),
+                "gamma": _f(_pick(r, "gamma", "optionGamma")),
+                "theta": _f(_pick(r, "theta", "optionTheta")),
+                "vega": _f(_pick(r, "vega", "optionVega")),
+                "rho": _f(_pick(r, "rho", "optionRho")),
+                "vanna": _f(_pick(r, "vanna")),
+                "charm": _f(_pick(r, "charm")),
+                "vomma": _f(_pick(r, "vomma")),
+                "veta": _f(_pick(r, "veta")),
+                "speed": _f(_pick(r, "speed")),
+                "color": _f(_pick(r, "color")),
+                "ultima": _f(_pick(r, "ultima")),
+            },
+            "implied_volatility": _f(_pick(r, "impliedVolatility", "iv")),
+            "dte": _f(_pick(r, "dte", "daysToExpiration", "daysToExpiry")),
+            "open_interest": _f(_pick(r, "openInterest", "oi")),
+            "trades": _f(_pick(r, "trades", "tradeCount", "count", "executions")),
         })
     out.sort(key=lambda x: x["t"])
     return {"ready": bool(out), "rows": out, "count": len(out),
@@ -705,11 +830,39 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             ("/v1/options/tool/net-drift",),
             lambda t: {"aggregationPeriod": "1m", **_tf(t)},
             norm_net_drift, "FAST"),
+        # v1.43.0 · El Interval Map deja de ser un payload crudo guardado «por si
+        # acaso» y pasa a ser la FUENTE del mapa de calor dinámico de TRACE, con una
+        # herramienta por griega. Antes sólo se pedía GAMMA y se publicaba sin
+        # normalizar, así que DELTA, VANNA y CHARM no existían como mapa y el fondo
+        # de TRACE tenía que salir del cálculo propio del motor.
+        QuantDataTool(
+            "interval_map_gamma", "Flow Analysis", "Interval Map · GAMMA",
+            ("/v1/options/tool/interval-map",),
+            lambda t: {"greekMode": "GAMMA", "aggregationPeriod": "5m", **_tf(t)},
+            lambda p: {**norm_interval_map(p, "GAMMA"), "raw": p}, "FAST"),
+        QuantDataTool(
+            "interval_map_delta", "Flow Analysis", "Interval Map · DELTA",
+            ("/v1/options/tool/interval-map",),
+            lambda t: {"greekMode": "DELTA", "aggregationPeriod": "5m", **_tf(t)},
+            lambda p: {**norm_interval_map(p, "DELTA"), "raw": p}, "MEDIUM"),
+        QuantDataTool(
+            "interval_map_vanna", "Flow Analysis", "Interval Map · VANNA",
+            ("/v1/options/tool/interval-map",),
+            lambda t: {"greekMode": "VANNA", "aggregationPeriod": "5m", **_tf(t)},
+            lambda p: {**norm_interval_map(p, "VANNA"), "raw": p}, "MEDIUM"),
+        QuantDataTool(
+            "interval_map_charm", "Flow Analysis", "Interval Map · CHARM",
+            ("/v1/options/tool/interval-map",),
+            lambda t: {"greekMode": "CHARM", "aggregationPeriod": "5m", **_tf(t)},
+            lambda p: {**norm_interval_map(p, "CHARM"), "raw": p}, "MEDIUM"),
+        # Alias del mapa de GAMMA. La clave antigua sigue viva para no romper a
+        # ningún consumidor que todavía la lea, pero ya publica la matriz normalizada
+        # en vez del payload crudo.
         QuantDataTool(
             "options_heat_map", "Flow Analysis", "Options Heat Map",
             ("/v1/options/tool/interval-map",),
             lambda t: {"greekMode": "GAMMA", "aggregationPeriod": "5m", **_tf(t)},
-            lambda p: {"ready": bool(p), "raw": p}, "MEDIUM"),
+            lambda p: {**norm_interval_map(p, "GAMMA"), "raw": p}, "MEDIUM"),
         QuantDataTool(
             "options_order_flow", "Dashboard", "Options Order Flow",
             ("/v1/options/tool/order-flow/consolidated",),
@@ -754,7 +907,13 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             "oi_change", "Open Interest", "Cambio de OI",
             ("/v1/options/tool/open-interest-change",),
             lambda t: _tf(t),
-            lambda p: norm_by_strike(p, ("change", "oiChange", "delta", "value")), "SLOW"),
+            # El CAMBIO de OI entre sesiones es un dato del proveedor. Nunca se
+            # reconstruye restando snapshots de volumen: el volumen no dice cuántos
+            # contratos quedaron abiertos.
+            lambda p: {**norm_by_strike(p, ("change", "oiChange", "openInterestChange",
+                                            "delta", "value")),
+                       "semantics": "OPEN_INTEREST_CHANGE_BETWEEN_SESSIONS",
+                       "source": "QUANTDATA_OPEN_INTEREST_CHANGE"}, "SLOW"),
 
         # ── Volatility Analysis ─────────────────────────────────────────────
         QuantDataTool(
@@ -842,7 +1001,8 @@ PAGES: Dict[str, List[str]] = {
                   "equity_prints", "dark_flow", "dark_pool_levels", "news", "gainers_losers"],
     "Exposure": ["gex_by_strike", "vex_by_strike", "dex_by_strike", "chex_by_strike",
                  "gex_by_expiration", "vex_by_expiration", "dex_by_expiration", "chex_by_expiration"],
-    "Flow Analysis": ["net_flow", "net_drift", "options_heat_map", "options_order_flow_raw"],
+    "Flow Analysis": ["net_flow", "net_drift", "interval_map_gamma", "interval_map_delta",
+                      "interval_map_vanna", "interval_map_charm", "options_order_flow_raw"],
     "Dark Pool / Equities": ["dark_flow", "dark_pool_levels", "equity_prints", "stock_price_over_time"],
     "Statistics": ["contract_statistics", "trade_side_statistics", "market_share"],
     "Open Interest": ["max_pain", "max_pain_over_time", "oi_change", "oi_by_strike", "oi_by_expiration", "oi_over_time"],

@@ -255,6 +255,11 @@ ENGINE_SHARED_KEYS: Dict[str, str] = {
     "net_flow": "net_flow",
     "net_drift": "net_drift",
     "options_heat_map": "interval_gamma",
+    # v1.43.0 · El mapa de GAMMA lo pide ya el carril del motor cada ciclo. El
+    # carril de páginas lo ADOPTA en vez de repetir la petición, de modo que la
+    # griega que TRACE muestra por defecto queda LIVE sin gastar cuota extra. Las
+    # otras tres se piden aparte porque el motor no las necesita.
+    "interval_map_gamma": "interval_gamma",
     "max_pain_over_time": "max_pain",
     "iv_rank": "iv_rank",
 }
