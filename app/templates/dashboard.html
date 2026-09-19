@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ app_name }}</title>
+  <link rel="icon" type="image/png" href="/static/branding/itm_quant_iq_logo.png?v={{ app_version }}" />
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}" />
+  <link rel="stylesheet" href="/static/modern_3d_theme.css?v={{ app_version }}" />
+  <script src="/static/vendor/plotly.min.js"></script>
+</head>
+<body class="easy-ui">
+<span class="lean-hidden" aria-hidden="true">SERVER READY · v{{ app_version }}</span>
+<header class="topbar">
+  <div class="brand-wrap"><img class="brand-logo-iq" src="/static/branding/itm_quant_iq_logo.png?v={{ app_version }}" alt="ITM QUANT"><a class="brand" href="/">ITM QUANT <span>MULTI ASSET</span></a></div>
+  <div class="market-strip lean-market-strip"><span id="marketMode" class="status-pill">CARGANDO</span><span id="leanActiveRead">MOTOR CUANT · ACTIVO</span><span id="marketSource" class="lean-hidden">—</span><span id="dataAge" class="lean-hidden">—</span></div>
+  <div class="top-actions lean-top-actions"><span class="status-pill" data-internal-only hidden>ALWAYS-ON · v{{ app_version }}</span><button id="themeToggle" class="btn btn-ghost theme-toggle" type="button" title="Cambiar tema institucional oscuro/claro">TEMA · OSCURO</button><button id="refreshBtn" class="btn btn-primary">ACTUALIZAR</button><span id="memoryState" class="lean-hidden">MEMORIA</span><a href="/providers/coverage" target="_blank" class="lean-hidden" tabindex="-1">DATOS · COBERTURA</a><button id="performanceToggle" class="lean-hidden" type="button" tabindex="-1">PERF · MAX</button><button id="easyModeBtn" class="lean-hidden" type="button" tabindex="-1">MODO FÁCIL · ON</button></div>
+</header>
+<div class="global-sticky-shell" id="globalStickyShell">
+<section id="globalReplayBar" class="replay-bar lean-replay" data-mode="LIVE" aria-label="Contexto temporal global">
+  <div class="replay-status">
+    <span class="eyebrow">CONTEXTO TEMPORAL GLOBAL · TODA LA PLATAFORMA</span>
+    <b id="replayBanner">● EN VIVO</b>
+    <small id="replayContextDetail">HOY usa LIVE. Una fecha histórica cambia todos los módulos al mismo reloj causal.</small>
+  </div>
+  <div class="replay-controls replay-primary-controls">
+    <label>FECHA / SESIÓN<input id="replayDateCalendar" type="date" /></label>
+    <select id="traceDate" class="select lean-hidden" aria-hidden="true" tabindex="-1"><option value="">Sesión</option></select>
+    <input id="replayTime" class="lean-hidden" type="time" step="1" value="09:30:00" aria-hidden="true" tabindex="-1" />
+    <button id="replayLiveBtn" class="btn btn-primary" type="button">HOY · LIVE</button>
+  </div>
+  <div class="replay-timeline" aria-label="Reproducción causal de la sesión seleccionada">
+    <button id="replayPlayPause" class="btn btn-ghost replay-play" type="button" title="Reproducir o pausar sesión histórica">▶ PLAY</button>
+    <button id="replayStepBack" class="btn btn-ghost" type="button" title="Retroceder un punto del reloj">◀ 1m</button>
+    <input id="replayTimeline" type="range" min="0" max="0" step="1" value="0" aria-label="Reloj de Replay" disabled />
+    <button id="replayStepForward" class="btn btn-ghost" type="button" title="Avanzar un punto del reloj">1m ▶</button>
+    <label class="replay-speed-label">VELOCIDAD<select id="replaySpeed" class="select"><option value="1" selected>1x</option><option value="5">5x</option><option value="10">10x</option></select></label>
+    <span id="replayTimelineLabel">LIVE</span>
+  </div>
+</section>
+<nav class="top-section-nav quant-nav" aria-label="Secciones ITM QUANT DOW">
+      <button class="nav-btn active" data-section="command" data-workspace="trader">OPERATIVA</button>
+      <button class="nav-btn" data-section="equityhub" data-workspace="trader">EQUITY HUB</button>
+      <button class="nav-btn" data-section="premarket" data-workspace="trader">PREMARKET</button>
+      <button class="nav-btn" data-section="trace" data-workspace="trader">TRACE</button>
+      <button class="nav-btn" data-section="scanner" data-workspace="trader">SCANNER</button>
+      <button class="nav-btn" data-section="flow" data-workspace="trader">FLUJO</button>
+      <button class="nav-btn" data-section="dealer" data-workspace="trader">DEALER FLOW</button>
+      <button class="nav-btn" data-section="chain" data-workspace="trader">ESTRUCTURA</button>
+      <button class="nav-btn" data-section="vol" data-workspace="trader">VOLATILIDAD</button>
+      <button class="nav-btn" data-section="macro" data-workspace="trader">MACRO</button>
+      <button class="nav-btn lean-auditor-btn" data-section="auditor" data-workspace="trader" data-internal-only hidden>AUDITOR</button>
+    </nav>
+    <nav id="flowGroupNav" class="lean-subnav group-subnav hidden" data-group="flow" aria-label="Módulos de flujo">
+      <b>FLUJO</b><button type="button" data-lean-go="flow">Unusual Flow</button><button type="button" data-lean-go="netdrift">Net Drift</button><button type="button" data-lean-go="prints">Large Prints</button>
+    </nav>
+    <nav id="structureGroupNav" class="lean-subnav group-subnav hidden" data-group="structure" aria-label="Módulos de estructura">
+      <b>ESTRUCTURA</b><button type="button" data-lean-go="chain">Cadena</button><button type="button" data-lean-go="exposure">Exposure</button><button type="button" data-lean-go="gexmatrix">GEX Matrix</button><button type="button" data-lean-go="positioning">Positioning</button><button type="button" data-lean-go="surface"><span>Surface</span><em class="workspace-3d-badge">3D</em></button>
+    </nav>
+</div>
+<div class="layout">
+  <main class="content">
+    <section class="asset-dock">
+      <div class="asset-active">
+        <div><p class="eyebrow">ACTIVO EN ANÁLISIS</p><strong id="activeAssetSymbol">DIA</strong><span id="activeAssetName">—</span></div>
+        <div class="asset-meta"><span id="activeAssetKind">ETF · Dow</span><b id="assetDataStatus">DATOS LIVE</b></div>
+      </div>
+      <div class="symbol-search-launcher">
+        <label>SÍMBOLO</label>
+        <button id="symbolSearchBtn" class="symbol-search-btn" type="button" aria-haspopup="dialog" aria-controls="symbolSearchModal">
+          <span class="symbol-search-icon">⌕</span><strong id="symbolSearchCurrent">DIA</strong><span id="symbolSearchCurrentName">Buscar símbolo</span><kbd>Ctrl K</kbd>
+        </button>
+        <small>Cada símbolo conserva precio, estructura y derivados propios. Los mercados relacionados se usan internamente solo como confluencia.</small>
+      </div>
+      <select id="quickAssetSelect" class="lean-hidden" aria-hidden="true" tabindex="-1"></select>
+      <div id="assetGrid" class="asset-grid lean-hidden"></div>
+    </section>
+    <div id="symbolSearchModal" class="symbol-search-modal hidden" role="dialog" aria-modal="true" aria-labelledby="symbolSearchTitle">
+      <div class="symbol-search-backdrop" data-symbol-close></div>
+      <div class="symbol-search-panel">
+        <div class="symbol-search-head"><h2 id="symbolSearchTitle">Instrumentos · ETF · futuros · índices</h2><button id="symbolSearchClose" class="symbol-close" type="button" aria-label="Cerrar">×</button></div>
+        <div class="symbol-search-input-wrap"><span>⌕</span><input id="symbolSearchInput" type="search" autocomplete="off" placeholder="Buscar SPY, QQQ, IWM, DIA, YM, DJX…" /></div>
+        <div id="symbolCategoryTabs" class="symbol-category-tabs">
+          <button type="button" data-symbol-category="Todos" class="active">TODOS</button>
+          <button type="button" data-symbol-category="ETFs">ETF</button>
+          <button type="button" data-symbol-category="Índices">ÍNDICES</button>
+          <button type="button" data-symbol-category="Futuros">FUTUROS</button>
+          <button type="button" data-symbol-category="Volatilidad">VOLATILIDAD</button>
+        </div>
+        <div class="symbol-search-columns"><span>SÍMBOLO Y DESCRIPCIÓN</span><span>MERCADO</span></div>
+        <div id="symbolSearchResults" class="symbol-search-results"></div>
+        <div class="symbol-search-foot">Universo dinámico · ETFs de Alpaca + Quant Data, más futuros, índices y volatilidad soportados · cada instrumento conserva su propia matemática</div>
+      </div>
+    </div>
+    <section class="ecosystem-dock lean-hidden" id="assetEcosystemDock">
+      <div class="ecosystem-title"><p class="eyebrow">ECOSISTEMA CUANTITATIVO DEL ACTIVO</p><strong>ETF / EQUITY · ÍNDICE · FUTURO · DERIVADOS</strong><small>Todos los proveedores habilitados aportan a la par; cada instrumento conserva su matemática antes de la fusión normalizada.</small></div>
+      <div class="ecosystem-items">
+        <div><span>ETF / EQUITY</span><b id="ecoEquities">—</b></div>
+        <div><span>ÍNDICES</span><b id="ecoIndices">—</b></div>
+        <div><span>FUTUROS</span><b id="ecoFutures">—</b></div>
+        <div><span>DERIVADOS</span><b id="ecoDerivatives">—</b></div>
+        <div><span>FUSIÓN</span><b id="ecoFusionState">CALENTANDO</b></div>
+      </div>
+    </section>
+    <section class="expiry-dock" id="expiryDock">
+      <div class="expiry-title"><p class="eyebrow">GLOBAL EXPIRY WINDOW · TODA LA PLATAFORMA</p><div><strong id="expiryWindowLabel">AUTO · MULTI-EXPIRY INTRADAY</strong><span id="expiryRecommended">RECOMENDADO</span></div><small>Gamma/Delta · Scanner · TRACE · Cadena · Flujo de Opciones · Net Drift · Exposure · GEX Matrix · Volatilidad · Positioning · Volumen · Superficie 3D</small></div>
+      <div class="expiry-controls">
+        <select id="expiryWindow" class="select expiry-select">
+          <option value="AUTO" selected>AUTO · MULTI-EXPIRY INTRADAY</option><option value="0DTE">0DTE</option><option value="WEEK">SEMANA ACTUAL</option><option value="2W">2 SEMANAS</option><option value="MONTH">MES ACTUAL</option><option value="ALL">TODOS CARGADOS</option>
+        </select>
+        <div class="expiry-count"><span>VENCIMIENTOS USADOS</span><b id="expiryCount">—</b></div><div class="expiry-count"><span>0DTE HOY</span><b id="zeroDteToday">—</b></div>
+      </div>
+      <div class="expiry-used" id="expiryUsed">Esperando cadena…</div>
+      <div class="expiry-weights hidden" id="expiryWeights"></div>
+    </section>
+    <section class="guided-strip lean-hidden" aria-label="Flujo de lectura recomendado">
+      <div><span>LECTURA RECOMENDADA</span><b>4 pasos, sin perderte</b></div>
+      <button type="button" class="guide-step active" data-go="command"><i>1</i><span><b>Resumen</b><small>qué propone el modelo</small></span></button>
+      <button type="button" class="guide-step" data-go="scanner"><i>2</i><span><b>Zona</b><small>entrada, objetivos, inval.</small></span></button>
+      <button type="button" class="guide-step" data-go="trace"><i>3</i><span><b>Confirmar</b><small>reacción Gamma/Delta</small></span></button>
+      <button type="button" class="guide-step" data-go="dealer"><i>4</i><span><b>Flujo</b><small>hedge pressure</small></span></button>
+    </section>
+    <div id="globalError" class="alert alert-danger hidden"></div>
+    <div id="assetLoading" class="asset-loading hidden"><div class="spinner"></div><div><b id="assetLoadingTitle">CARGANDO ACTIVO…</b><small>Sincronizando datos de mercado · preparando estructura · recalculando análisis cuantitativo</small></div></div>
+
+    <section id="section-command" class="page-section active">
+      <div class="easy-only" id="easyPanel">
+        <div class="easy-banner" id="easyBanner" hidden></div>
+        <div class="easy-blocks" id="easyBlocks"></div>
+        <p class="small muted" id="easyNote"></p>
+        <button class="btn btn-ghost" id="easyToExpert" type="button">VER VISTA COMPLETA</button>
+      </div>
+      <div class="page-heading full-only"><div><p class="eyebrow">PANTALLA OPERATIVA · FUENTE ÚNICA: QUANT SCANNER</p><h1><span class="asset-symbol">DIA</span> Operativa</h1></div><div class="timestamp" id="lastRefresh">—</div></div>
+      <div class="op-view-switch full-only" role="group" aria-label="Vista Operativa"><button id="opViewBoard" class="btn btn-primary" type="button">BOARD DOW</button><button id="opViewAsset" class="btn btn-ghost" type="button">ACTIVO</button><button id="openScannerDetail" class="btn btn-ghost" type="button">DETALLE SCANNER</button></div>
+      <div id="opBoardView" class="full-only">
+        <div class="highlight-grid board-summary">
+          <article class="highlight-card"><span>ACCIONABLES AHORA</span><b id="boardActionable">0</b></article>
+          <article class="highlight-card"><span>MODELOS CALIBRADOS</span><b id="boardCalibrated">0 / 0</b></article>
+          <article class="highlight-card"><span>EV GATE ACTIVE</span><b id="boardEvActive">0 / 0</b></article>
+          <article class="highlight-card"><span>OBSOLETOS</span><b id="boardStale">0</b></article>
+        </div>
+        <article class="panel board-panel"><div class="panel-title"><div><p class="eyebrow">ORDEN DE ATENCIÓN · SCANNER ONLY</p><h2>Board Dow</h2></div><small id="boardRefreshState">refresco escalonado</small></div>
+          <div class="table-wrap"><table class="board-table"><thead><tr><th>Activo</th><th>Scanner</th><th>Acción</th><th>Gate</th><th>Edge</th><th>Zona</th><th>Gap</th><th>Edad</th></tr></thead><tbody id="boardBody"><tr><td colspan="8" class="muted">Inicializando Board…</td></tr></tbody></table></div>
+          <p class="small muted" id="boardNote">Scanner decide por activo; el Board solo organiza atención.</p>
+        </article>
+      </div>
+      <div id="opAssetView" class="hidden full-only">
+      <article class="op-decision quant-brief" id="opDecision">
+        <div class="quant-brief-result">
+          <span class="op-label">RESULTADO QUANT · SÍNTESIS INTERNA</span>
+          <div class="quant-result-line"><strong id="opDirection" class="wait">ESPERANDO</strong><b id="opActionability" class="none">ESPERAR</b></div>
+          <small id="opDirectionDetail">Scanner decide · el resto del motor filtra contexto, calidad y timing.</small>
+          <div class="quant-strength"><span>FUERZA ESTRUCTURAL</span><b id="quantStrength">—</b><small id="quantStrengthNote">No es probabilidad de acierto.</small></div>
+        </div>
+        <div class="quant-brief-level"><span class="op-label">ZONA</span><b id="opZone">—</b><small id="quantLocation">esperando estructura</small></div>
+        <div class="quant-brief-targets"><div><span class="op-label">T1</span><b id="opT1">—</b></div><div><span class="op-label">T2</span><b id="opT2">—</b></div></div>
+        <div class="quant-brief-risk"><span class="op-label">INVALIDACIÓN</span><b id="opInvalidation">—</b><small id="opInvalidationDetail">estructura + volatilidad</small></div>
+        <div class="quant-brief-why"><span class="op-label">POR QUÉ</span><div id="quantWhy" class="quant-why-list"><span>Esperando suficiente información cuantitativa.</span></div></div>
+        <div class="quant-timing-line" id="opTape"><b id="opTapeState">TIMING · WAITING</b><div class="op-progress"><div id="opTapeProgressFill" class="op-progress-fill"></div></div><small id="opTapeDetail">Tape temporiza; no crea ni cambia la dirección.</small></div>
+        <small id="opActionabilityMode" class="quant-model-note">Probability · COLLECTING</small><small id="opModelRisk" class="quant-model-risk-note">MODEL RISK · exposiciones y escenarios de opciones son estimaciones/modelos; el flujo observado se mantiene separado.</small>
+      </article>
+      <div class="hero-grid nextgen-intelligence-grid" id="nextgenDecisionIntelligence">
+        <article class="hero-card" data-internal-only hidden><span>MARKET TRUTH</span><strong id="opTruthNext">—</strong><small id="opTruthDetail">calidad de fuentes</small></article>
+        <article class="hero-card" data-internal-only hidden><span>CAUSALIDAD LIVE</span><strong id="opCausalityNext">—</strong><small id="opCausalityDetail">orden temporal interno</small></article>
+        <article class="hero-card" data-internal-only hidden><span>FEATURE ALIGNMENT</span><strong id="opFeatureNext">—</strong><small id="opFeatureDetail">SHADOW · no cambia Scanner</small></article>
+        <article class="hero-card"><span>P(T1 ANTES DE INVALID.)</span><strong id="opProbNext">—</strong><small id="opProbDetail">solo si está calibrado OOS</small></article>
+        <article class="hero-card"><span>EXPECTED VALUE</span><strong id="opEvNext">—</strong><small id="opEvDetail">solo si gate calibrado</small></article>
+        <article class="hero-card"><span>QUÉ CAMBIÓ</span><strong id="opChangeNext">—</strong><small id="opChangeDetail">comparación causal entre ciclos</small></article>
+        <article class="hero-card" data-internal-only hidden><span>DATA HEALTH</span><strong id="opDataHealthNext">—</strong><small id="opDataHealthDetail">diagnóstico interno</small></article>
+        <article class="hero-card"><span>EXPIRY INTELLIGENCE</span><strong id="opExpiryNext">—</strong><small id="opExpiryDetail">fechas reales · no alias zero/one</small></article>
+        <article class="hero-card"><span>STRUCTURAL DENSITY</span><strong id="opStructuralNext">—</strong><small id="opStructuralDetail">proximidad de niveles/confluencias</small></article>
+        <article class="hero-card"><span>DERIVATIVES FLOW</span><strong id="opDerivativesNext">—</strong><small id="opDerivativesDetail">MODEL vs OBSERVED separados</small></article>
+      </div>
+      <div class="op-workspace-grid">
+        <article class="panel op-trace nextgen-trace-panel"><div class="panel-title"><div><p class="eyebrow">TRACE · PRECIO + ESTRUCTURA + FLUJO</p><h2>Precio · estructura · dinámica · flujo real</h2></div><small>Lectura visual de la evidencia que acompaña al Scanner.</small></div>
+          <div class="op-trace-pulse"><span>Γ <b id="opGammaNetLive">—</b></span><span>Δ <b id="opDeltaNetLive">—</b></span><span>FLUJO OPCIONES 5m <b id="opOpraLive">—</b></span><span id="opPulseAge">snapshot —</span></div>
+          <div id="operativaTraceChart" class="nextgen-trace-host compact" data-renderer="ITM_QUANT_HYBRID_PRICE_OVERLAY" data-fallback-renderer="ITM_QUANT_CANVAS_2D"><canvas id="operativaTraceCanvas"></canvas><div class="nextgen-crosshair-tip" id="operativaTraceTip"></div></div>
+          <div class="nextgen-model-risk">MODELO TEÓRICO ENTRE SNAPSHOTS · IV/OI SE ACTUALIZA CON SNAPSHOT · FLUJO OBSERVADO SE MANTIENE SEPARADO</div><small class="muted">Tape sigue tick-by-tick; el timeframe solo agrega velas.</small>
+        </article>
+        <aside class="panel op-state-rail">
+          <div class="panel-title"><div><p class="eyebrow">MARKET STATE</p><h2>Estado del campo</h2></div><small>No es otra señal.</small></div>
+          <div class="state-rail-grid institutional-state-grid">
+            <div><span>FASE</span><b id="opFieldPhase">—</b></div>
+            <div><span>ESTABILIDAD Γ</span><b id="opFieldStability">—</b></div>
+            <div><span>PRESIÓN Δ / FLOW</span><b id="opFieldDirectional">—</b></div>
+            <div><span>CONFLUENCIA</span><b id="opFieldConfluence">—</b><small>índice, no probabilidad</small></div>
+            <div><span>DEALER FIELD</span><b id="opDealerField">—</b><small>estimated inventory</small></div>
+            <div><span>HEDGE PRESSURE</span><b id="opDealerHedge">—</b><small id="opDealerFlowConfirm">flow confirm —</small></div>
+            <div data-internal-only hidden><span>DATA QUALITY</span><b id="opDataQuality">—</b></div>
+            <div data-internal-only hidden><span>MODEL HEALTH</span><b id="opModelHealth">—</b></div>
+          </div>
+          <div class="structural-confirm-card itm-structural-flow-card" id="opItmStructuralFlowCard">
+            <div class="structural-confirm-head"><span>ITM STRUCTURAL FLOW</span><b id="opItmFlowStatus">WAITING</b></div>
+            <small>INTERNO · CAMBIO ESTRUCTURAL POR SNAPSHOT · NO ES ORDER FLOW · NO CAMBIA SCANNER</small>
+            <div class="structural-confirm-grid">
+              <div><span>GEX FLOW</span><b id="opItmGexFlow">—</b></div>
+              <div><span>DEX FLOW</span><b id="opItmDexFlow">—</b></div>
+              <div><span>CONVEXITY PRESSURE</span><b id="opItmConvexity">—</b></div>
+              <div><span>OBSERVACIONES</span><b id="opItmFlowObs">—</b></div>
+            </div>
+            <div class="structural-flow-strip" aria-label="Historial estructural ITM GEX DEX y convexidad">
+              <div class="structural-flow-strip-head"><span>STRUCTURAL HISTORY</span><small>ΔGEX · ΔDEX · CONVEXITY · ITM</small></div>
+              <canvas id="opItmFlowCanvas"></canvas>
+            </div>
+          </div>
+          <div class="structural-confirm-card opra-diagnostic-card" id="opOpraDiagnosticCard" data-internal-only hidden>
+            <div class="structural-confirm-head"><span>OPRA DATA STATUS</span><b id="opOpraStatus">WAITING</b></div>
+            <small>DIAGNÓSTICO DE SUSCRIPCIÓN · NO ES SEÑAL</small>
+            <div class="structural-confirm-grid">
+              <div><span>UNDERLYING</span><b id="opOpraUnderlying">—</b></div>
+              <div><span>CONTRATOS</span><b id="opOpraContracts">—</b></div>
+              <div><span>ÚLTIMO EVENTO</span><b id="opOpraLastAge">—</b></div>
+              <div><span>PRINTS 5m</span><b id="opOpraPrints5">—</b></div>
+            </div>
+          </div>
+          <div class="state-rail-foot"><span id="opCausalState">LIVE</span><span>TRACE LIVE · SUPERFICIE 3D</span></div>
+          <div class="tech-mini-rail" aria-label="Advanced technology readiness" data-internal-only hidden><span>HFT <b id="techHft" class="tech-state">—</b></span><span>FPGA <b id="techFpga" class="tech-state">—</b></span><span>COLO <b id="techColo" class="tech-state">—</b></span><span>QPU <b id="techQpu" class="tech-state">—</b></span><span>AI <b id="techAi" class="tech-state">—</b></span><span>XR <b id="techXr" class="tech-state">—</b></span><span>LAT <b id="techLatency" class="tech-state">—</b></span><span>RENDER <b id="techRender" class="tech-state">—</b></span></div>
+          <div class="state-rail-reasons"><span>RAZONES DOMINANTES</span><div id="opFieldReasons">Esperando campo cuantitativo…</div></div>
+        </aside>
+      </div>
+
+      <details class="return-anomaly-lab full-only" id="returnAnomalyLab" open>
+        <summary><span>ANOMALÍAS &amp; MOMENTUM · SHADOW</span><b id="ramSummaryState">ACTIVE / COLLECTING</b></summary>
+        <div class="return-anomaly-body">
+          <div class="panel-title return-anomaly-head">
+            <div><p class="eyebrow">RETORNOS LOGARÍTMICOS · CAUSAL · MULTIFRAME</p><h2>Expansión anormal y presión de momentum</h2></div>
+            <small>Sección aislada. No cambia Scanner, no ejecuta órdenes y no convierte una anomalía en COMPRA/VENTA.</small>
+          </div>
+          <div class="return-anomaly-controls" role="group" aria-label="Timeframe de anomalías">
+            <button type="button" class="ram-tf active" data-ram-tf="1m">1m</button>
+            <button type="button" class="ram-tf" data-ram-tf="3m">3m</button>
+            <button type="button" class="ram-tf" data-ram-tf="5m">5m</button>
+            <button type="button" class="ram-tf" data-ram-tf="15m">15m</button>
+            <span id="ramUpdated">—</span>
+          </div>
+          <div class="hero-grid six return-anomaly-kpis">
+            <article class="hero-card"><span>ESTADO SHADOW</span><strong id="ramState">—</strong><small id="ramStateDetail">CURRENT protegido</small></article>
+            <article class="hero-card"><span>PRECURSOR</span><strong id="ramScore">—</strong><small>índice 0–100 · no probabilidad</small></article>
+            <article class="hero-card"><span>PRESIÓN OBSERVADA</span><strong id="ramPressure">—</strong><small>alcista / bajista / mixta · no señal</small></article>
+            <article class="hero-card"><span>BASELINE</span><strong id="ramBaseline">—</strong><small id="ramBaselineN">solo pasado</small></article>
+            <article class="hero-card"><span>EPISODIOS</span><strong id="ramEpisodes">—</strong><small>agrupa shocks cercanos</small></article>
+            <article class="hero-card"><span>FLOW CONTEXT</span><strong id="ramFlow">—</strong><small id="ramFlowDetail">SHADOW / absorción</small></article>
+          </div>
+          <div class="return-anomaly-chart-wrap">
+            <canvas id="returnAnomalyCanvas" aria-label="Anomalías de rendimientos logarítmicos"></canvas>
+            <div id="ramEmpty" class="return-anomaly-empty">Esperando historial causal…</div>
+          </div>
+          <div class="return-anomaly-foot">
+            <span><b>CURRENT:</b> detector v1.27.10 preservado.</span>
+            <span><b>CANDIDATE:</b> causal · hora NY · régimen de volatilidad · 1/3/5/15m · episodios.</span>
+            <span><b>PROMOCIÓN:</b> prohibida sin OOS + purge gap + baseline + guardrails.</span>
+          </div>
+        </div>
+      </details>
+
+      <details class="deep-tech-drawer full-only" data-internal-only hidden>
+        <summary>ADVANCED TECH / SCENARIO / HFT READINESS</summary>
+        <div class="deep-tech-layout">
+          <article class="deep-tech-panel"><div class="panel-title"><div><p class="eyebrow">GENERATIVE SCENARIO LAB · SHADOW</p><h3>Escenarios estocásticos / IA-ready</h3></div><b id="scenarioEngine">COLLECTING</b></div><div class="scenario-host"><canvas id="scenarioCanvas"></canvas></div><div class="deep-tech-kpis"><span>68% RANGE <b id="scenarioRange">—</b></span><span>TAILS 5/95 <b id="scenarioTail">—</b></span></div><small>Exploración de escenarios; no forecast y sin autoridad de Scanner.</small></article>
+          <article class="deep-tech-panel"><div class="panel-title"><div><p class="eyebrow">QUANTUM-READY OPTIMIZATION · SHADOW</p><h3>QUBO / Ising readiness</h3></div><b id="quantumState" class="tech-state">—</b></div><div class="deep-tech-kpis vertical"><span>BACKEND <b id="quantumBackend">—</b></span><span>SELECCIÓN SHADOW <b id="quantumSelected">—</b></span></div><small>Usa fallback clásico salvo QPU real configurada; no cambia dirección ni ejecuta órdenes.</small></article>
+          <article class="deep-tech-panel"><div class="panel-title"><div><p class="eyebrow">INFRA / OBSERVABILITY</p><h3>Readiness real</h3></div><b id="techFutures" class="tech-state">—</b></div><div id="deepTechGrid" class="deep-tech-grid"></div></article>
+        </div>
+      </details>
+      <details class="quant-context-drawer full-only" data-internal-only hidden>
+        <summary>VER CONTEXTO / SALUD DEL MOTOR</summary>
+        <div class="v117-health-grid quant-health-inline">
+          <div><span>RÉGIMEN</span><b id="opRegimeTop">—</b></div><div><span>DATA QUALITY</span><b id="opQualityTop">—</b></div>
+          <div><span>MODEL HEALTH</span><b id="opHealthTop">—</b></div><div><span>MEMORIA</span><b id="opMemoryTop">PERSISTENTE</b></div>
+          <div><span>GAMMA</span><b id="opGammaContext">—</b><small id="opGammaDetail">contexto</small></div>
+          <div><span>VOLATILIDAD</span><b id="opVolContext">—</b><small id="opVolDetail">contexto</small></div>
+          <div><span>TAPE MTF</span><b id="opMtfContext">COLLECTING</b><small id="opMtfDetail">contexto</small></div>
+          <div><span>AUDITOR</span><b id="opAuditTop">—</b></div>
+        </div>
+      </details>
+      <details class="op-audit advanced-only" data-internal-only hidden><summary>Detalle adicional / auditoría</summary>
+      <div class="grid-2 advanced-only">
+        <article class="panel">
+          <div class="panel-title"><div><p class="eyebrow">ESTADO ACTUAL</p><h2>Lectura institucional <span class="asset-symbol">DIA</span></h2></div></div>
+          <div class="metric-list">
+            <div><span>Régimen</span><b id="marketRegime">—</b></div>
+            <div><span>Gamma</span><b id="gammaRegime">—</b></div>
+            <div><span>Presión Gamma</span><b id="gammaPressure">—</b></div>
+            <div><span>Presión Delta</span><b id="deltaPressure">—</b></div>
+            <div><span>Flow</span><b id="flowRegime">—</b></div>
+            <div><span>Volatilidad</span><b id="volRegime">—</b></div>
+            <div><span>Gamma + Delta</span><b id="alignment">—</b></div>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><p class="eyebrow">RUTA LIVE</p><h2>Niveles activos</h2></div></div>
+          <div class="route-line"><div><span>ACTUAL</span><b id="routeCurrent">—</b></div><i>→</i><div><span>ACTIVO</span><b id="routeActive">—</b></div><i>→</i><div><span>NEXT</span><b id="routeNext">—</b></div><i>→</i><div><span>EXT.</span><b id="routeExt">—</b></div></div>
+          <div class="state-banner" id="activeState">—</div>
+        </article>
+      </div>
+      <div class="grid-3 advanced-only">
+        <article class="panel compact"><p class="eyebrow">FLOW</p><h3>Mayor evento</h3><div id="largestFlow" class="big-line">Esperando</div></article>
+        <article class="panel compact"><p class="eyebrow">VOLATILIDAD</p><h3>Expected Move</h3><div id="expectedMove" class="big-line">—</div><small id="expectedRange">—</small></article>
+        <article class="panel compact"><p class="eyebrow">POSITIONING</p><h3>Put / Call OI</h3><div id="pcOi" class="big-line">—</div><small id="oiWalls">—</small></article>
+      </div>
+      <div class="grid-2 advanced-only">
+        <article class="panel compact"><p class="eyebrow">MACRO CONTEXT</p><h3>Stress macro</h3><div id="macroStress" class="big-line">—</div><small id="macroNextEvent">—</small></article>
+        <article class="panel compact"><p class="eyebrow">LARGE PRINTS</p><h3>Mayor print <span class="asset-symbol">DIA</span></h3><div id="largestPrint" class="big-line">—</div><small id="largestPrintVenue">—</small></article>
+      </div>
+      <article class="panel change-panel"><div class="panel-title"><div><p class="eyebrow">WHAT CHANGED · ÚLTIMO CICLO CUANTITATIVO</p><h2>Qué cambió y por qué debes mirarlo</h2></div><span class="status-pill" id="adaptiveMode">SCANNER SHADOW</span></div><div id="whatChanged" class="change-grid"><div class="muted">Esperando segundo snapshot…</div></div></article>
+      <div class="hero-grid three advanced-only">
+        <article class="hero-card"><span>SESSION MEMORY · GAMMA</span><strong id="sessionGammaRun">—</strong><small id="sessionGammaDetail">migración acumulada</small></article>
+        <article class="hero-card"><span>SESSION MEMORY · DELTA</span><strong id="sessionDeltaRun">—</strong><small id="sessionDeltaDetail">migración acumulada</small></article>
+        <article class="hero-card"><span>MEMORIA DE SESIÓN</span><strong id="sessionMemoryCount">—</strong><small id="sessionMemoryDetail">HOT / SESSION / RESEARCH</small></article>
+      </div>
+      </details>
+      <div class="source-disclosure" id="sourceNote"></div>
+      </div>
+    </section>
+
+    <section id="section-equityhub" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">RESUMEN EN UNA VISTA · ESTILO SPOTGAMMA</p><h1>Equity Hub · <span class="asset-symbol">DIA</span></h1></div><div class="timestamp">Cada número reusa un cálculo ya existente (Key Levels, Gamma Squeeze, Skew, Monte Carlo); esta página solo los junta.</div></div>
+      <div class="hero-grid">
+        <article class="hero-card"><span>SPOT</span><strong id="ehSpot">—</strong></article>
+        <article class="hero-card"><span>ZERO GAMMA</span><strong id="ehZeroGamma">—</strong></article>
+        <article class="hero-card"><span>CALL WALL</span><strong id="ehCallWall">—</strong></article>
+        <article class="hero-card"><span>PUT WALL</span><strong id="ehPutWall">—</strong></article>
+        <article class="hero-card"><span>VOL TRIGGER</span><strong id="ehVolTrigger">—</strong></article>
+        <article class="hero-card"><span>MAX PAIN</span><strong id="ehMaxPain">—</strong></article>
+      </div>
+      <div class="hero-grid">
+        <article class="hero-card"><span>EXPECTED MOVE</span><strong id="ehExpectedMove">—</strong><small id="ehExpectedRange">—</small></article>
+        <article class="hero-card"><span>ATM IV</span><strong id="ehAtmIv">—</strong></article>
+        <article class="hero-card"><span>SKEW 25Δ</span><strong id="ehSkew">—</strong></article>
+        <article class="hero-card"><span>GAMMA REGIME</span><strong id="ehRegime">—</strong></article>
+        <article class="hero-card"><span>GAMMA SQUEEZE</span><strong id="ehSqueeze">—</strong><small id="ehSqueezeDetail">descriptivo · Scanner conserva autoridad</small></article>
+        <article class="hero-card"><span>SCANNER BIAS</span><strong id="ehScanner">—</strong><small>única autoridad direccional</small></article>
+      </div>
+      <article class="panel chart-panel institutional-chart-panel"><div class="panel-title"><div><h2>Gamma Model</h2><small>Call/Put por strike, sin netear · mismo lenguaje visual institucional.</small></div><button class="btn btn-ghost" type="button" data-quant3d="Gamma">ABRIR GAMMA 3D</button></div><div id="equityHubGammaModel" class="chart"></div></article>
+      <article class="panel chart-panel institutional-chart-panel"><div class="panel-title"><div><h2>Monte Carlo — Cono de probabilidad</h2><small>Probabilidad bajo supuestos del modelo · no predicción.</small></div></div><div id="equityHubMonteCarlo" class="chart"></div></article>
+      <article class="panel compact"><div class="panel-title"><div><h2>Probabilidad de tocar / cerrar más allá de cada nivel</h2><small>Al vencimiento seleccionado, bajo el mismo supuesto GBM del cono de arriba.</small></div></div><div id="ehMonteCarloLevels" class="change-grid"></div></article>
+    </section>
+
+    <section id="section-premarket" class="page-section">
+      <div class="page-heading"><div><p class="eyebrow">ANÁLISIS BAJO DEMANDA · ACTIVO NATIVO</p><h1>Premarket Inteligente · <span class="asset-symbol">DIA</span></h1></div><div class="top-actions"><button id="analyzePremarketBtn" class="btn btn-primary">ANALIZAR PREMARKET</button><button id="freezeBtn" class="btn btn-ghost">Congelar referencia</button></div></div>
+      <div class="easy-callout"><b>Qué hace</b><span>Escanea toda la cadena y todas las secciones del motor, pero te muestra solo lo que cambia la decisión: 6–8 strikes cercanos, cantidades, Gamma+Delta, concentraciones, confirmaciones verificables, anomalías y los dos escenarios. Todos los niveles visibles permanecen en el precio nativo del activo seleccionado.</span></div>
+      <div id="premarketAnalysisEmpty" class="empty-state">Pulsa <b>ANALIZAR PREMARKET</b> para generar la lectura cuantitativa actual.</div>
+      <div id="premarketAnalysisContent" class="hidden">
+        <div class="hero-grid four">
+          <article class="hero-card"><span>SESGO</span><strong id="pmaBias">—</strong><small id="pmaRegime">—</small></article>
+          <article class="hero-card"><span>FUERZA</span><strong id="pmaStrength">—</strong><small id="pmaQuality">—</small></article>
+          <article class="hero-card"><span>PRECIO ACTIVO</span><strong id="pmaSpot">—</strong><small>niveles nativos del activo</small></article>
+          <article class="hero-card"><span>NIVEL CLAVE</span><strong id="pmaKeyLevel">—</strong><small id="pmaKeyReading">—</small></article>
+        </div>
+
+        <article class="panel">
+          <div class="panel-title"><div><h2>Totales de opciones utilizados</h2><small>Cantidades reales de la ventana de vencimientos seleccionada.</small></div></div>
+          <div class="metric-list pm-total-grid">
+            <div><span>Call OI</span><b id="pmaCallOi">—</b></div><div><span>Put OI</span><b id="pmaPutOi">—</b></div><div><span>OI TOTAL</span><b id="pmaTotalOi">—</b></div>
+            <div><span>Call Volumen</span><b id="pmaCallVol">—</b></div><div><span>Put Volumen</span><b id="pmaPutVol">—</b></div><div><span>VOLUMEN TOTAL</span><b id="pmaTotalVol">—</b></div>
+            <div><span>Gamma neta (GEX)</span><b id="pmaNetGex">—</b></div><div><span>Gamma bruta</span><b id="pmaGrossGex">—</b></div><div><span>Delta neta (DEX)</span><b id="pmaNetDex">—</b></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title"><div><h2>6–8 strikes más importantes alrededor del precio</h2><small>El ranking compite solo entre strikes cercanos; un strike lejano no entra por tener mucho OI.</small></div></div>
+          <div class="table-wrap"><table class="pm-strike-table"><thead><tr><th>Strike</th><th>Call OI</th><th>Put OI</th><th>OI total</th><th>Call Vol</th><th>Put Vol</th><th>Vol total</th><th>Gamma/GEX</th><th>Delta/DEX</th><th>IV</th><th>Lectura</th></tr></thead><tbody id="pmaStrikes"></tbody></table></div>
+        </article>
+
+        <div class="grid-2">
+          <article class="panel"><h2>Concentraciones clave</h2><div id="pmaConcentrations" class="change-list"></div></article>
+          <article class="panel"><h2>Estructura del día</h2><div class="metric-list"><div><span>Zero Gamma / Flip</span><b id="pmaFlip">—</b></div><div><span>Max Pain estimado</span><b id="pmaMaxPain">—</b></div><div><span>Call Wall · Gamma</span><b id="pmaCallWall">—</b></div><div><span>Put Wall · Gamma</span><b id="pmaPutWall">—</b></div><div><span>Mayor Call OI</span><b id="pmaCallOiPeak">—</b></div><div><span>Mayor Put OI</span><b id="pmaPutOiPeak">—</b></div><div><span>IV ATM</span><b id="pmaAtmIv">—</b></div><div><span>Expected Move</span><b id="pmaExpectedMove">—</b></div><div><span>Piso esperado</span><b id="pmaExpectedLow">—</b></div><div><span>Techo esperado</span><b id="pmaExpectedHigh">—</b></div></div></article>
+        </div>
+
+        <article class="panel"><div class="panel-title"><div><h2>Confluencia entre vencimientos</h2><small>Buckets disjuntos de vencimiento; muestra los strikes que coinciden sin doble conteo.</small></div><b id="pmaExpiryStatus">—</b></div><div id="pmaExpiryGrid" class="change-list"></div></article>
+
+        <article class="panel">
+          <div class="panel-title"><div><h2>Qué está confirmando o contradiciendo</h2><small>Solo pesa una fuente cuando hay datos suficientes; cada fila explica en qué se basa.</small></div><b id="pmaConfirmSummary">—</b></div>
+          <div class="table-wrap"><table><thead><tr><th>Mercado / capa</th><th>Estado</th><th>Fuerza</th><th>Cantidades / datos</th><th>¿En base a qué?</th></tr></thead><tbody id="pmaConfirmations"></tbody></table></div>
+        </article>
+
+        <article class="panel"><div class="panel-title"><div><h2>Situaciones especiales detectadas</h2><small>Solo aparecen anomalías cuantificadas que pueden cambiar la lectura.</small></div></div><div id="pmaSituations" class="change-list"></div></article>
+
+        <div class="grid-2">
+          <article class="panel"><h2>Escenario principal</h2><div id="pmaMainScenario" class="secondary-plan">—</div></article>
+          <article class="panel"><h2>Único escenario alternativo</h2><div id="pmaAltScenario" class="secondary-plan">—</div><p class="small muted">Solo importa si falla la invalidación/condición del escenario principal.</p></article>
+        </div>
+
+        <article class="panel pm-route-panel">
+          <div class="panel-title"><div><h2>Ruta cuantitativa proyectada</h2><small>Overlay visual de niveles definidos por Scanner. La curva NO determina la dirección y NO es una probabilidad de trayectoria.</small></div><label class="trace-switch"><input type="checkbox" id="premarketRouteToggle" checked><span>RUTA PREMARKET</span></label></div>
+          <div class="pm-route-status"><b id="pmaRouteState">ESPERANDO ANÁLISIS</b><span id="pmaRouteDisclosure">SCANNER AUTHORITY · VISUAL INTERPOLATION ONLY</span></div>
+          <canvas id="premarketRouteCanvas" class="premarket-route-canvas"></canvas>
+        </article>
+
+        <article class="panel scanner-banner pm-conclusion"><div><span>CONCLUSIÓN CUANTITATIVA PREMARKET</span><b id="pmaConclusionHeadline">—</b></div><small id="pmaConclusionText">—</small></article>
+        <div class="source-disclosure" id="pmaMethod">—</div>
+      </div>
+
+      <details class="advanced-only pm-frozen-reference"><summary>Referencia congelada anterior</summary>
+        <div id="premarketEmpty" class="empty-state">Aún no existe un mapa congelado para la sesión actual.</div>
+        <div id="premarketContent" class="hidden">
+          <div class="hero-grid four"><article class="hero-card"><span>LOW</span><strong id="pmLow">—</strong></article><article class="hero-card"><span>PIVOT</span><strong id="pmPivot">—</strong></article><article class="hero-card"><span>HIGH</span><strong id="pmHigh">—</strong></article><article class="hero-card"><span>RUTA FAVORECIDA</span><strong id="pmDirection">—</strong></article></div>
+          <div class="grid-2"><article class="panel"><h2>Mapa estructural</h2><div class="metric-list"><div><span><span class="asset-symbol">DIA</span> captura</span><b id="pmSpot">—</b></div><div><span>Gamma Center</span><b id="pmCenter">—</b></div><div><span>Dynamic Flip</span><b id="pmFlip">—</b></div><div><span>Gamma Regime</span><b id="pmGamma">—</b></div></div></article><article class="panel"><h2>Contexto de apertura</h2><div class="metric-list"><div><span>Flow expectation/tape</span><b id="pmTape">—</b></div><div><span>Expected Move</span><b id="pmEM">—</b></div><div><span>Expiry Window capturado</span><b id="pmExpiry">—</b></div><div><span>Capturado</span><b id="pmCaptured">—</b></div></div></article></div>
+        </div>
+      </details>
+    </section>
+
+    <section id="section-scanner" class="page-section institutional-workspace">
+      <button id="backToOperativa" class="btn btn-ghost merged-back" type="button">← VOLVER A OPERATIVA</button>
+      <div class="page-heading"><div><p class="eyebrow">TODAS LAS CAPAS · UNA SOLA RUTA ESTRUCTURAL</p><h1>Quant Scanner · <span class="asset-symbol">DIA</span></h1></div><div class="timestamp" id="scannerMode">—</div></div>
+      <div class="scanner-banner" id="scannerBanner"><div><span>STRUCTURAL PATH ENGINE</span><b id="scannerHeadline">Esperando estructura…</b></div><small id="scannerState">—</small></div>
+      <div class="easy-callout easy-only"><b>Cómo leer esta pantalla</b><span>Primero mira Dirección + Zona. Evidence sigue siendo evidencia interna. Si ya existe histórico OOS suficiente, <strong>P(T1)</strong> te dice frecuencia calibrada y <strong>EV</strong> combina esa probabilidad con el R/R del instrumento elegido; en OPTIONS usa la prima teórica, IV/DTE y tiempo histórico. Mientras esté SHADOW no bloquea la señal.</span></div>
+      <div class="hero-grid scanner-hero">
+        <article class="hero-card scanner-direction"><span>DIRECCIÓN</span><strong id="scannerDirection">—</strong><small id="scannerType">rebote / ruptura</small></article>
+        <article class="hero-card"><span>ZONA DE REACCIÓN</span><strong id="scannerZone">—</strong><small id="scannerZoneCenter">centro cuantitativo</small></article>
+        <article class="hero-card scanner-t1"><span>TARGET 1</span><strong id="scannerT1">—</strong><small id="scannerT1Score">atracción —</small></article>
+        <article class="hero-card scanner-t2"><span>TARGET 2</span><strong id="scannerT2">—</strong><small id="scannerT2Score">atracción —</small></article>
+        <article class="hero-card scanner-evidence"><span>EVIDENCIA INTERNA</span><strong id="scannerEvidence">—</strong><small>score de confluencia, no probabilidad</small></article>
+        <article class="hero-card"><span>P(T1) CALIBRADA</span><strong id="scannerProbability">—</strong><small id="scannerProbabilityDetail">esperando histórico OOS</small></article>
+        <article class="hero-card"><span>EXPECTED VALUE</span><strong id="scannerEV">—</strong><small id="scannerEVDetail">EV en R · P(T1) vs break-even</small></article>
+        <article class="hero-card scanner-invalid"><span>INVALIDACIÓN</span><strong id="scannerInvalidation">—</strong><small id="scannerStopDetail">volatilidad + estructura</small></article>
+      </div>
+      <div class="hero-grid three scanner-trust-grid advanced-only">
+        <article class="hero-card"><span>QUALITY GATE</span><strong id="scannerQualityGate">—</strong><small id="scannerQualityGateDetail">Data Quality + Model Health</small></article>
+        <article class="hero-card"><span>SIGNAL RELIABILITY</span><strong id="scannerReliability">COLLECTING</strong><small id="scannerReliabilityDetail">histórico descriptivo, no probabilidad</small></article>
+        <article class="hero-card"><span>REGIME SHADOW</span><strong id="scannerShadow">—</strong><small id="scannerShadowDetail">no altera la señal principal sin calibración</small></article>
+      </div>
+      <div class="hero-grid four scanner-conditional-grid advanced-only">
+        <article class="hero-card"><span>EVIDENCIA CONDICIONAL</span><strong id="conditionalEvidence">NO CALIBRATED VERDICT</strong><small id="conditionalEvidenceDetail">contexto estadístico; Scanner mantiene la dirección</small></article>
+        <article class="hero-card"><span>MUESTRA OOS</span><strong id="conditionalSamples">—</strong><small id="conditionalSessions">sesiones comparables</small></article>
+        <article class="hero-card"><span>P(T1&lt;INVALID.)</span><strong id="conditionalProb">—</strong><small id="conditionalProbDetail">usa solo calibración existente</small></article>
+        <article class="hero-card"><span>BRIER / SKILL</span><strong id="conditionalBrier">—</strong><small id="conditionalBrierDetail">calidad probabilística, no dirección</small></article>
+      </div>
+      <div class="hero-grid four scanner-factor-grid advanced-only">
+        <article class="hero-card"><span>MASS · OI</span><strong id="scannerMass">—</strong><small>masa estructural · rank + magnitud robusta</small></article>
+        <article class="hero-card"><span>GAMMA INTENSITY</span><strong id="scannerGammaIntensity">—</strong><small>convexidad por contrato · sin duplicar OI</small></article>
+        <article class="hero-card"><span>TURNOVER</span><strong id="scannerTurnover">—</strong><small>actividad / OI estabilizado</small></article>
+        <article class="hero-card"><span>NET TILT</span><strong id="scannerNetTilt">—</strong><small>desequilibrio gated por magnitud</small></article>
+      </div>
+      <div class="grid-2">
+        <article class="panel scanner-score-panel"><h2>Rebote vs ruptura</h2>
+          <div class="scanner-score-row"><span>BOUNCE</span><div class="score-track"><i id="scannerBounceBar" class="score-fill bounce"></i></div><b id="scannerBounce">—</b></div>
+          <div class="scanner-score-row"><span>BREAK</span><div class="score-track"><i id="scannerBreakBar" class="score-fill break"></i></div><b id="scannerBreak">—</b></div>
+          <div class="scanner-score-row"><span>STRUCTURE</span><div class="score-track"><i id="scannerStructureBar" class="score-fill structure"></i></div><b id="scannerStructure">—</b></div>
+          <div class="metric-list scanner-metrics"><div><span>R/R a T1</span><b id="scannerRR1">—</b></div><div><span>R/R a T2</span><b id="scannerRR2">—</b></div><div><span>Vacío estructural</span><b id="scannerVacuum">—</b></div></div>
+        </article>
+        <article class="panel"><h2>Plan B / escenario alterno</h2><div class="secondary-plan" id="scannerSecondary">Esperando escenario secundario…</div><p class="small muted">El Plan B solo se activa si la tesis principal pierde su invalidación o aparece evidencia nueva suficiente. El filtro de persistencia evita cambiar BUY/SELL por ruido de un solo ciclo.</p></article>
+      </div>
+      <article class="panel chart-panel scanner-route-shell institutional-chart-panel"><div class="institutional-chart-toolbar"><div><span class="chart-kicker">SCANNER PATH</span><b>Ruta estructural · zona · objetivos · invalidación</b></div><div class="chart-toolbar-badges"><span>ÚNICA AUTORIDAD DIRECCIONAL</span></div></div><div id="scannerChart" class="chart scanner-route-chart"></div></article>
+      <div class="grid-2">
+        <article class="panel"><h2>Por qué eligió esta zona</h2><div id="scannerReasons" class="scanner-reasons"></div></article>
+        <article class="panel"><h2>Qué contradice la lectura</h2><div id="scannerContradictions" class="scanner-reasons contradictions"></div></article>
+      </div>
+      <article class="panel advanced-only"><div class="panel-title"><div><h2>Zonas candidatas escaneadas</h2><small>Ranking estructural de-correlacionado. Mass, intensity, turnover y tilt no se vuelven a sumar indirectamente dentro del Scanner.</small></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Strike</th><th>Structure</th><th>Bounce</th><th>Break</th><th>GEX</th><th>Delta</th><th>OI</th><th>Volumen</th><th>Turnover*</th><th>Confluencias</th></tr></thead><tbody id="scannerZonesTable"></tbody></table></div>
+      </article>
+      <div class="source-disclosure" id="scannerMethod">Scanner interno: sintetiza las secciones del programa. Los scores son evidencia interna, no certeza ni probabilidad calibrada.</div>
+    </section>
+
+    <section id="section-trace" class="page-section">
+      <div class="page-heading"><div><p class="eyebrow">POSICIONAMIENTO EN TIEMPO REAL · <span class="asset-symbol">DIA</span></p><h1>TRACE PRO 3 · LIVE INTERACTION · <span class="asset-symbol">DIA</span></h1></div><div class="timestamp">Modelo propio ITM QUANT · no replica algoritmos propietarios</div></div>
+      <div class="easy-callout easy-only"><b>TRACE en 20 segundos</b><span><strong>1)</strong> Espera que el precio llegue a la zona del Scanner. <strong>2)</strong> Mira si Gamma/Delta se fortalecen o migran. <strong>3)</strong> Confirma con Hedge Pressure/Flow. Una barra Gamma/Delta que cambia es exposición recalculada. CAP cian = la magnitud se fortalece; CAP oro = se debilita. HALO = actividad nueva de opciones observada. OI y volumen oficial no se animan entre snapshots.</span></div>
+      <div class="trace-layer-guide" aria-label="Las tres capas de TRACE">
+        <div class="trace-layer structure"><span>1 · ESTRUCTURA</span><b>OI · Γ · Δ · GEX · DEX · Walls</b><small>Qué existe y dónde está concentrado el riesgo. Ancho del perfil = exposición; NO es volumen negociado.</small></div>
+        <div class="trace-layer dynamics"><span>2 · DINÁMICA</span><b>Spot · IV · Tiempo · Vanna · Charm · Speed · Color</b><small>Cómo se deforma la estructura mientras cambia el mercado. El repricing entre snapshots es MODELO, no nuevo OI.</small></div>
+        <div class="trace-layer flow"><span>3 · FLUJO REAL</span><b>Opciones · Contratos · Premium · Agresión · Tape</b><small>Qué se negocia realmente. Los puntos/impulsos solo aparecen con prints observados y calidad suficiente.</small></div>
+      </div>
+      <article class="panel trace-terminal-toolbar" id="traceTerminalToolbar">
+        <div class="trace-terminal-row trace-terminal-primary">
+          <div class="trace-tool-cluster trace-presets"><span class="trace-tool-label">WORKSPACE</span>
+            <button type="button" class="trace-chip active" data-trace-preset="pro">PRO AUTO</button>
+            <button type="button" class="trace-chip" data-trace-preset="sniper">SNIPER</button>
+            <button type="button" class="trace-chip" data-trace-preset="structure">STRUCTURE</button>
+            <button type="button" class="trace-chip" data-trace-preset="flow">FLOW</button>
+          </div>
+          <div class="trace-tool-cluster trace-timeframes"><span class="trace-tool-label">VELAS</span>
+            <button type="button" class="trace-chip active" data-trace-tf="1m">1m</button>
+            <button type="button" class="trace-chip" data-trace-tf="3m">3m</button>
+            <button type="button" class="trace-chip" data-trace-tf="5m">5m</button>
+            <button type="button" class="trace-chip" data-trace-tf="15m">15m</button>
+          </div>
+          <div class="trace-tool-cluster trace-price-modes"><span class="trace-tool-label">PRECIO</span>
+            <button type="button" class="trace-chip active" data-trace-price="Velas japonesas">VELAS</button>
+            <button type="button" class="trace-chip" data-trace-price="Línea">LÍNEA</button>
+          </div>
+          <div class="trace-tool-cluster trace-profile-tools"><span class="trace-tool-label">PERFIL IZQ</span>
+            <select id="traceLeftProfile" class="select trace-compact-select" title="Perfil lateral izquierdo del instrumento Dow activo"><option value="DEX" selected>DEX</option><option value="OI">OI</option><option value="NET_OI">NET OI</option><option value="VOLUME">VOLUMEN</option><option value="NET_VOLUME">NET VOL</option><option value="OPRA_NET">FLOW NET</option></select>
+          </div>
+          <div class="trace-tool-cluster trace-profile-tools"><span class="trace-tool-label">PERFIL DER</span>
+            <select id="traceRightProfile" class="select trace-compact-select" title="Perfil lateral derecho del instrumento Dow activo"><option value="GEX" selected>GEX</option><option value="OI">OI</option><option value="NET_OI">NET OI</option><option value="VOLUME">VOLUMEN</option><option value="NET_VOLUME">NET VOL</option><option value="OPRA_NET">FLOW NET</option></select>
+          </div>
+          <div class="trace-tool-cluster trace-profile-tools"><span class="trace-tool-label">MAPA VALOR</span>
+            <select id="traceValueField" class="select trace-compact-select" title="Campo de valor estructural detrás del precio; no crea señal"><option value="GEX" selected>GEX</option><option value="DEX">DEX</option><option value="NET_OI">NET OI</option><option value="OPRA_NET">FLOW NET</option><option value="OFF">OFF</option></select>
+          </div>
+          <div class="trace-tool-cluster trace-profile-tools"><span class="trace-tool-label">HEATMAP</span>
+            <select id="traceTemporalHeatmap" class="select trace-compact-select" title="Mapa temporal por métrica; no suma campos incompatibles"><option value="joint" selected>Γ + Δ</option><option value="gamma">GAMMA</option><option value="delta">DELTA</option><option value="charm">CHARM</option><option value="net_volume">VOLUMEN NETO</option><option value="net_oi">OI NETO</option><option value="off">OFF</option></select>
+          </div>
+          <div class="trace-tool-cluster trace-profile-tools"><span class="trace-tool-label">FLOW</span>
+            <select id="traceUnusualThreshold" class="select trace-compact-select" title="Umbral visual de flujo inusual observado"><option value="AUTO" selected>AUTO</option><option value="100000">≥ $100K</option><option value="250000">≥ $250K</option><option value="500000">≥ $500K</option><option value="1000000">≥ $1M</option></select>
+          </div>
+          <div class="trace-tool-cluster trace-windows"><span class="trace-tool-label">VENTANA</span>
+            <button type="button" class="trace-chip" data-trace-window="30">30m</button>
+            <button type="button" class="trace-chip active" data-trace-window="60">1H</button>
+            <button type="button" class="trace-chip" data-trace-window="120">2H</button>
+            <button type="button" class="trace-chip" data-trace-window="390">SESIÓN</button>
+            <button type="button" class="trace-chip" data-trace-window="0">DÍA</button>
+          </div>
+          <div class="trace-tool-cluster trace-live-tools">
+            <button id="traceFollowToggle" class="btn btn-primary trace-live-btn" type="button" title="Última vela a la derecha con margen real. Rueda = zoom temporal; arrastrar = historial; mover apaga FOLLOW.">● FOLLOW LIVE</button>
+            <button id="traceCenterPrice" class="btn btn-ghost trace-icon-btn" type="button" title="Centrar precio">CENTRAR</button>
+            <button id="traceFullscreen" class="btn btn-ghost trace-icon-btn" type="button" title="Pantalla completa">⛶</button>
+            <button id="traceBackLive" class="btn btn-ghost trace-icon-btn" type="button">LIVE</button>
+          </div>
+        </div>
+        <div class="trace-terminal-row trace-terminal-secondary">
+          <span class="trace-tool-label trace-phase-label">ANÁLISIS</span>
+          <div class="trace-recommendation"><span>CONFIGURACIÓN RECOMENDADA</span><b id="traceRecommended">1m · 1H · AUTO PRECIO · GAMMA</b><small id="traceRecommendedWhy">Se adapta a la distancia a zona, volatilidad y accionabilidad.</small><button id="traceApplyRecommended" class="btn btn-ghost" type="button">APLICAR</button></div><div class="trace-recommendation"><span>MODO TRACE</span><b id="traceLayoutSummary">INSTITUTIONAL · DEX IZQ · GEX DER · HEATMAP SUAVIZADO</b><small id="traceLayoutSummaryWhy">La estructura se prioriza con presets, perfiles divididos y un heatmap temporal más limpio.</small></div>
+          <span class="trace-tool-label trace-phase-label">PRESENTACIÓN</span>
+          <div class="trace-quick-toggles">
+            <label class="trace-switch"><input type="checkbox" id="traceKeyLevels" checked><span>NIVELES</span></label>
+            <label class="trace-switch"><input type="checkbox" id="traceExpectedMove" checked><span>±1σ</span></label>
+            <label class="trace-switch"><input type="checkbox" id="traceFlowExpanded"><span>FLOW DOCK</span></label>
+            <label class="trace-switch" title="Overlay visual de la ruta definida por Scanner. No crea dirección ni recalcula el motor."><input type="checkbox" id="traceRouteProjection"><span>RUTA LIVE</span></label>
+          </div>
+          <details class="trace-advanced-drawer">
+            <summary>CONTROLES NEXTGEN · PRESENTACIÓN Y ENCUADRE ▾</summary>
+            <div class="trace-advanced-grid">
+              <div class="trace-control trace-expiry-control"><label>Vencimientos</label><select id="traceExpiryWindow" class="select"><option value="AUTO">AUTO · MULTI-EXPIRY INTRADAY</option><option value="0DTE">0DTE</option><option value="WEEK">SEMANA ACTUAL</option><option value="2W">2 SEMANAS</option><option value="MONTH">MES ACTUAL</option><option value="ALL">TODOS CARGADOS</option></select><small id="traceExpiryDetail">Sincronizado globalmente</small></div>
+              <div class="trace-control" id="tracePriceStyleWrap"><label>Precio</label><select id="tracePriceStyle" class="select"><option>Línea</option><option selected>Velas japonesas</option></select><small id="tracePriceModeLabel">VELAS JAPONESAS · PRECIO PRIMERO</small></div>
+              <div class="trace-control" id="traceCandleWrap"><label>Timeframe</label><select id="traceCandle" class="select"><option value="1m" selected>1 minuto</option><option value="3m">3 minutos</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option></select></div>
+              <div class="trace-control" id="traceTimeWindowWrap"><label>Ventana visible</label><select id="traceTimeWindow" class="select"><option value="15">15m</option><option value="30">30m</option><option value="60" selected>1H</option><option value="120">2H</option><option value="390">SESIÓN</option><option value="0">TODO</option></select></div>
+              <div class="trace-control" id="traceYFrameWrap"><label>Escala Y</label><select id="traceYFrame" class="select"><option value="auto" selected>AUTO PRECIO</option><option value="structure">ESTRUCTURA</option><option value="sigma1">±1σ</option><option value="sigma2">±2σ</option><option value="strikes">ESCALERA COMPLETA</option></select></div>
+              <div class="trace-control" id="traceWindowWrap"><label>Strikes ±</label><select id="traceWindow" class="select"><option value="5">5</option><option value="8">8</option><option value="12" selected>12</option><option value="18">18</option><option value="25">25</option></select></div>
+              <div class="trace-control"><label>Opacidad heatmap temporal</label><input id="traceHeatmapOpacity" type="range" min="0" max="85" value="36"><small>Solo presentación; Gamma/Delta crudos permanecen separados.</small></div>
+            </div>
+          </details>
+        </div>
+      </article>
+      <article class="panel chart-panel trace-main-panel trace-terminal-shell trace-spatial-v1245 trace-full-viewport-v1245 trace-flow-dock-v1250 trace-institutional-v1258" id="traceTerminalShell">
+        <div class="trace-live-helper"><b>TRACE MAP</b><span>DEX / presión direccional a la izquierda · heatmap suavizado, precio y flujo al centro · GEX / estructura a la derecha. El gráfico usa cálculos propios de ITM QUANT y datos observados. Rueda = zoom X; arrastrar = historial; hover o clic en un strike sincroniza toda la vista.</span></div>
+        <div class="trace-spatial-grid">
+          <div class="trace-chart-stage"><div id="traceChart" class="nextgen-trace-host" data-renderer="ITM_QUANT_HYBRID_PRICE_OVERLAY" data-fallback-renderer="ITM_QUANT_CANVAS_2D"><canvas id="traceCanvas"></canvas><div class="nextgen-crosshair-tip" id="traceTip"></div></div></div>
+          <aside class="trace-spatial-hud" aria-label="TRACE Structure HUD">
+            <div class="trace-hud-kicker"><span>TRACE STRUCTURE</span><i></i><small id="traceTfIntegrity">TF SYNC · —</small></div>
+            <div class="trace-hud-block"><span>SCANNER BIAS</span><b id="traceHudScanner">—</b><small>ÚNICA AUTORIDAD DIRECCIONAL</small></div>
+            <div class="trace-hud-block"><span>Γ + Δ STATE</span><b id="traceHudInteraction">—</b><small>MISMO STRIKE · DESCRIPTIVE ONLY</small></div>
+            <div class="trace-hud-block gravity"><span>STRIKE GRAVITY</span><b id="traceHudGravity">—</b><small id="traceHudGravityDetail">relevancia estructural + flow + distancia</small></div>
+            <div class="trace-hud-block"><span>FLOW</span><b id="traceHudFlow">—</b><small>FLUJO OBSERVADO CUANDO DISPONIBLE</small></div>
+            <div class="trace-hud-block"><span>GAMMA SQUEEZE</span><b id="traceHudSqueeze">—</b><small id="traceHudSqueezeDetail">DESCRIPTIVO · SCANNER CONSERVA AUTORIDAD</small></div>
+            <div class="trace-hud-levels">
+              <div><span>Γ FLIP</span><b id="traceHudFlip">—</b></div>
+              <div><span>Γ CENTER</span><b id="traceHudGammaCenter">—</b></div>
+              <div><span>Δ CENTER</span><b id="traceHudDeltaCenter">—</b></div>
+            </div>
+            <div class="trace-hud-kicker"><span>KEY LEVELS · SPOTGAMMA STYLE</span></div>
+            <div class="trace-hud-levels" id="traceHudKeyLevels">
+              <div><span>CALL WALL</span><b id="traceHudCallWall">—</b></div>
+              <div><span>PUT WALL</span><b id="traceHudPutWall">—</b></div>
+              <div><span>VOL TRIGGER</span><b id="traceHudVolTrigger">—</b></div>
+              <div><span>MAX PAIN</span><b id="traceHudMaxPain">—</b></div>
+              <div><span>EXPECTED MOVE</span><b id="traceHudExpectedMove">—</b></div>
+            </div>
+            <div class="trace-hud-note">ATTRACTING = relevancia aumenta · ACTIVE = estable/fuerte · FADING = pierde relevancia · RELEASED = ya no pesa suficiente.</div>
+          </aside>
+        </div>
+        <div class="aggression-trigger-strip" id="aggressionTriggerStrip" data-state="NEUTRAL" aria-label="ITM Aggression Trigger">
+          <div class="aggression-trigger-label"><span>AGGRESSION TRIGGER</span><b id="aggTriggerState">NEUTRAL</b><small id="aggTriggerTf">1m LIVE</small></div>
+          <canvas id="aggressionDeltaCanvas" aria-label="Velas Delta de Agresión"></canvas>
+          <div class="aggression-trigger-note">SCANNER MANDA · AGRESIÓN TEMPORIZA</div>
+        </div>
+        <div class="trace-pulse-strip trace-bottom-metrics">
+          <div class="pulse-price"><span>SPOT</span><b id="tracePulseSpot">—</b><small id="tracePulseSource">esperando LIVE</small></div>
+          <div><span>Γ NET LIVE</span><b id="traceGammaNet">—</b><small id="traceGammaVelocity">Δ snapshot —</small></div>
+          <div><span>Γ CENTER</span><b id="traceGammaCenterLive">—</b><small>reprice spot/time</small></div>
+          <div><span>Δ NET LIVE</span><b id="traceDeltaNet">—</b><small id="traceDeltaVelocity">Δ snapshot —</small></div>
+          <div><span>Δ CENTER</span><b id="traceDeltaCenterLive">—</b><small>reprice spot/time</small></div>
+          <div><span>FLOW 5M</span><b id="traceOpraActivity">—</b><small id="traceOpraCoverage">actividad observada</small></div>
+          <div><span>SNAPSHOT</span><b id="traceSnapshotAge">—</b><small>IV/OI/vol oficial</small></div>
+        </div>
+        <div class="trace-status-line"><span><i class="trace-status-dot"></i><b>ITM QUANT TRACE</b> · PRICE ENGINE + ITM OVERLAY · TRUE X SCALE · heatmap temporal suavizado · event-time candles/line · data-backed gravity nodes.</span><span id="traceContractState" class="trace-contract-state ok">TRACE CONTRACT OK</span><span>SCANNER MANDA · TRACE LOCALIZA · TAPE TEMPORIZA.</span><a class="trace-tv-attribution" href="https://www.tradingview.com/" target="_blank" rel="noopener">Price rendering: TradingView Lightweight Charts™</a></div>
+        <div class="nextgen-model-risk">MODEL RISK VISIBLE · STRIKE GRAVITY = relevancia descriptiva, NO predicción de precio · IV/OI no se inventan.</div>
+      </article>
+      <article class="panel trace-full-flow-panel">
+        <div class="panel-title"><div><p class="eyebrow">TRACE · FLUJO INUSUAL PRO · OBSERVADO LIVE</p><h2>Flujo Inusual Pro · <span class="asset-symbol">DIA</span></h2></div><small>Precio + eventos + actividad inferior · mismo reloj causal de TRACE</small></div>
+        <div id="traceFlowProChart" class="chart trace-flow-pro-chart"></div>
+        <div class="source-disclosure">Este panel localiza eventos observados; no cambia la dirección del Scanner ni crea una señal independiente.</div>
+      </article>
+      <details class="trace-diagnostics full-only">
+        <summary>DIAGNÓSTICO CUANT / CAPAS / TAPE</summary>
+      <div class="gex-overlay-status"><div><span>ESTRUCTURA NATIVA</span><b id="nativeStructureStatus">—</b></div><small id="nativeStructureDetail">Gamma Flip, majors OI/volumen y GEX estructural calculados por ITM QUANT. Proveedores externos solo corroboran evidencia normalizada.</small></div>
+      <details class="trace-layer-details advanced-only">
+        <summary>CAPAS · leyenda y estructura</summary>
+        <div class="trace-legend-strip">
+          <div><span class="dot dot-green"></span><b>Gamma / Delta +</b><small>positivo</small></div>
+          <div><span class="dot dot-red"></span><b>Gamma / Delta −</b><small>negativo</small></div>
+          <div><span class="dot dot-white"></span><b>Heatmap blanco</b><small>baja concentración</small></div>
+          <div><span class="line-swatch"></span><b><span class="asset-symbol">DIA</span> Precio</b><small>línea o velas</small></div>
+        </div>
+      </details>
+
+      <article class="panel tape-confirm-panel" id="traceTapePanel" data-state="WAITING">
+        <div class="tape-confirm-head">
+          <div><span class="eyebrow">TAPE TIMING ONLY · NO CAMBIA SCANNER</span><strong id="tapeConfirmState">ESPERANDO ZONA</strong></div>
+          <div class="tape-zone"><small>Zona</small><b id="tapeConfirmZone">—</b></div>
+        </div>
+        <div class="tape-confirm-grid">
+          <div><span>Progreso</span><b id="tapeConfirmProgress">0%</b><div class="tape-progress"><i id="tapeConfirmBar"></i></div></div>
+          <div><span>Tiempo restante</span><b id="tapeConfirmSeconds">—</b><small>presupuesto máximo de confirmación</small></div>
+          <div><span>Signed volume</span><b id="tapeConfirmSigned">—</b><small id="tapeConfirmBuyPct">BUY —</small></div>
+          <div><span>Participación</span><b id="tapeCadence">—</b><small id="tapeCadenceDetail">—</small></div>
+          <div><span>Agresión</span><b id="tapeAggressionScore">50/100 · MIXED</b><small id="tapeContested">—</small></div>
+        </div>
+        <div class="tape-mtf-box">
+          <div class="tape-mtf-head"><span>MULTITIMEFRAME TAPE CONTEXT · SHADOW</span><b id="tapeMtfState">COLLECTING</b></div>
+          <div class="tape-mtf-grid">
+            <div><span>1m</span><b id="tapeMtf1m">—</b></div><div><span>3m</span><b id="tapeMtf3m">—</b></div><div><span>5m</span><b id="tapeMtf5m">—</b></div>
+            <div><span>Rápido vs lento</span><b id="tapeMtfFastSlow">—</b></div>
+          </div>
+          <small id="tapeMtfNote">Una sola familia de contexto. No suma tres confirmaciones ni cambia Scanner/Tape trigger.</small>
+        </div>
+        <div class="tape-confirm-note" id="tapeConfirmNote">El Scanner decide zona y dirección. Tape solo confirma/rechaza el momento de entrada y se guarda aparte para investigación.</div>
+      </article>
+      <div class="hero-grid four trace-flow-cards">
+        <article class="hero-card"><span>FLUJO ACTIVO</span><strong id="traceFlowActive">—</strong><small id="traceFlowActiveDetail">Esperando evento confirmado</small></article>
+        <article class="hero-card"><span>MAYOR FLUJO DEL DÍA</span><strong id="traceLargestFlow">—</strong><small id="traceLargestFlowDetail">—</small></article>
+        <article class="hero-card"><span>SESIÓN DEL EVENTO</span><strong id="traceFlowSession">—</strong><small>PRE / LIVE</small></article>
+        <article class="hero-card"><span>ZONA DEL EVENTO</span><strong id="traceFlowZone">—</strong><small>Opening low/high · Flip · Key Gamma</small></article>
+      </div>
+      <div class="hero-grid four trace-attribution-cards">
+        <article class="hero-card"><span>GEX CHANGE DRIVER</span><strong id="attrDriver">—</strong><small>atribución secuencial diagnóstica</small></article>
+        <article class="hero-card"><span>SPOT REPRICING</span><strong id="attrSpot">—</strong><small id="attrSpotDetail">—</small></article>
+        <article class="hero-card"><span>IV EFFECT</span><strong id="attrIv">—</strong><small id="attrIvDetail">—</small></article>
+        <article class="hero-card"><span>TIME / OI</span><strong id="attrTimeOi">—</strong><small>no equivale a liquidez retirada/añadida</small></article>
+      </div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>EST. DEALER GEX · SHADOW</span><strong id="traceDealerGex">—</strong><small>inferencia de inventario; no posición dealer observada</small></article>
+        <article class="hero-card"><span>HEDGE PRESSURE 1M</span><strong id="traceHedge1">—</strong><small>estimated underlying hedge</small></article>
+        <article class="hero-card"><span>HEDGE PRESSURE 5M</span><strong id="traceHedge5">—</strong><small>estimated underlying hedge</small></article>
+        <article class="hero-card"><span>HEDGE PRESSURE 15M</span><strong id="traceHedge15">—</strong><small>estimated underlying hedge</small></article>
+      </div>
+      <div class="trace-help-grid advanced-only">
+        <div><b>Perfiles laterales:</b> Gamma queda a la izquierda y Delta a la derecha. Verde = exposición positiva; rojo = negativa; barra más larga = mayor magnitud en ese strike.</div>
+        <div><b>Fondo TRACE:</b> verde = positivo, rojo = negativo y blanco = concentración baja/neutral. La intensidad indica cuánto pesa la estructura.</div>
+        <div><b>Precio LIVE:</b> La línea usa trades del activo y se mueve trade por trade. Las velas japonesas forman OHLC por tiempo. La lectura de agresión se mantiene separada del precio principal.</div>
+        <div><b>Flujo inusual:</b> el panel inferior dibuja BUY/SELL en línea y marca los eventos relevantes con PRE/LIVE, precio del activo y zona (opening low/high, flip, key gamma, etc.).</div>
+        <div><b>Retroceder:</b> el reloj global superior controla toda la plataforma. TRACE no tiene un reloj independiente; mover Replay reconstruye solo información causal hasta esa hora.</div>
+        <div><b>Niveles:</b> Dynamic Flip, Gamma Center, Delta Center, OI Walls y Key Gamma son cálculos propios de ITM QUANT.</div>
+        <div><b>Agresión y Tape:</b> cada trade puede clasificarse con bid/ask y tick-rule de respaldo como contexto microestructural. No reemplaza al precio ni es el trigger de entrada. TAPE CONFIRMATION empieza al entrar en la zona del Scanner y decide CONFIRMED / ABSORBED / REJECTED / CHURN / EXPIRED dentro de un presupuesto temporal.</div>
+      </div>
+      </details>
+    </section>
+
+
+    <section id="section-dealer" class="page-section">
+      <div class="page-heading"><div><p class="eyebrow">INFERRED POSITIONING · TRADES + QUOTES + OI</p><h1>Dealer Intelligence & Hedge Impact</h1></div><div class="timestamp">Modelo estimado · no inventario real observado</div></div>
+      <div class="easy-callout easy-only"><b>Qué te interesa aquí</b><span><strong>Hedge Pressure BUY</strong> = el escenario estima necesidad neta de comprar cobertura; <strong>SELL</strong> = vender. Úsalo como confirmación del Scanner, no como señal aislada. Dealer GEX es inferido y siempre se compara por separado con el GEX estructural.</span></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>DEALER FIELD · EST.</span><strong id="dealerState">—</strong><small id="dealerConfidence">confidence —</small></article>
+        <article class="hero-card"><span>ESTIMATED DEALER GEX · SHADOW</span><strong id="dealerGex">—</strong><small>flujo + OI + Greeks; no inventario observado</small></article>
+        <article class="hero-card"><span>HEDGE PRESSURE · 15M</span><strong id="dealerHedge15">—</strong><small id="dealerHedgeConfidence">escenario dealer-counterparty</small></article>
+        <article class="hero-card"><span>INVENTORY SHIFT</span><strong id="dealerHedgeAccel">—</strong><small id="dealerInventoryShiftDetail">cambio sintético 15m</small></article>
+        <article class="hero-card"><span>SYNTHETIC OI Δ</span><strong id="dealerSyntheticOi">—</strong><small id="dealerSyntheticOiDetail">OI oficial permanece separado</small></article>
+        <article class="hero-card"><span>FLOW CONFIRMATION</span><strong id="dealerScenarioRange">—</strong><small id="dealerFlowConfirmDetail">underlying/futures when available</small></article>
+      </div>
+      <div class="hero-grid three advanced-only dealer-diagnostics">
+        <article class="hero-card"><span>DEALER GREEKS</span><strong id="dealerGreeksValuation">—</strong><small id="dealerGreeksRepriced">reprice coverage —</small></article>
+        <article class="hero-card"><span>OPEN/CLOSE MODEL</span><strong id="dealerOpeningModel">—</strong><small id="dealerOpeningDetail">SHADOW por defecto</small></article>
+        <article class="hero-card"><span>GEX RECONCILIATION</span><strong id="dealerGexAgreement">—</strong><small id="dealerGexAgreementDetail">Structural vs Dealer</small></article>
+      </div>
+      <div class="dealer-quality-strip">
+        <div><span>NBBO / SPOT SYNC</span><b id="dealerNbboSync">—</b></div>
+        <div><span>AGGRESSOR QUALITY</span><b id="dealerAggressorQuality">—</b></div>
+        <div><span>PACKAGES</span><b id="dealerPackages">—</b><small>candidate detection</small></div>
+        <div><span>DEALER STATE SCORE</span><b id="dealerStateScore">—</b><small>no probabilidad</small></div>
+      </div>
+      <div class="grid-2">
+        <article class="panel"><h2>Hedge Pressure por horizonte</h2><div id="dealerHedgeWindows" class="change-grid"><div class="muted">Esperando flujo LIVE.</div></div></article>
+        <article class="panel"><h2>Strikes con mayor presión estimada</h2><div id="dealerTopStrikes" class="change-grid"><div class="muted">Esperando actividad.</div></div></article>
+      </div>
+      <article class="panel advanced-only"><h2>Inventario sintético por strike</h2><div class="table-wrap"><table><thead><tr><th>Strike</th><th>Dealer contracts</th><th>Delta shares</th><th>Dealer GEX</th><th>Vanna</th><th>Charm</th><th>Hedge to neutral</th><th>Confidence</th></tr></thead><tbody id="dealerInventoryTable"></tbody></table></div></article>
+      <div class="source-disclosure">Opening/closing, dealer inventory y hedge requirement son inferencias transparentes. ITM QUANT no afirma observar la identidad del participante ni el hedge real del market maker.</div>
+    </section>
+
+    <section id="section-chain" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">STRIKE × VENCIMIENTO</p><h1>Cadena Cuantitativa · <span class="asset-symbol">DIA</span></h1></div><select id="chainMetric" class="select"><option>Q-Score</option><option>Open Interest</option><option>Volumen</option><option>Gamma</option><option>GEX</option><option>Delta</option><option>DEX</option><option>Vanna</option><option>Charm</option><option>Speed</option><option>Actividad inusual</option></select></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>GREEKS SOURCE</span><strong id="greeksSource">—</strong><small>Alpaca vs ITM QUANT fallback</small></article>
+        <article class="hero-card"><span>Δ GAP PROVEEDOR</span><strong id="greeksDeltaGap">—</strong><small>divergencia media absoluta</small></article>
+        <article class="hero-card"><span>Γ GAP PROVEEDOR</span><strong id="greeksGammaGap">—</strong><small>mediana relativa</small></article>
+        <article class="hero-card"><span>HIGHER GREEKS</span><strong id="greeksHigher">—</strong><small id="greeksHigherDetail">Vanna · Charm · Speed</small></article>
+      </div>
+      <div id="chainHighlights" class="highlight-grid"></div><div class="surface-launch-strip"><div><span>ESTRUCTURA 3D</span><b>Strike × Expiración × Campo</b><small>Superficie interactiva · rotación/zoom</small></div><div class="surface-launch-actions"><button class="btn btn-ghost" type="button" data-quant3d="Gamma">Γ GAMMA 3D</button><button class="btn btn-ghost" type="button" data-quant3d="GEX">GEX 3D</button><button class="btn btn-ghost" type="button" data-quant3d="DEX">DEX 3D</button><button class="btn btn-ghost" type="button" data-quant3d="Charm">CHARM 3D</button></div></div>
+      <article class="panel chart-panel institutional-chart-panel"><div id="chainChart" class="chart tall"></div></article>
+      <p class="small muted">Verde = Calls · Rojo = Puts · intensidad = magnitud del dato seleccionado. No significa comprar/vender automáticamente.</p>
+      <div class="explain-grid"><div><b>Q-Score</b><span>0–100 de relevancia cuantitativa del contrato. Combina Gamma, Delta, OI, volumen, cercanía al spot y vencimiento. Q85 NO significa 85% de probabilidad.</span></div><div><b>Actividad inusual</b><span>En esta versión mide principalmente Volumen/OI: cuánto se negocia hoy frente al posicionamiento abierto. Más adelante puede calibrarse con Z-score histórico.</span></div></div>
+    </section>
+
+    <section id="section-flow" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">MULTI ASSET · LONDON→NY · <span class="asset-symbol">DIA</span></p><h1>Flujo Inusual Pro · <span class="asset-symbol">DIA</span></h1></div><div class="timestamp">Pantalla independiente · no se mezcla con TRACE</div></div>
+      <div class="flow-compat-data" aria-hidden="true" hidden>
+        <span id="flowProLatest"></span><span id="flowProLatestDetail"></span><span id="flowProLargest"></span><span id="flowProLargestDetail"></span>
+        <span id="flowProNet"></span><span id="flowProZone"></span><span id="flowProSession"></span><span id="flowMicroState"></span>
+        <span id="flowPremiumAccel"></span><span id="flowPersistence"></span><span id="flowMultiExpiry"></span><span id="flowMultiExpiryDetail"></span>
+      </div>
+      <article class="panel flow-pro-shell institutional-chart-panel flow-reference-shell">
+        <div id="flowProChart" class="chart flow-pro-chart line-terminal-chart flow-reference-terminal"></div>
+      </article>
+      <article class="panel flow-event-table-compat" hidden><h2>Eventos cuantitativos destacados</h2><div class="table-wrap"><table><thead><tr><th>Hora</th><th>Sesión</th><th>BUY/SELL</th><th class="asset-symbol">DIA</th><th>Strike</th><th>Prima / Notional</th><th>Q-Flow LIVE</th><th>Norm SHADOW</th><th>Agresor</th><th>Open likelihood</th><th>Hedge impact*</th></tr></thead><tbody id="flowTable"></tbody></table></div><p class="small muted">Q-Flow LIVE conserva el score legado que usa el Scanner. Norm SHADOW usa anclas históricas por activo, proximidad en sigma y familias sin doble conteo; no cambia la señal hasta validación LIVE/OOS. PREMARKET usa el tape real como proxy etiquetado. Options Flow aparece solo con trades de opciones observados. *Open/Close y Hedge Impact son inferencias, no identidad ni hedge observado.</p></article>
+    </section>
+
+    <section id="section-netdrift" class="page-section">
+      <div class="page-heading"><div><p class="eyebrow">QUANT DATA · OPTIONS FLOW OBSERVADO</p><h1>Net Drift · <span class="asset-symbol">DIA</span></h1></div><select id="netDriftScope" class="select" title="Net Drift observado por Quant Data"><option selected>Todas exp.</option></select></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>CALL DRIFT</span><strong id="driftCall">—</strong><small>premium Call acumulado observado</small></article>
+        <article class="hero-card"><span>PUT DRIFT</span><strong id="driftPut">—</strong><small>premium Put acumulado observado</small></article>
+        <article class="hero-card"><span>NET DRIFT</span><strong id="driftNet">—</strong><small>Call + Put según signo del proveedor</small></article>
+        <article class="hero-card"><span>BUCKETS</span><strong id="driftGamma">—</strong><small>intervalos reales recibidos</small></article>
+      </div>
+      <article class="panel chart-panel drift-shell institutional-chart-panel"><div class="institutional-chart-toolbar"><div><span class="chart-kicker">QUANT DATA · NET DRIFT</span><b>Precio · Drift acumulado Call/Put/Net · premium por bucket</b></div><div class="chart-toolbar-badges"><span>OBSERVADO</span><span>1M BUCKETS</span></div></div><div id="netDriftChart" class="chart x-tall line-terminal-chart"></div></article>
+    </section>
+
+    <section id="section-exposure" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">STRIKE × EXPOSICIÓN</p><h1>Exposición por Strike Pro · <span class="asset-symbol">DIA</span></h1></div><select id="exposureMetric" class="select"><option selected>Gamma</option><option>Delta</option><option>Net OI</option><option>Volumen Neto</option></select></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>MAYOR POSITIVO</span><strong id="expPositive">—</strong><small id="expPositiveValue">—</small></article>
+        <article class="hero-card"><span>MAYOR NEGATIVO</span><strong id="expNegative">—</strong><small id="expNegativeValue">—</small></article>
+        <article class="hero-card"><span>STRIKE MÁS CERCANO</span><strong id="expNearest">—</strong><small id="expNearestValue">—</small></article>
+        <article class="hero-card"><span>DYNAMIC FLIP</span><strong id="expFlip">—</strong><small>referencia de régimen Gamma</small></article>
+      </div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>STRUCTURAL GEX PROXY</span><strong id="structuralGex">—</strong><small>OI × Gamma; no afirma inventario dealer</small></article>
+        <article class="hero-card"><span>FLOW-ADJUSTED GEX</span><strong id="flowAdjustedGex">—</strong><small>proxy estructural + actividad de opciones</small></article>
+        <article class="hero-card"><span>GEX @ -0.5%</span><strong id="gexDownScenario">—</strong><small>sensibilidad con IV/OI constantes</small></article>
+        <article class="hero-card"><span>GEX @ +0.5%</span><strong id="gexUpScenario">—</strong><small>sensibilidad con IV/OI constantes</small></article>
+      </div>
+      <article class="panel chart-panel exposure-shell institutional-chart-panel"><div class="panel-title"><div><h2>Exposure by Strike</h2><small>Vista 2D operativa</small></div><button class="btn btn-ghost" type="button" data-quant3d="Gamma">ABRIR SURFACE 3D</button></div><div id="exposureChart" class="chart tall"></div></article>
+      <p class="small muted">Verde = exposición neta positiva · rojo = exposición neta negativa. El selector permite comparar Gamma, Delta, Net OI y Volumen Neto por strike.</p>
+    </section>
+
+    <section id="section-gexmatrix" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">GEX · STRIKE × VENCIMIENTO</p><h1>Matriz &amp; Migración · <span class="asset-symbol">DIA</span></h1></div><div class="surface-controls"><label>Vista<select id="matrixSurfaceView" class="select"><option value="matrix" selected>MATRIZ 2D</option><option value="surface">SURFACE 3D · GPU</option></select></label><label>Métrica<select id="gexMatrixMetric" class="select"><option selected>GEX</option><option>ΔGEX</option></select></label><label id="gexBaselineWrap">Baseline<select id="gexMatrixBaseline" class="select"><option value="OPEN" selected>APERTURA / PRIMER SNAPSHOT</option><option value="PREVIOUS">SNAPSHOT PREVIO</option></select></label><label>Etiquetas<select id="gexMatrixThreshold" class="select"><option value="AUTO" selected>AUTO · RELATIVO</option><option value="0.10">0.10M</option><option value="0.25">0.25M</option><option value="0.50">0.50M</option></select></label><label>Migración<select id="gammaMigrationMode" class="select"><option value="DIFFERENCE" selected>DIFFERENCE · CAMBIO</option><option value="VALUE">VALUE · NIVEL</option></select></label></div></div>
+      <article class="panel chart-panel institutional-chart-panel"><div class="panel-title"><div><h2>GEX Matrix</h2><small>Valores exactos en hover · escala visual robusta · MVC resaltado</small></div><button class="btn btn-ghost" type="button" data-quant3d="GEX">ABRIR SURFACE 3D</button></div><div id="gexMatrixChart" class="chart x-tall"></div></article>
+      <article class="panel chart-panel institutional-chart-panel"><div class="institutional-chart-toolbar"><div><span class="chart-kicker">GAMMA MIGRATION</span><b>Strike × tiempo · VALUE / DIFFERENCE</b></div><div class="chart-toolbar-badges"><span id="gammaMigrationState">ESPERANDO SNAPSHOTS</span><span>NO DEALER INVENTORY CLAIM</span></div></div><div id="gammaMigrationChart" class="chart tall"></div></article>
+      <div class="grid-2">
+        <article class="panel"><h2>Inspector de celda</h2><div id="gexCellInspector" class="metric-list"><div><span>Strike / Vencimiento</span><b id="gexCellKey">Haz clic en una celda</b></div><div><span>GEX / DEX</span><b id="gexCellExposure">—</b></div><div><span>OI / Volumen</span><b id="gexCellActivity">—</b></div><div><span>IV / contratos</span><b id="gexCellContracts">—</b></div></div><p class="small muted">Drilldown exacto del contrato/celda seleccionada; no genera una señal adicional.</p></article>
+        <article class="panel"><h2>Lectura de migración</h2><div id="gammaMigrationDigest" class="change-grid"><div class="muted">Esperando dos snapshots comparables.</div></div></article>
+      </div>
+      <div class="explain-grid"><div><b>Verde / rojo</b><span>Exposición positiva / negativa. El color usa escala robusta; el hover conserva el valor exacto.</span></div><div><b>DIFFERENCE</b><span>Cambio de exposición calculada contra el snapshot previo comparable. No afirma observar inventario dealer.</span></div><div><b>VALUE</b><span>Nivel calculado de exposición por strike a través del tiempo.</span></div><div><b>MVC</b><span>Mayor magnitud absoluta de la matriz, resaltada sin aplastar el contraste del resto.</span></div></div>
+    </section>
+
+    <section id="section-vol" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">IV · SKEW · TERM</p><h1>Volatility Engine · <span class="asset-symbol">DIA</span></h1></div></div>
+      <div class="hero-grid"><article class="hero-card"><span>ATM IV</span><strong id="atmIv">—</strong></article><article class="hero-card"><span>SKEW 25Δ · EXP. CERCANA</span><strong id="skew">—</strong></article><article class="hero-card"><span>MODEL EXPECTED MOVE</span><strong id="volEM">—</strong><small>S × IV × √T</small></article><article class="hero-card"><span>MARKET IMPLIED MOVE</span><strong id="marketEM">—</strong><small>ATM straddle mid</small></article><article class="hero-card"><span>EM DISLOCATION</span><strong id="emDislocation">—</strong><small>mercado vs modelo</small></article><article class="hero-card"><span>RÉGIMEN IV</span><strong id="volState">—</strong></article><article class="hero-card"><span>REALIZED VOL*</span><strong id="realizedVol">—</strong><small id="realizedVolDetail">esperando muestra suficiente</small></article><article class="hero-card"><span>IV - RV</span><strong id="ivRvSpread">—</strong><small>premium/discount diagnóstico</small></article><article class="hero-card"><span>TERM STRUCTURE</span><strong id="termState">—</strong><small>ATM-forward por vencimiento</small></article><article class="hero-card"><span>VOL-OF-VOL*</span><strong id="volOfVol">—</strong><small>variación de IV entre snapshots</small></article><article class="hero-card"><span>FORWARD VOL*</span><strong id="forwardVol">—</strong><small>varianza implícita entre 2 primeros expiries</small></article><article class="hero-card"><span>FRONT vs FORWARD</span><strong id="frontForward">—</strong><small>proxy de premium de evento/frente</small></article></div>
+      <article class="panel compact"><div class="panel-title"><div><h2>Skew por vencimiento</h2><small>25Δ Put IV - Call IV calculado dentro del mismo expiry.</small></div></div><div id="skewExpiryGrid" class="change-grid"></div></article>
+      <div class="hero-grid three"><article class="hero-card"><span>AMERICAN MODEL CHECK</span><strong id="americanCheck">—</strong><small id="americanCheckDetail">CRR diagnóstico vs Black-Scholes</small></article><article class="hero-card"><span>RATE INPUT</span><strong id="rateInput">—</strong><small id="rateSource">—</small></article><article class="hero-card"><span>DIVIDEND / CARRY</span><strong id="dividendInput">—</strong><small id="dividendSource">—</small></article></div>
+      <article class="panel chart-panel institutional-chart-panel"><div class="panel-title"><div><h2>Term Structure</h2><small>IV por vencimiento · lectura 2D</small></div><button class="btn btn-ghost" type="button" data-quant3d="IV">ABRIR IV SURFACE 3D</button></div><div id="volChart" class="chart"></div></article>
+      <article class="panel chart-panel institutional-chart-panel"><div class="panel-title"><div><h2>Skew Model (SVI)</h2><small>Complementa el "SKEW 25Δ" de arriba: ese promedia los 1-3 contratos observados más cercanos a 0.25 delta (discreto); este ajusta SVI a toda la sonrisa y resuelve el strike de 25Δ exacto (continuo, con chequeo de arbitraje). Ninguno reemplaza al otro.</small></div></div><div id="skewChart" class="chart"></div></article>
+    </section>
+
+    <section id="section-positioning" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">OI · GEX · DEX · MONEYNESS · VOLUMEN</p><h1>Positioning & Volumen · <span class="asset-symbol">DIA</span></h1></div></div>
+      <div class="grid-2">
+        <article class="panel"><h2>Open Interest</h2><div class="metric-list"><div><span>Call OI</span><b id="callOi">—</b></div><div><span>Put OI</span><b id="putOi">—</b></div><div><span>Put/Call OI</span><b id="pcOi2">—</b></div><div><span>Mayor Call OI</span><b id="topCallOi">—</b></div><div><span>Mayor Put OI</span><b id="topPutOi">—</b></div></div></article>
+        <article class="panel"><h2>Exposición estructural</h2><div class="metric-list"><div><span>Net GEX proxy</span><b id="netGex">—</b></div><div><span>Gross GEX</span><b id="grossGex">—</b></div><div><span>Net Delta exposure</span><b id="netDex">—</b></div></div><div class="locked-feature"><b>Large Prints / Off-Exchange <span class="asset-symbol">DIA</span></b><span>Activo en módulo propio. Solo se etiqueta OFF-EXCHANGE cuando el feed aporta evidencia específica; no se llama Dark Pool sin evidencia.</span></div></article>
+      </div>
+      <article class="panel"><div class="panel-title"><div><h2>Niveles cuantitativos principales</h2><small>Por defecto quedan ordenados por precio para leer el mercado de abajo hacia arriba.</small></div><select id="levelsOrder" class="select"><option value="strike" selected>Por strike</option><option value="score">Por importancia</option></select></div><div class="table-wrap"><table><thead><tr><th>Strike</th><th>GEX</th><th>Delta</th><th>OI</th><th>Volumen</th><th>Score</th><th>Estado</th><th>Conf.</th></tr></thead><tbody id="levelsTable"></tbody></table></div></article>
+    <div class="merged-block"><div class="panel-title"><div><p class="eyebrow">POSICIONAMIENTO PROXY · STRIKE</p><h2>Net Positioning</h2></div><select id="positioningMetric" class="select"><option selected>Delta-adjusted</option><option>OI Call-Put</option><option>Gamma-adjusted</option></select></div>
+      <article class="panel chart-panel"><div id="netPositioningChart" class="chart tall"></div></article>
+      <div class="explain-grid"><div><b>Delta-adjusted · recomendado</b><span>OI ponderado por Delta. Ayuda a ver dónde está concentrada la exposición direccional equivalente.</span></div><div><b>OI Call-Put</b><span>Calls positivos menos Puts negativos. Es estructura base, no dirección garantizada.</span></div><div><b>Gamma-adjusted</b><span>Usa GEX firmado por strike para ver posicionamiento sensible a Gamma.</span></div><div><b>Importante</b><span>Es un proxy de ITM QUANT; no afirma conocer inventario customer/dealer.</span></div></div></div><div class="merged-block"><div class="panel-title"><div><p class="eyebrow">OPCIONES · VOLUMEN POR STRIKE</p><h2>Volumen Pro</h2></div><select id="volumeMetric" class="select"><option selected>Calls vs Puts</option><option>Volumen Total</option><option>Vol/OI</option></select></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>CALL VOLUME</span><strong id="volumeCalls">—</strong><small>contratos negociados</small></article>
+        <article class="hero-card"><span>PUT VOLUME</span><strong id="volumePuts">—</strong><small>contratos negociados</small></article>
+        <article class="hero-card"><span>PUT/CALL VOLUME</span><strong id="volumePCR">—</strong><small>ratio de volumen</small></article>
+        <article class="hero-card"><span>HOTSPOT VOL/OI</span><strong id="volumeHotspot">—</strong><small id="volumeHotspotDetail">actividad relativa</small></article>
+      </div>
+      <article class="panel chart-panel"><div id="volumeChart" class="chart tall"></div></article>
+      <div class="explain-grid">
+        <div><b>Calls vs Puts · recomendado</b><span>Calls aparecen arriba en celeste; Puts abajo en fucsia. Sirve para ver en qué strikes se está negociando más cada lado.</span></div>
+        <div><b>Volumen Total</b><span>Suma Calls + Puts por strike. Las barras doradas resaltan concentraciones de volumen especialmente altas dentro de la cadena actual.</span></div>
+        <div><b>Vol/OI</b><span>Compara cuánto se negocia hoy frente al Open Interest existente. Un ratio alto señala actividad inusual relativa, no compra/venta automática.</span></div>
+        <div><b>Cómo usarlo</b><span>Primero mira Gamma/GEX para estructura; luego Volumen Pro para saber dónde está entrando actividad hoy; confirma con Delta y Flujo Inusual.</span></div>
+      </div></div>
+    </section>
+
+    <section id="section-macro" class="page-section institutional-workspace">
+      <div class="page-heading"><div><p class="eyebrow">FRED · BLS · FEDERAL RESERVE</p><h1>Macro Context</h1></div><div class="timestamp">Contexto cuantitativo · no reemplaza Gamma/Delta/Flow</div></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>MACRO STRESS</span><strong id="macroStress2">—</strong><small>0–100 · contexto de riesgo</small></article>
+        <article class="hero-card"><span>TREASURY 10Y</span><strong id="macro10y">—</strong><small id="macro10yChange">—</small></article>
+        <article class="hero-card"><span>CURVA 10Y-2Y</span><strong id="macroCurve">—</strong><small>spread de curva</small></article>
+        <article class="hero-card"><span>HY OAS</span><strong id="macroHy">—</strong><small>stress de crédito</small></article>
+      </div>
+      <article class="panel chart-panel institutional-chart-panel"><div class="institutional-chart-toolbar"><div><span class="chart-kicker">MACRO REGIME</span><b>Rates · curva · crédito · eventos oficiales</b></div><div class="chart-toolbar-badges"><span>CONTEXT ONLY</span></div></div><div id="macroChart" class="chart tall"></div></article>
+      <article class="panel"><h2>Calendario macro oficial próximo</h2><div class="table-wrap"><table><thead><tr><th>Fecha / hora EC</th><th>Fuente</th><th>Evento</th><th>Impacto</th></tr></thead><tbody id="macroEventsTable"></tbody></table></div><p class="small muted">Eventos BLS/Fed obtenidos de calendarios oficiales. El score de Macro Stress es un modelo de contexto, no una probabilidad de compra/venta.</p></article>
+    </section>
+
+    <section id="section-prints" class="page-section">
+      <div class="page-heading"><div><p class="eyebrow">STOCK TAPE LIVE · <span class="asset-symbol">DIA</span></p><h1>Large Prints / Off-Exchange · <span class="asset-symbol">DIA</span></h1></div><div class="timestamp">Sin inferir identidad ni intención</div></div>
+      <div class="hero-grid four">
+        <article class="hero-card"><span>PRINTS DETECTADOS</span><strong id="printCount">—</strong></article>
+        <article class="hero-card"><span>OFF-EXCHANGE CONF.</span><strong id="offCount">—</strong></article>
+        <article class="hero-card"><span>NOTIONAL TOTAL</span><strong id="printNotional">—</strong></article>
+        <article class="hero-card"><span>OFF-EX NOTIONAL</span><strong id="offNotional">—</strong></article>
+      </div>
+      <article class="panel chart-panel institutional-chart-panel"><div class="institutional-chart-toolbar"><div><span class="chart-kicker">LARGE PRINTS · LIQUIDITY TERRAIN</span><b>Precio · prints · notional · zonas adaptativas</b></div><div class="chart-toolbar-badges"><span>CONTEXT ONLY</span></div></div><div id="printsChart" class="chart tall"></div></article>
+      <article class="panel"><div class="panel-title"><div><h2>Liquidity Zones</h2><small>Clustering propio ITM QUANT · mediana ponderada · score relativo</small></div></div><div id="liquidityZonesGrid" class="change-grid"><div class="muted">Esperando prints suficientes.</div></div></article>
+      <article class="panel"><h2>Eventos destacados Q-Print</h2><div class="table-wrap"><table><thead><tr><th>Hora</th><th class="asset-symbol">DIA</th><th>Shares</th><th>Notional</th><th>Q-Print</th><th>Clasificación</th><th>Venue</th><th>Condiciones</th></tr></thead><tbody id="printsTable"></tbody></table></div><p class="small muted">OFF-EXCHANGE se muestra solo cuando exchange/tape lo identifica. Un Large Print no implica automáticamente compra o venta.</p></article>
+    </section>
+
+
+    <section id="section-surface" class="page-section quant-4d-section">
+      <span class="lean-hidden" aria-hidden="true">Surface 4D</span>
+      <button id="backToMatrix" class="btn btn-ghost merged-back" type="button">← VOLVER A MATRIZ 2D</button>
+      <div class="page-heading quant-4d-heading"><div><p class="eyebrow">QUANT 3D / 4D LAB · GPU TERMINAL</p><h1>Superficies Cuantitativas · <span class="asset-symbol">DIA</span></h1><small>3D = Strike × Expiración × Campo · 4D = la misma superficie a través del reloj causal LIVE/REPLAY.</small></div><div class="quant-gpu-badges"><span id="surfaceGpuState">GPU · DETECTANDO</span><span id="surfaceWireState">BINARY · READY</span><span>MODEL RISK · VISIBLE</span></div></div>
+      <article class="panel nextgen-surface-panel cinematic-surface">
+        <div class="panel-title"><div><p class="eyebrow">SUPERFICIE 3D · CAMPO CUANTITATIVO</p><h2>Campo cuantitativo reactivo</h2></div><div class="surface-title-actions"><small>Arrastra = rotar · rueda = zoom · reloj global = dimensión tiempo.</small><button id="surfaceResetBtn" class="btn btn-ghost" type="button">CENTRAR 3D</button><button id="surfaceImmersiveBtn" class="btn btn-ghost" type="button" data-internal-only hidden>XR / IMMERSIVE</button></div></div>
+        <div class="surface-controls surface-controls-primary" id="surfacePrimaryControls">
+          <label>Vista<select id="surfaceView" class="select"><option value="expiry" selected>STRIKE × EXPIRY</option><option value="session">TRACE · STRIKE × TIME</option></select></label>
+          <label id="surfaceMetricWrap">Métrica<select id="surfaceMetric" class="select"><option selected>Gamma</option><option>IV</option><option>GEX</option><option>Delta</option><option>DEX</option><option>Vanna</option><option>Charm</option><option>Speed</option><option>Open Interest</option><option>Net OI</option><option>Volumen</option><option>Volumen Neto</option><option>Score cuantitativo</option><option>Actividad inusual</option></select></label>
+          <label id="surfaceOptionViewWrap">Contratos<select id="surfaceOptionView" class="select"><option selected>Net</option><option>Calls</option><option>Puts</option></select></label>
+          <label id="surfaceRenderStyleWrap">Render<select id="surfaceRenderStyle" class="select"><option selected>Superficie</option><option>Barras</option><option>Líneas</option><option>Puntos</option><option>Picos</option><option>Olas</option></select></label>
+          <label id="traceLandscapeLensWrap" class="hidden">Lente TRACE<select id="traceLandscapeLens" class="select"><option>Gamma</option><option>Delta</option><option>Charm</option></select></label>
+          <label id="traceLandscapeScaleWrap" class="hidden">Color / escala<select id="traceLandscapeScale" class="select"><option value="session" selected>Session</option><option value="anchor">Anchor</option><option value="column">Column · forma relativa</option></select></label>
+          <div class="surface-control-state"><span>VISTA ACTIVA</span><b id="surfaceMainState">GAMMA · NET · SUPERFICIE</b></div>
+        </div>
+        <div class="surface-reading-guide">
+          <div title="ALTURA: magnitud firmada del campo. Cambia la geometría visual, no el dato económico."><b>ALTURA <i>?</i></b><span>magnitud firmada del campo seleccionado</span></div><div title="COLOR: codifica signo/intensidad; no sustituye el valor numérico."><b>COLOR <i>?</i></b><span>signo/intensidad; nunca reemplaza el valor económico</span></div><div title="NIEBLA: shader de incertidumbre/model-risk; más niebla = menor soporte/calidad visualizable."><b>NIEBLA <i>?</i></b><span>incertidumbre / baja calidad de datos</span></div><div title="CONTORNOS: líneas de igual nivel que resaltan transiciones/concentraciones del campo."><b>CONTORNOS <i>?</i></b><span>zonas de transición y concentración</span></div>
+        </div>
+        <div class="surface-lens-caption"><b>LENTES 3D</b><span>Solo cambian el campo visual de la Superficie. Q · SHADOW no es señal ni probabilidad.</span></div>
+        <div class="surface-field-tabs" id="surfaceFieldTabs">
+          <button class="trace-chip" type="button" data-field="IV" title="IV σ: volatilidad implícita por strike/vencimiento.">IV σ</button><button class="trace-chip active" type="button" data-field="Gamma" title="Gamma: sensibilidad de Delta al movimiento de Spot; estructura/fricción.">Γ GAMMA</button><button class="trace-chip" type="button" data-field="Delta" title="Delta: sensibilidad direccional del valor de la opción al Spot.">Δ DELTA</button><button class="trace-chip" type="button" data-field="Vanna" title="Vanna: sensibilidad de Delta a cambios en IV.">VANNA</button><button class="trace-chip" type="button" data-field="Charm" title="Charm: cambio de Delta por paso del tiempo.">CHARM</button><button class="trace-chip" type="button" data-field="Speed" title="Speed: cambio de Gamma cuando cambia Spot.">SPEED</button><button class="trace-chip" type="button" data-field="Color" title="Color: cambio de Gamma por paso del tiempo; sensibilidad de segundo orden.">COLOR</button><button class="trace-chip" type="button" data-field="GEX" title="GEX: exposición Gamma agregada en unidades económicas del modelo.">GEX</button><button class="trace-chip" type="button" data-field="DEX" title="DEX: exposición Delta agregada.">DEX</button><button class="trace-chip" type="button" data-field="Hedge" title="HEDGE: presión estimada de cobertura; no hedge observado de un participante.">HEDGE</button><button class="trace-chip" type="button" data-field="Q" title="Q SHADOW: campo de investigación sin autoridad de producción y no es probabilidad.">Q · SHADOW</button>
+        </div>
+        <div class="surface-scenario-row">
+          <span class="surface-scenario-label">IV SCENARIO · MODEL RISK</span>
+          <button class="trace-chip" type="button" data-surface-iv="-0.02">IV −2pt</button><button class="trace-chip active" type="button" data-surface-iv="0">BASE</button><button class="trace-chip" type="button" data-surface-iv="0.02">IV +2pt</button>
+          <span class="surface-clock"><b>4D TIME</b> = RELOJ GLOBAL CAUSAL · LIVE / REPLAY</span>
+        </div>
+        <div class="v124-surface-lab-grid">
+          <div class="v124-surface-main">
+            <div id="surfaceChart" class="nextgen-surface-host"><canvas id="surfaceWebglCanvas"></canvas><div id="surfaceAltChart" class="surface-alt-chart hidden"></div><div class="surface-overlay"><b id="surfaceNativeMetric">GAMMA</b><span id="surfaceNativeStatus">esperando campo…</span><small id="surfaceBackendStatus" data-internal-only hidden>backend 3D interno</small></div></div>
+            <div class="surface-diagnostics-grid">
+              <article><span>CORTE EN STRIKE</span><canvas id="surfaceStrikeSliceCanvas"></canvas></article>
+              <article><span>MAPA DE CALOR · VISTA SUPERIOR</span><canvas id="surfaceHeatCanvas"></canvas></article>
+              <article><span>PERFIL POR EXPIRACIÓN</span><canvas id="surfaceExpiryBarsCanvas"></canvas></article>
+            </div>
+          </div>
+          <aside class="v124-surface-stack">
+            <section class="surface-stack-card"><div class="surface-stack-title">STACK ANALÍTICO · MODELO ITM</div><div class="surface-stack-grid">
+              <div><span>Gamma / GEX Field</span><b id="surfaceStackGamma">—</b></div>
+              <div><span>Delta / DEX Field</span><b id="surfaceStackDelta">—</b></div>
+              <div><span>Dealer Positioning</span><b id="surfaceStackDealer">—</b></div>
+              <div><span>Hedge Pressure</span><b id="surfaceStackHedge">—</b></div>
+              <div><span>IV State</span><b id="surfaceStackIv">—</b></div>
+              <div><span>Confidence</span><b id="surfaceStackConfidence">—</b></div>
+              <div><span>Model Risk</span><b id="surfaceStackRisk">VISIBLE</b></div>
+            </div></section>
+            <section class="surface-stack-card"><div class="surface-stack-title">ITM STRUCTURAL FLOW · INTERNAL</div><div class="surface-stack-grid">
+              <div><span>GEX Flow</span><b id="surfaceItmGexFlow">—</b></div>
+              <div><span>DEX Flow</span><b id="surfaceItmDexFlow">—</b></div>
+              <div><span>Convexity Pressure</span><b id="surfaceItmConvexity">—</b></div>
+              <div><span>State</span><b id="surfaceItmFlowStatus">WAITING</b></div>
+            </div><small>Derivado de snapshots estructurales ITM; no es order flow ni altera Scanner.</small></section>
+
+            <section class="surface-stack-card guide"><div class="surface-stack-title">GUÍA RÁPIDA</div><p><b>Strike</b> = eje X · <b>Expiry</b> = eje Y · <b>Campo</b> = altura Z · <b>Tiempo</b> = animación/replay 4D.</p><p>Rojo/alto = concentración positiva según campo · azul/bajo = negativo/soporte según la métrica. La semántica exacta cambia por campo.</p></section>
+          </aside>
+        </div>
+        <div class="nextgen-model-risk" id="surfaceModelRisk">MODEL RISK VISIBLE · superficies teóricas/estimadas · Q SHADOW no es probabilidad ni cambia Scanner.</div>
+      </article>
+      <details class="panel surface-legacy-drawer"><summary>AYUDA / DIAGNÓSTICOS AVANZADOS ▾</summary>
+        <div id="surfaceExpiryExplain" class="explain-grid"><div><b>Gamma</b><span>Fricción/estabilidad de cobertura por strike y vencimiento.</span></div><div><b>Delta</b><span>Exposición direccional agregada; no es una señal aislada.</span></div><div><b>Vanna / Charm / Speed / Color</b><span>Cómo cambia Delta/Gamma con IV, tiempo y Spot.</span></div><div><b>Hedge</b><span>Presión estimada de cobertura; no hedge observado.</span></div><div><b>Q SHADOW</b><span>Campo combinado de investigación; no probabilidad.</span></div></div>
+        <div id="surfaceTraceExplain" class="explain-grid hidden"><div><b>Altura real</b><span>Exposición firmada; no se normaliza para fingir magnitud.</span></div><div><b>Color</b><span>Intensidad contextual; no altera la altura económica.</span></div><div><b>Gamma Flip</b><span>Transición de régimen calculada desde Gamma.</span></div><div><b>Sin fallback oculto</b><span>Si falta una métrica se muestra UNAVAILABLE.</span></div></div>
+      </details>
+      <details id="surfaceSlicePanel" class="panel chart-panel surface-legacy-drawer"><summary>CROSS-SECTION 2D · INTERACTIVE ANALYTICS</summary>
+        <div class="surface-slice-toolbar">
+          <label>Métrica<select id="surfaceSliceMetric" class="select"><option selected>Gamma</option><option>GEX</option><option>Delta</option><option>DEX</option><option>Vanna</option><option>Charm</option><option>Speed</option><option>Open Interest</option><option>Net OI</option><option>Volumen</option><option>Volumen Neto</option><option>Actividad inusual</option><option>Score cuantitativo</option></select></label>
+          <label>Render<select id="surfaceSliceRender" class="select"><option selected>Barras</option><option>Líneas</option><option>Puntos</option><option>Picos</option><option>Olas</option></select></label>
+          <div class="surface-slice-state"><span>VISTA ACTIVA</span><b id="surfaceSliceState">GAMMA · NET · BARRAS</b><small>Calls / Puts / Net se comparte con el selector superior.</small></div>
+        </div>
+        <div class="surface-slice-layout">
+          <div id="surfaceSliceChart" class="chart"></div>
+          <aside id="nodeInspector" class="node-inspector">
+            <div class="node-inspector-head"><div><span>NODE INSPECTOR</span><b id="nodeInspectorState">WAITING</b></div><button id="nodeInspectorClear" class="btn btn-ghost" type="button">LIBERAR</button></div>
+            <div class="node-inspector-strike"><span>STRIKE</span><strong id="nodeInspectorStrike">—</strong></div>
+            <div class="node-inspector-grid"><div><span>MÉTRICA</span><b id="nodeInspectorMetric">—</b></div><div><span>VALOR</span><b id="nodeInspectorValue">—</b></div></div>
+            <div id="nodeInspectorDetails" class="node-inspector-details">Mueve el cursor sobre el Cross-Section o haz clic para fijar un strike y enlazarlo con TRACE.</div>
+          </aside>
+        </div>
+      </details>
+    </section>
+
+    <section id="section-auditor" class="page-section" data-internal-only hidden>
+      <div class="page-heading"><div><p class="eyebrow">DATA QUALITY · MODEL HEALTH · SOURCES</p><h1>Auditor &amp; Fuentes</h1></div><select id="auditSourceView" class="select"><option value="auditor" selected>AUDITOR</option><option value="infrastructure">FUENTES</option></select></div>
+      <div class="hero-grid three"><article class="hero-card"><span>DATA QUALITY</span><strong id="auditScore">—</strong><small id="auditDataStatus">cobertura/frescura</small></article><article class="hero-card"><span>MODEL HEALTH</span><strong id="auditModelHealth">—</strong><small id="auditModelStatus">coherencia interna</small></article><article class="hero-card"><span>RESEARCH CALIBRATION</span><strong id="auditCalibration">—</strong><small id="auditCalibrationStatus">muestras observadas</small></article></div>
+      <div class="hero-grid three v117-audit-memory"><article class="hero-card"><span>AUDITOR DIARIO</span><strong id="auditDailyPersistent">COLLECTING</strong><small id="auditDailyPersistentDetail">informe persistente de sesión</small></article><article class="hero-card"><span>AUDITOR ACUMULADO</span><strong id="auditCumulativePersistent">COLLECTING</strong><small id="auditCumulativePersistentDetail">tendencias entre sesiones</small></article><article class="hero-card"><span>MEMORIA QUANT</span><strong id="auditMemoryPersistent">PROTEGIDA</strong><small id="auditMemoryPersistentDetail">fuera del código reemplazable</small></article></div>
+      <article class="panel"><div class="table-wrap"><table><thead><tr><th>Chequeo</th><th>Estado</th><th>Detalle</th></tr></thead><tbody id="auditTable"></tbody></table></div></article>
+
+      <details class="auditor-research-drawer" open>
+        <summary><span>RESEARCH &amp; CALIBRATION</span><small>cobertura histórica · walk-forward · OOS · sin crear otra sección operativa</small></summary>
+        <div class="auditor-research-content">
+      
+      
+      <article class="panel replay-range-panel"><div class="panel-title"><div><p class="eyebrow">RANGO HISTÓRICO · INVESTIGACIÓN</p><h2>Cobertura histórica</h2></div><small>No cambia el reloj global; resume qué datos existen para investigar/calibrar.</small></div>
+        <div class="replay-range-controls"><label>Desde<input id="researchStart" type="date" /></label><label>Hasta<input id="researchEnd" type="date" /></label><button id="researchRangeBtn" class="btn btn-ghost" type="button">EVALUAR RANGO</button></div>
+        <div class="highlight-grid replay-range-summary"><article class="highlight-card"><span>SESIONES USABLES</span><b id="rangeSessions">—</b></article><article class="highlight-card"><span>SEÑALES / MÍNIMO</span><b id="rangeSignals">—</b></article><article class="highlight-card"><span>TAPE ARCHIVADO</span><b id="rangeTape">—</b></article><article class="highlight-card"><span>MODEL READINESS</span><b id="rangeModel">—</b></article></div>
+        <div id="rangeDropped" class="source-disclosure">Selecciona un rango para ver sesiones usables, cobertura temporal y descartes.</div>
+      </article>
+      <div class="hero-grid four"><article class="hero-card"><span>ESTADO</span><strong id="calStatus">COLLECTING</strong><small>no activa pesos adaptativos por sí solo</small></article><article class="hero-card"><span>MUESTRAS DEPURADAS</span><strong id="calSamples">0</strong><small id="calMinimum">mínimo recomendado —</small></article><article class="hero-card"><span>SESIONES</span><strong id="calSessions">0</strong><small>historial realmente evaluable</small></article><article class="hero-card"><span>SCANNER ADAPTATIVO</span><strong id="calAdaptive">SHADOW</strong><small>comparación sin alterar señal principal</small></article></div><div class="status-strip"><span>WALK-FORWARD READINESS</span><b id="calWalkForward">COLLECTING SESSIONS</b></div>
+      <div class="hero-grid three"><article class="hero-card"><span>PURGE GAP</span><strong id="calPurge">—</strong><small>sesiones excluidas entre train/test</small></article><article class="hero-card"><span>COST-AWARE EXPECTANCY</span><strong id="calNetExpectancy">—</strong><small id="calCostAssumptions">cost proxy configurable</small></article><article class="hero-card"><span>COST-AWARE PF</span><strong id="calNetPF">—</strong><small>no inventa comisiones si no configuras bps</small></article></div>
+      <div class="hero-grid four"><article class="hero-card"><span>PROBABILITY MODEL</span><strong id="calProbStage">COLLECTING</strong><small id="calProbStageDetail">Evidence ≠ probabilidad</small></article><article class="hero-card"><span>BRIER SKILL OOS</span><strong id="calBrierSkill">—</strong><small id="calBrierDetail">debe superar tasa base</small></article><article class="hero-card"><span>BASE RATE</span><strong id="calBaseRate">—</strong><small>frecuencia T1-first del histórico</small></article><article class="hero-card"><span>P&L INSTRUMENT</span><strong id="calInstrumentMode">UNDERLYING</strong><small>MODELO TEÓRICO · IV constante · spread fijo · no es precio proyectado</small></article></div>
+      <article class="panel live-validation-panel"><div class="panel-title"><div><h2>Fase de validación LIVE</h2><small>No añade otra señal. Te dice si la maquinaria de calibración ya tiene datos reales suficientes.</small></div><b id="liveValidationStage">COLLECTING</b></div><div id="liveValidationGrid" class="change-grid"><div class="muted">Esperando sesiones LIVE…</div></div><div class="source-disclosure" id="liveValidationNext">—</div></article>
+      <div class="hero-grid four"><article class="hero-card"><span>PARTIAL POOLING</span><strong id="calPooling">—</strong><small id="calPoolingDetail">Global → Expiry</small></article><article class="hero-card"><span>LOG LOSS OOS</span><strong id="calLogLoss">—</strong><small id="calLogLossDetail">modelo vs tasa base</small></article><article class="hero-card"><span>TIME TO T1</span><strong id="calResolutionTime">—</strong><small id="calResolutionDetail">tiempo histórico de resolución</small></article><article class="hero-card"><span>RISK UNIT</span><strong id="calRiskUnit">—</strong><small id="calRiskUnitDetail">unidad usada por EV/expectancy</small></article></div>
+      <div class="two-col"><article class="panel"><h2>Expected Value · ejemplos</h2><div id="evExamples" class="change-grid"><div class="muted">Esperando calibración.</div></div><p class="small muted">EV = p × R/R − (1−p) − costes. En OPTIONS el R/R se calcula sobre prima y riesgo modelado hasta invalidación; no reutiliza la geometría del subyacente.</p></article><article class="panel"><h2>Reliability · probabilidad vs observado</h2><div id="probReliability" class="change-grid"><div class="muted">Se necesita holdout fuera de muestra.</div></div><p class="small muted">La curva solo se promueve cuando mejora el Brier de la tasa base fuera de muestra.</p></article></div>
+      <article class="panel"><h2>Métricas observadas por horizonte</h2><div class="table-wrap"><table><thead><tr><th>Horizonte</th><th>N</th><th>Dirección +</th><th>T1</th><th>T2</th><th>Invalidación</th><th>MFE</th><th>MAE</th><th>Expectancy</th><th>Profit Factor</th><th>Brier*</th><th>T1 min</th><th>R Unit</th></tr></thead><tbody id="calibrationTable"></tbody></table></div><p class="small muted" id="calibrationNote">Se calculan solo con datos guardados; no convierten Evidence Score en probabilidad.</p></article>
+      <article class="panel"><h2>Evidence Score · calibración descriptiva</h2><div id="evidenceBins" class="change-grid"></div></article><div class="two-col"><article class="panel"><h2>Actionability · ¿NO EDGE filtra ruido?</h2><div id="edgeCalibration" class="change-grid"></div></article><article class="panel"><h2>Rendimiento descriptivo por régimen</h2><div id="regimeCalibration" class="change-grid"></div></article></div>
+      <div class="two-col"><article class="panel"><h2>Rendimiento por Expiry Window</h2><div id="expiryCalibration" class="change-grid"></div></article><article class="panel"><h2>Walk-forward / holdout cronológico</h2><div id="walkForwardStats" class="change-grid"></div></article></div>
+      <div class="two-col"><article class="panel"><h2>Qué variables están aportando</h2><div id="featureCalibration" class="change-grid"><div class="muted">Muestra insuficiente todavía.</div></div><p class="small muted">Correlación descriptiva contra movimiento resuelto. No convierte una variable en causal ni en probabilidad.</p></article><article class="panel"><h2>Weight Fit · SHADOW</h2><div id="weightFitStats" class="change-grid"><div class="muted">Esperando muestra fuera de sesión suficiente.</div></div><p class="small muted">Propone pesos solo para investigación y holdout. Nunca cambia el Scanner LIVE automáticamente.</p></article></div>
+      <article class="panel institutional-labs"><div class="panel-title"><div><p class="eyebrow">INSTITUTIONAL RESEARCH · SHADOW ONLY</p><h2>Labs cuantitativos</h2></div><b id="researchAuthority">Scanner LIVE sin cambios</b></div>
+        <div class="hero-grid four"><article class="hero-card"><span>VOL FORECAST</span><strong id="researchVolState">COLLECTING</strong><small>EWMA · GARCH · IV · forward</small></article><article class="hero-card"><span>MICROSTRUCTURE</span><strong id="researchMicroState">COLLECTING</strong><small>L1 ahora · L2 cuando exista</small></article><article class="hero-card"><span>CROSS-ASSET</span><strong id="researchCrossState">COLLECTING</strong><small>PCA · beta dinámica · residual</small></article><article class="hero-card"><span>ML READINESS</span><strong id="researchMlState">COLLECTING</strong><small>no entrena sin muestra suficiente</small></article></div>
+        <div class="grid-2"><div><h3>Volatility Forecast Lab</h3><div id="researchVolGrid" class="change-grid"><div class="muted">Esperando muestra.</div></div></div><div><h3>Microstructure Lab</h3><div id="researchMicroGrid" class="change-grid"><div class="muted">Esperando Tape/L1.</div></div></div></div>
+        <div class="grid-2"><div><h3>Cross-Asset Lab</h3><div id="researchCrossGrid" class="change-grid"><div class="muted">Esperando sesiones comunes.</div></div></div><div><h3>Machine Learning · Research Gate</h3><div id="researchMlGrid" class="change-grid"><div class="muted">COLLECTING.</div></div></div></div>
+        <div class="source-disclosure">Estas capas no suman votos, no cambian dirección ni accionabilidad y no se promocionan automáticamente. Primero deben demostrar mejora fuera de muestra.</div>
+      </article>
+      <article class="panel"><h2>Arquitectura de investigación</h2><div class="research-flow">SIP + OPRA + L1/L2 <i>→</i> SNAPSHOTS <i>→</i> SHADOW LABS <i>→</i> HIPÓTESIS SIN FUTURO <i>→</i> WALK-FORWARD / OOS <i>→</i> PROMOCIÓN EXPLÍCITA</div></article>
+
+        </div>
+      </details>
+    </section>
+
+    <section id="section-infrastructure" class="page-section" data-internal-only hidden>
+      <button id="backToAuditor" class="btn btn-ghost merged-back" type="button">← VOLVER A AUDITOR</button>
+      <div class="page-heading"><div><p class="eyebrow">PROVIDER FABRIC · MARKET DATA · ANALYTICS · MACRO · RESEARCH</p><h1>Data Infrastructure</h1></div></div>
+      <div class="hero-grid five">
+        <article class="hero-card"><span>ALPACA SIP</span><strong id="infraFutures">—</strong><small id="infraFuturesDetail">precio · trades · quotes · breadth</small></article>
+        <article class="hero-card"><span>ALPACA OPRA</span><strong id="infraIndex">—</strong><small id="infraIndexDetail">opciones · OI · IV · Greeks</small></article>
+        <article class="hero-card"><span>QUANT DATA</span><strong id="infraSecondary">—</strong><small id="infraSecondaryDetail">options intelligence · corroboración</small></article>
+        <article class="hero-card"><span>TASTYTRADE DXLINK</span><strong id="infraTasty">—</strong><small id="infraTastyDetail">quotes · trades · Greeks · futuros · derivados</small></article>
+        <article class="hero-card"><span>RESEARCH STORE</span><strong id="infraResearch">—</strong><small id="infraResearchDetail">SQLite/WAL</small></article>
+      </div>
+      <article class="panel provider-flow-fabric-panel">
+        <div class="panel-title"><div><p class="eyebrow">OBSERVACIONES REALES · SIN LLAMADAS DE RED</p><h2>Provider Flow Fabric</h2></div><button id="providerFlowRefresh" class="btn btn-ghost" type="button">COMPROBAR</button></div>
+        <div class="hero-grid six provider-flow-grid">
+          <article class="hero-card"><span>SISTEMA</span><strong id="providerFlowBottleneck">WAITING</strong><small id="providerFlowBottleneckDetail">DATA / STREAM / QUEUE</small></article>
+          <article class="hero-card"><span>PRECIO</span><strong id="providerFlowPrice">—</strong><small id="providerFlowPriceDetail">fuente canónica / redundancia</small></article>
+          <article class="hero-card"><span>OPCIONES</span><strong id="providerFlowOptions">—</strong><small id="providerFlowOptionsDetail">OPRA + DXLink</small></article>
+          <article class="hero-card"><span>PRINTS 5M</span><strong id="providerFlowPrints">0</strong><small id="providerFlowPrintsDetail">tape canónico observado</small></article>
+          <article class="hero-card"><span>CONTRATOS</span><strong id="providerFlowContracts">0</strong><small id="providerFlowContractsDetail">universo disponible</small></article>
+          <article class="hero-card"><span>QUANT DATA</span><strong id="providerFlowQuantData">WAITING</strong><small id="providerFlowQuantDataDetail">FEATURE_BUS options intelligence</small></article>
+        </div>
+        <div class="source-disclosure">Stack operativo: Alpaca SIP/OPRA + tastytrade/DXLink + Quant Data options intelligence + fuentes macro oficiales. La matemática estructural permanece nativa de ITM QUANT.</div>
+      </article>
+      <article class="panel"><h2>Source Health Matrix</h2><div id="sourceHealthGrid" class="change-grid"></div></article>
+      <article class="panel"><h2>Fuentes activas</h2><div class="explain-grid"><div><b>Alpaca SIP</b><span>Precio, trades, quotes, volumen y breadth de ETFs/acciones relacionados.</span></div><div><b>Alpaca OPRA</b><span>Cadena de opciones y materia prima para Gamma, Delta, IV, OI y cálculos propios de ITM QUANT.</span></div><div><b>Quant Data</b><span>Exposición Gamma/Delta/Vanna/Charm, Net Drift/Flow, Gamma Migration, IV Rank y Max Pain como evidencia normalizada. No sustituye los cálculos nativos ni la autoridad del Scanner.</span></div><div><b>tastytrade / DXLink</b><span>Quotes, trades, Summary/OI, Greeks y ecosistemas de índices, futuros y derivados disponibles; participa a la par y por calidad de cada observación.</span></div><div><b>FRED · BLS · Federal Reserve</b><span>Contexto macro y calendario oficial sin campos de suscripción adicionales dentro de ITM QUANT.</span></div></div></article>
+    </section>
+  <button id="sophiaToggle" class="sophia-toggle" type="button" aria-controls="sophiaPanel" aria-expanded="false" title="Abrir Sophia">
+    <img src="/static/branding/itm_quant_globe.png?v={{ app_version }}" alt=""><span>SOPHIA</span><i id="sophiaWatchBadge">0</i>
+  </button>
+  <aside id="sophiaPanel" class="sophia-panel" aria-live="polite" aria-label="Sophia · asistente cuantitativa">
+    <div class="sophia-head">
+      <div class="sophia-identity"><img src="/static/branding/itm_quant_globe.png?v={{ app_version }}" alt=""><div><span>SOPHIA</span><small>QUANT COPILOT · LOCAL</small></div></div>
+      <div class="sophia-head-actions"><button id="sophiaVoiceToggle" type="button" class="sophia-mini-btn" aria-pressed="true" title="Voz local">🔊</button><button id="sophiaClose" type="button" class="sophia-mini-btn" aria-label="Cerrar Sophia">×</button></div>
+    </div>
+    <div id="sophiaRuntimeLine" class="sophia-runtime-line">SELF-HOSTED · SIN CRÉDITOS · SCANNER MANDA</div>
+    <div id="sophiaMessages" class="sophia-messages"><div class="sophia-msg assistant">Estoy lista. Puedes preguntarme o pedirme que vigile una condición del mercado.</div></div>
+    <div class="sophia-watch-line"><span id="sophiaWatchText">Sin avisos activos</span><button id="sophiaClearWatches" type="button">CANCELAR AVISOS</button></div>
+    <div class="sophia-composer">
+      <button id="sophiaMic" class="sophia-mic" type="button" title="Mantén pulsado para hablar" aria-label="Hablar con Sophia">🎙</button>
+      <input id="sophiaInput" type="text" autocomplete="off" placeholder="Pregunta o pide un aviso…" aria-label="Mensaje para Sophia">
+      <button id="sophiaSend" class="sophia-send" type="button">ENVIAR</button>
+    </div>
+    <small id="sophiaMicHint" class="sophia-mic-hint">Mantén 🎙 para hablar · voz local, sin API de pago.</small>
+  </aside>
+  <div id="sophiaAlerts" class="sophia-alerts" aria-live="assertive"></div>
+
+  <button id="contextHelpToggle" class="context-help-toggle" type="button" title="Explica la sección actual">? · QUÉ ESTOY VIENDO</button>
+  <aside id="contextHelpDrawer" class="context-help-drawer" aria-live="polite">
+    <button id="contextHelpClose" type="button" aria-label="Cerrar">×</button>
+    <p class="eyebrow" id="contextHelpEyebrow">GUÍA OPERATIVA</p><h2 id="contextHelpTitle">Qué estoy viendo</h2>
+    <div class="context-help-block"><span>QUÉ ES</span><p id="contextHelpWhat">—</p></div>
+    <div class="context-help-block"><span>QUÉ MIRAR PRIMERO</span><p id="contextHelpLook">—</p></div>
+    <div class="context-help-block"><span>QUÉ SIGNIFICA</span><p id="contextHelpMeaning">—</p></div>
+    <div class="context-help-block"><span>CÓMO USARLO</span><p id="contextHelpUse">—</p></div>
+    <small>La guía explica; no añade otra señal ni cambia el Scanner.</small>
+  </aside>
+  </main>
+</div>
+<script>window.ITMQ_VERSION="{{ app_version }}";</script>
+<script src="/static/performance_core.js?v={{ app_version }}"></script>
+<script src="/static/live_scheduler.js?v={{ app_version }}"></script>
+<script src="/static/tool_runtime.js?v={{ app_version }}"></script>
+<script src="/static/binary_transport.js?v={{ app_version }}"></script>
+<script src="/static/webgpu_surface.js?v={{ app_version }}"></script>
+<script src="/static/section_help.js?v={{ app_version }}"></script>
+<script src="/static/itm_chart_engine.js?v={{ app_version }}"></script>
+<script src="/static/vendor/lightweight-charts.standalone.production.js?v=5.2.1"></script>
+<script src="/static/lightweight_trace.js?v={{ app_version }}"></script>
+<script src="/static/market_line_terminal.js?v={{ app_version }}"></script>
+<script src="/static/nextgen_terminal.js?v={{ app_version }}"></script>
+<script src="/static/ultra_charts.js?v={{ app_version }}"></script>
+<script src="/static/institutional_terminal.js?v={{ app_version }}"></script>
+<script src="/static/modern_chart_system.js?v={{ app_version }}"></script>
+<script src="/static/app.js?v={{ app_version }}"></script>
+<script src="/static/return_anomalies.js?v={{ app_version }}"></script>
+<script src="/static/aggression_delta.js?v={{ app_version }}"></script>
+<script src="/static/sophia.js?v={{ app_version }}"></script>
+</body>
+</html>

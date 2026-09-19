@@ -1,0 +1,905 @@
+/* ITM QUANT · TRACE v1.41.0 — tres paneles con eje de precio compartido
+ *
+ *   [ perfil izquierdo ]  [ heatmap + precio + niveles ]  [ perfil derecho ]
+ *
+ * Los tres paneles comparten el mismo eje vertical de precio/strike, así que una
+ * barra de la izquierda está siempre a la altura exacta del strike al que
+ * pertenece en el gráfico central.
+ *
+ * Todo lo que se dibuja viene de /api/nextgen/trace. Este archivo no calcula
+ * exposición ni dirección: sólo presenta lo que el motor ya resolvió.
+ */
+(function (global) {
+  'use strict';
+
+  const Q = global.ITMQ;
+  if (!Q) { console.error('[TRACE] falta itmq_core.js'); return; }
+
+  /* ---------------------------------------------------------- métricas */
+
+  // value(row) devuelve unidades absolutas (no millones) para poder formatear en B/M.
+  const METRICS = {
+    GEX: { label: 'GEX', value: r => Q.num(r.gamma_m) * 1e6, fmt: v => Q.signedCompact(v, 2),
+           parts: r => ({ call: Q.num(r.call_gamma_m) * 1e6, put: Q.num(r.put_gamma_m) * 1e6 }),
+           help: 'Exposición gamma por strike' },
+    DEX: { label: 'DEX', value: r => Q.num(r.delta_m) * 1e6, fmt: v => Q.signedCompact(v, 2),
+           parts: r => ({ call: Q.num(r.call_delta_m) * 1e6, put: Q.num(r.put_delta_m) * 1e6 }),
+           help: 'Exposición delta por strike' },
+    VEX: { label: 'VEX', value: r => Q.num(r.vanna_1vol_m) * 1e6, fmt: v => Q.signedCompact(v, 2), help: 'Exposición vanna por strike' },
+    CHEX: { label: 'CHEX', value: r => Q.num(r.charm_10m_m) * 1e6, fmt: v => Q.signedCompact(v, 2), help: 'Exposición charm por strike' },
+    OI: { label: 'OI', value: r => Q.num(r.oi), fmt: v => Q.compact(v, 1), signed: false,
+          parts: r => ({ call: Q.num(r.call_oi), put: -Q.num(r.put_oi) }),
+          help: 'Interés abierto total' },
+    NET_OI: { label: 'NET OI', value: r => Q.num(r.net_oi), fmt: v => Q.signedCompact(v, 1), help: 'Interés abierto call − put' },
+    VOLUME: { label: 'VOLUMEN', value: r => Q.num(r.volume_snapshot), fmt: v => Q.compact(v, 1), signed: false,
+              parts: r => ({ call: Q.num(r.call_volume), put: -Q.num(r.put_volume) }),
+              help: 'Volumen de opciones del snapshot' },
+    NET_VOLUME: { label: 'NET VOL', value: r => Q.num(r.net_volume), fmt: v => Q.signedCompact(v, 1), help: 'Volumen call − put' },
+    FLOW: { label: 'FLUJO 5M', value: r => Q.num(r.opra_directional_premium_5m), fmt: v => Q.money(v, 1), help: 'Prima direccional observada en 5 minutos' },
+    GRAVITY: { label: 'GRAVEDAD', value: r => Q.num(r.gravity_score), fmt: v => v.toFixed(0), signed: false, help: 'Relevancia estructural del strike' },
+    // La liquidez de la zona no cambia CUÁNTA gamma hay en un strike: cambia cuánto
+    // pesa ese strike. Por eso entra como métrica propia y en GRAVEDAD, no dentro
+    // del GEX. Interpolar OI entre snapshots sería inventar contratos.
+    LIQUIDITY: { label: 'LIQUIDEZ', value: r => Q.num(r.liquidity_score), fmt: v => v.toFixed(0), signed: false,
+                 help: 'Liquidez observada de la zona: OI, volumen y contratos OPRA de 5 min' },
+    // Cuánto se ha movido la exposición desde el último snapshot de cadena por la
+    // revalorización contra el precio en vivo. Es la prueba visible de que GEX y
+    // DEX se mueven con el mercado y no sólo al refrescar la cadena.
+    GEX_LIVE: { label: 'Δ GEX VIVO', value: r => Q.num(r.gamma_change_m) * 1e6, fmt: v => Q.signedCompact(v, 2),
+                help: 'Movimiento del GEX desde el snapshot, por revalorización contra el precio en vivo' },
+    DEX_LIVE: { label: 'Δ DEX VIVO', value: r => Q.num(r.delta_change_m) * 1e6, fmt: v => Q.signedCompact(v, 2),
+                help: 'Movimiento del DEX desde el snapshot, por revalorización contra el precio en vivo' },
+  };
+
+  const HEATFIELDS = {
+    joint: { key: 'joint_coherence', label: 'Γ + Δ' },
+    gamma: { key: 'gamma_intensity', label: 'GAMMA' },
+    delta: { key: 'delta_intensity', label: 'DELTA' },
+    charm: { key: 'charm_intensity', label: 'CHARM' },
+    net_oi: { key: 'net_oi_intensity', label: 'OI NETO' },
+    net_volume: { key: 'net_volume_intensity', label: 'VOLUMEN NETO' },
+  };
+
+  // Los estilos de nivel viven en el núcleo para que TRACE y el panel de flujo
+  // dibujen el mismo precio con el mismo color y el mismo nombre.
+  const LEVEL_STYLE = Q.LEVELS;
+
+  /* ------------------------------------------------------------ estado */
+
+  const S = {
+    data: null,
+    heat: null,            // bitmap precalculado
+    heatKey: '',
+    rows: [],
+    strikes: [],
+    spot: new Q.GlideValue(150),
+    priceLo: new Q.GlideValue(220),
+    priceHi: new Q.GlideValue(220),
+    left: { metric: 'DEX', glide: new Q.Glide(140), max: new Q.GlideValue(260, 1),
+            call: new Q.Glide(140), put: new Q.Glide(140) },
+    right: { metric: 'GEX', glide: new Q.Glide(140), max: new Q.GlideValue(260, 1),
+             call: new Q.Glide(140), put: new Q.Glide(140) },
+    breakdown: false,        // NETO (false) · CALL+PUT (true)
+    heatField: 'joint',
+    heatOpacity: 0.55,
+    perspective: 'MM',
+    expiry: 'ALL',
+    timeframe: '1m',
+    windowMin: 390,
+    hoverStrike: NaN,
+    // Strike fijado con un clic: sobrevive a soltar el ratón, que es lo que permite
+    // leer sus números sin que desaparezcan.
+    pinnedStrike: NaN,
+    onStrike: null,
+    hoverTime: NaN,
+    link: new Q.TimeLink(),
+    panels: {},
+    priceMode: 'candles',
+    showLevels: true,
+    showPrints: true,
+  };
+
+  const GUT = { left: 48, right: 48 };     // carriles de etiquetas de precio
+  const PAD = { top: 12, bottom: 26 };
+
+  /* ------------------------------------------------- dominio del eje Y */
+
+  function computePriceDomain() {
+    const d = S.data || {};
+    const vals = [];
+    for (const c of d.candles || []) { vals.push(Q.num(c.h), Q.num(c.l)); }
+    const spot = Q.num((d.profiles || {}).spot, NaN);
+    if (Q.isNum(spot)) vals.push(spot);
+    // Los strikes con exposición relevante tienen que caber en pantalla; si no,
+    // el perfil lateral mostraría barras sin su strike visible.
+    const rows = S.rows;
+    if (rows.length) {
+      const m = METRICS[S.left.metric], m2 = METRICS[S.right.metric];
+      let peak = 0;
+      for (const r of rows) peak = Math.max(peak, Math.abs(m.value(r)), Math.abs(m2.value(r)));
+      for (const r of rows) {
+        if (Math.abs(m.value(r)) > peak * 0.12 || Math.abs(m2.value(r)) > peak * 0.12) vals.push(Q.num(r.strike));
+      }
+    }
+    const fin = vals.filter(Q.isNum);
+    if (!fin.length) return null;
+    let lo = Math.min.apply(null, fin), hi = Math.max.apply(null, fin);
+
+    // La escalera de strikes puede extenderse mucho más que el recorrido del precio.
+    // Sin límite, la vela queda comprimida en unos pocos píxeles; con un límite
+    // demasiado estrecho desaparecen los strikes del perfil lateral. Se acota la
+    // ventana a lo que sea mayor entre el recorrido del precio y siete escalones de
+    // strike, de forma que ambas lecturas caben en cualquier régimen.
+    const pv = [];
+    for (const c of d.candles || []) { pv.push(Q.num(c.h), Q.num(c.l)); }
+    const pf = pv.filter(Q.isNum);
+    const anchor = Q.isNum(spot) ? spot : (pf.length ? (Math.min.apply(null, pf) + Math.max.apply(null, pf)) / 2 : NaN);
+    if (Q.isNum(anchor)) {
+      const pSpan = pf.length ? Math.max(Math.max.apply(null, pf) - Math.min.apply(null, pf), 0) : 0;
+      const step = strikeStep();
+      const half = Math.max(pSpan * 1.6, step * 7, Math.abs(anchor) * 0.0015);
+      lo = Math.max(lo, anchor - half);
+      hi = Math.min(hi, anchor + half);
+    }
+    const pad = Math.max((hi - lo) * 0.08, Math.abs(hi) * 0.0006, 0.05);
+    return { lo: lo - pad, hi: hi + pad };
+  }
+
+  /** ¿El eje de precio compartido sigue en transición? No lo hace avanzar. */
+  function priceAxisSettling() {
+    for (const g of [S.priceLo, S.priceHi, S.spot]) {
+      if (Q.isNum(g.tgt) && Q.isNum(g.cur) && Math.abs(g.cur - g.tgt) > 1e-7) return true;
+    }
+    return false;
+  }
+
+  function priceScale(box) {
+    const lo = S.priceLo.get(), hi = S.priceHi.get();
+    if (!Q.isNum(lo) || !Q.isNum(hi) || hi <= lo) return null;
+    return Q.scale(lo, hi, box.y + box.h, box.y);
+  }
+
+  function priceTicks() {
+    const lo = S.priceLo.get(), hi = S.priceHi.get();
+    if (!Q.isNum(lo) || !Q.isNum(hi)) return [];
+    return Q.niceTicks(lo, hi, 12);
+  }
+
+  /* --------------------------------------------------- heatmap bitmap */
+
+  /**
+   * El heatmap se rasteriza una sola vez por snapshot en un canvas del tamaño
+   * exacto de la matriz. Al pintarlo escalado con suavizado se obtienen las
+   * manchas continuas, y el coste por frame es un único drawImage.
+   */
+  function buildHeatBitmap() {
+    const h = (S.data || {}).heatmap_history;
+    const field = HEATFIELDS[S.heatField];
+    if (!h || h.ready !== true || !field) { S.heat = null; return; }
+    const m = h[field.key];
+    const strikes = h.strikes || [];
+    const times = h.times || [];
+    if (!Array.isArray(m) || !m.length || !strikes.length || !times.length) { S.heat = null; return; }
+
+    const key = [S.heatField, h.incremental_key, times.length, strikes.length].join('|');
+    if (key === S.heatKey && S.heat) return;
+    S.heatKey = key;
+
+    // Matriz esperada: [strike][time] o [time][strike]. Se detecta por dimensiones.
+    const rowsAreStrikes = m.length === strikes.length;
+    const W = times.length, H = strikes.length;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ictx = cv.getContext('2d');
+    const img = ictx.createImageData(W, H);
+
+    const pos = hexRGB(Q.token('--heat-pos', '#22c55e'));
+    const neg = hexRGB(Q.token('--heat-neg', '#ef4444'));
+
+    for (let yi = 0; yi < H; yi++) {
+      // fila 0 del bitmap = strike más alto (el eje de precio crece hacia arriba)
+      const si = H - 1 - yi;
+      for (let xi = 0; xi < W; xi++) {
+        const raw = rowsAreStrikes ? (m[si] || [])[xi] : (m[xi] || [])[si];
+        const v = Q.clamp(Q.num(raw, 0), -1, 1);
+        const a = Math.abs(v);
+        const c = v >= 0 ? pos : neg;
+        const o = (yi * W + xi) * 4;
+        // Por debajo del umbral el campo es ruido: dejarlo transparente evita que
+        // el fondo entero se tiña y permite ver dónde hay concentración real.
+        const k = a < 0.07 ? 0 : Math.pow((a - 0.07) / 0.93, 0.78);
+        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
+        img.data[o + 3] = Math.round(k * 240);
+      }
+    }
+    ictx.putImageData(img, 0, 0);
+    S.heat = { canvas: cv, times, strikes, t0: Q.parseTime(times[0]), t1: Q.parseTime(times[times.length - 1]) };
+  }
+
+  function hexRGB(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return [148, 163, 184];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  /* ------------------------------------------------- panel de perfiles */
+
+  function drawProfile(ctx, env, side) {
+    const cfg = S[side];
+    const box = {
+      x: side === 'left' ? GUT.left : 0,
+      y: PAD.top,
+      w: env.w - GUT.left,
+      h: env.h - PAD.top - PAD.bottom,
+    };
+    if (side === 'right') { box.x = 0; box.w = env.w - GUT.right; }
+    if (box.w <= 4 || box.h <= 4) return false;
+
+    const sy = priceScale(box);
+    if (!sy) { emptyPanel(ctx, env, 'SIN ESTRUCTURA'); return false; }
+
+    const metric = METRICS[cfg.metric] || METRICS.GEX;
+    const signed = metric.signed !== false;
+
+    // Escala X del perfil: se desliza hacia el nuevo máximo para que el eje no salte.
+    let peak = 0;
+    const parts = S.breakdown && typeof metric.parts === 'function' ? metric.parts : null;
+    for (const r of S.rows) {
+      peak = Math.max(peak, Math.abs(metric.value(r)));
+      if (parts) {
+        const p = parts(r);
+        peak = Math.max(peak, Math.abs(Q.num(p.call)), Math.abs(Q.num(p.put)));
+      }
+    }
+    cfg.max.set(peak > 0 ? peak : 1);
+    const mx = Math.max(cfg.max.get(), 1e-9);
+
+    // El eje cero va al centro para métricas con signo y al borde interior si no.
+    const zeroX = signed ? box.x + box.w * 0.5 : (side === 'left' ? box.x + box.w : box.x);
+    const half = signed ? box.w * 0.5 : box.w;
+    const sx = v => zeroX + (side === 'left' && !signed ? -1 : 1) * (v / mx) * half * 0.92;
+
+    // Rejilla de precio + etiquetas en el borde exterior.
+    const ticks = priceTicks();
+    Q.gridY(ctx, box, sy, ticks, t => t.toFixed(t >= 1000 ? 0 : 2), {
+      labelSide: side === 'left' ? 'left' : 'right',
+    });
+    if (side === 'right') {
+      // segundo carril de etiquetas: extremo derecho de la terminal
+      ctx.save();
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      for (const t of ticks) ctx.fillText(t.toFixed(t >= 1000 ? 0 : 2), box.x + box.w + 6, sy(t));
+      ctx.restore();
+    }
+
+    // Eje cero
+    ctx.save();
+    ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 1);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(zeroX) + 0.5, box.y); ctx.lineTo(Math.round(zeroX) + 0.5, box.y + box.h); ctx.stroke();
+    ctx.restore();
+
+    // Barras por strike. La altura se deriva del espaciado real entre strikes
+    // para que no se solapen ni dejen huecos al cambiar el zoom vertical.
+    const step = strikeStep();
+    const barH = Math.max(2, Math.min(18, Math.abs(sy(0) - sy(step)) * 0.74));
+    const posC = Q.token('--pos', '#22c55e');
+    const negC = Q.token('--neg', '#ef4444');
+
+    const showParts = S.breakdown && hasBreakdown(side);
+    const callC = Q.token('--call', '#2dd4bf');
+    const putC = Q.token('--put', '#f472b6');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
+    for (const r of S.rows) {
+      const k = Q.num(r.strike);
+      const y = sy(k);
+      if (y < box.y - barH || y > box.y + box.h + barH) continue;
+      const hovered = Q.isNum(S.hoverStrike) && Math.abs(S.hoverStrike - k) < step * 0.5;
+
+      if (showParts) {
+        // Dos barritas por strike: arriba lo que aportan las calls, abajo lo que
+        // aportan las puts. Juntas suman el neto, pero se ve de qué está hecho.
+        const half = Math.max(1, barH / 2 - 0.5);
+        for (const [val, col, dy] of [[cfg.call.get(k), callC, -half / 2 - 0.5],
+                                      [cfg.put.get(k), putC, half / 2 + 0.5]]) {
+          if (Math.abs(val) < mx * 0.0015) continue;
+          const x = Q.clamp(sx(val), box.x, box.x + box.w);
+          ctx.fillStyle = Q.alpha(col, hovered ? 1 : 0.88);
+          ctx.fillRect(Math.min(zeroX, x), y + dy - half / 2, Math.max(1, Math.abs(x - zeroX)), half);
+        }
+        if (hovered) {
+          ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'), 0.7);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(box.x + 0.5, Math.round(y - barH / 2) + 0.5, box.w - 1, barH);
+        }
+        continue;
+      }
+
+      const v = cfg.glide.get(k);
+      if (Math.abs(v) < mx * 0.0015) continue;
+      const x = Q.clamp(sx(v), box.x, box.x + box.w);
+      ctx.fillStyle = Q.alpha(v >= 0 ? posC : negC, hovered ? 1 : 0.86);
+      const x0 = Math.min(zeroX, x), w = Math.abs(x - zeroX);
+      ctx.fillRect(x0, y - barH / 2, Math.max(1, w), barH);
+      if (hovered) {
+        ctx.strokeStyle = Q.token('--text', '#e6edf7');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y - barH / 2) + 0.5, Math.max(1, w), barH);
+      }
+    }
+    ctx.restore();
+
+    if (showParts) {
+      ctx.save();
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = side === 'left' ? 'left' : 'right';
+      const lx = side === 'left' ? box.x + 3 : box.x + box.w - 3;
+      ctx.fillStyle = callC; ctx.fillText('CALL', lx, box.y + 2);
+      ctx.fillStyle = putC; ctx.fillText('PUT', lx, box.y + 12);
+      ctx.restore();
+    }
+
+    // Línea del spot para anclar visualmente los tres paneles.
+    const spot = S.spot.get();
+    if (Q.isNum(spot)) {
+      Q.levelLine(ctx, box, sy(spot), Q.alpha(Q.token('--text-dim', '#8494ad'), 0.55), { dash: [2, 3] });
+    }
+
+    // Eje X inferior con los topes de magnitud.
+    ctx.save();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+    ctx.textBaseline = 'top';
+    const ay = box.y + box.h + 6;
+    if (signed) {
+      ctx.textAlign = 'left'; ctx.fillText(metric.fmt(-mx), box.x + 2, ay);
+      ctx.textAlign = 'center'; ctx.fillText('0', zeroX, ay);
+      ctx.textAlign = 'right'; ctx.fillText(metric.fmt(mx), box.x + box.w - 2, ay);
+    } else {
+      ctx.textAlign = side === 'left' ? 'left' : 'right';
+      ctx.fillText(metric.fmt(mx), side === 'left' ? box.x + 2 : box.x + box.w - 2, ay);
+    }
+    ctx.restore();
+
+    const gliding = cfg.glide.step(env.dt);
+    const calling = cfg.call.step(env.dt);
+    const putting = cfg.put.step(env.dt);
+    const scaling = cfg.max.step(env.dt);
+    return gliding || calling || putting || scaling || priceAxisSettling();
+  }
+
+  /** Carga en el panel la métrica activa y, si existe, su desglose call/put. */
+  function applyMetric(side) {
+    const cfg = S[side];
+    const m = METRICS[cfg.metric] || METRICS.GEX;
+    cfg.glide.setAll(S.rows.map(r => [Q.num(r.strike), m.value(r)]));
+    if (typeof m.parts === 'function') {
+      cfg.call.setAll(S.rows.map(r => [Q.num(r.strike), m.parts(r).call]));
+      cfg.put.setAll(S.rows.map(r => [Q.num(r.strike), m.parts(r).put]));
+    } else {
+      cfg.call.setAll([]);
+      cfg.put.setAll([]);
+    }
+  }
+
+  /** ¿La métrica activa puede desglosarse en call y put? */
+  function hasBreakdown(side) {
+    const m = METRICS[S[side].metric];
+    return !!(m && typeof m.parts === 'function');
+  }
+
+  function strikeStep() {
+    const s = S.strikes;
+    if (s.length < 2) return 1;
+    let min = Infinity;
+    for (let i = 1; i < s.length; i++) min = Math.min(min, Math.abs(s[i] - s[i - 1]));
+    return Q.isNum(min) && min > 0 ? min : 1;
+  }
+
+  function emptyPanel(ctx, env, msg) {
+    ctx.save();
+    ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(msg, env.w / 2, env.h / 2);
+    ctx.restore();
+  }
+
+  /* ---------------------------------------------------- panel central */
+
+  function drawMain(ctx, env) {
+    const box = { x: GUT.left, y: PAD.top, w: env.w - GUT.left - GUT.right, h: env.h - PAD.top - PAD.bottom };
+    if (box.w <= 8 || box.h <= 8) return false;
+
+    const d = S.data;
+    if (!d) { emptyPanel(ctx, env, 'CARGANDO TRACE…'); return false; }
+
+    const sy = priceScale(box);
+    if (!sy) { emptyPanel(ctx, env, 'SIN DATOS DE PRECIO'); return false; }
+
+    const candles = d.candles || [];
+    let t0 = S.link.t0, t1 = S.link.t1;
+    const bounds = timeBounds(candles);
+    // La ventana temporal es COMPARTIDA con Flujo de Órdenes, y el TRACE la aceptaba
+    // sin condición. Si el otro panel la fijaba más ancha que las velas del TRACE
+    // —su tape de acciones arranca en premarket y el suyo no—, el precio y el heatmap
+    // se comprimían contra un lado y sobraba la mitad del lienzo. Siguiendo en vivo el
+    // TRACE manda sobre su propio eje; en cuanto el usuario arrastra o hace zoom
+    // (follow=false) vuelve a respetar la ventana compartida, que es lo que permite
+    // comparar paneles.
+    if (S.link.follow && bounds) {
+      t0 = bounds.t0; t1 = bounds.t1;
+      S.link.setWindow(t0, t1, { silent: true });
+    } else if (!Q.isNum(t0) || !Q.isNum(t1)) {
+      if (!bounds) { emptyPanel(ctx, env, 'SIN VELAS'); return false; }
+      t0 = bounds.t0; t1 = bounds.t1;
+      S.link.setWindow(t0, t1, { silent: true });
+    }
+    if (!Q.isNum(t0) || !Q.isNum(t1) || t1 <= t0) { emptyPanel(ctx, env, 'SIN VELAS'); return false; }
+    const sx = Q.scale(t0, t1, box.x, box.x + box.w);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
+
+    // 1 · heatmap estructural de fondo
+    if (S.heat && S.heatOpacity > 0.01) {
+      const hm = S.heat;
+      const lo = Math.min.apply(null, hm.strikes), hi = Math.max.apply(null, hm.strikes);
+      const step = hm.strikes.length > 1 ? (hi - lo) / (hm.strikes.length - 1) : 1;
+      const yTop = sy(hi + step / 2), yBot = sy(lo - step / 2);
+      const tSpan = hm.t1 - hm.t0;
+      const cellT = hm.times.length > 1 ? tSpan / (hm.times.length - 1) : 60_000;
+      const xL = sx(hm.t0 - cellT / 2), xR = sx(hm.t1 + cellT / 2);
+      if (xR > xL && yBot > yTop) {
+        ctx.save();
+        ctx.globalAlpha = S.heatOpacity;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(hm.canvas, xL, yTop, xR - xL, yBot - yTop);
+        ctx.restore();
+      }
+    }
+
+    // 2 · rejilla
+    const ticks = priceTicks();
+    Q.gridY(ctx, box, sy, ticks, t => t.toFixed(t >= 1000 ? 0 : 2), { labelSide: 'left' });
+    ctx.save();
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    for (const t of ticks) ctx.fillText(t.toFixed(t >= 1000 ? 0 : 2), box.x + box.w + 6, sy(t));
+    ctx.restore();
+    Q.axisX(ctx, box, sx, t0, t1, { grid: true });
+
+    // 3 · precio
+    if (S.priceMode === 'line') drawPriceLine(ctx, box, sx, sy, candles);
+    else drawCandles(ctx, box, sx, sy, candles, d.bar_interval_ms);
+
+    // 4 · prints de opciones observados
+    if (S.showPrints) drawPrints(ctx, box, sx, sy, d.option_prints || []);
+
+    ctx.restore();
+
+    // 5 · niveles estructurales con etiquetas encadenadas
+    if (S.showLevels) drawLevels(ctx, box, sy, d.levels || []);
+
+    // 6 · precio actual en ambos bordes (como en la referencia)
+    const spot = S.spot.get();
+    if (Q.isNum(spot)) {
+      const y = sy(spot);
+      if (y >= box.y && y <= box.y + box.h) {
+        Q.levelLine(ctx, box, y, Q.alpha(Q.token('--accent', '#38bdf8'), 0.8), { dash: [4, 3] });
+        const txt = '$' + spot.toFixed(spot >= 1000 ? 2 : 2);
+        Q.chip(ctx, box.x - 4, y, txt, { align: 'right', bg: Q.token('--accent', '#38bdf8'), color: '#04121f' });
+        Q.chip(ctx, box.x + box.w + 4, y, txt, { align: 'left', bg: Q.token('--accent', '#38bdf8'), color: '#04121f' });
+      }
+    }
+
+    // 7 · crosshair
+    if (S.panels.main && S.panels.main.pointer.inside) drawCrosshair(ctx, box, sx, sy);
+
+    let moving = S.spot.step(env.dt);
+    moving = S.priceLo.step(env.dt) || moving;
+    moving = S.priceHi.step(env.dt) || moving;
+    return moving;
+  }
+
+  function timeBounds(candles) {
+    if (!candles.length) return null;
+    const first = Q.parseTime(candles[0].t);
+    const last = Q.parseTime(candles[candles.length - 1].t);
+    if (!Q.isNum(first) || !Q.isNum(last)) return null;
+    const pad = Math.max((last - first) * 0.06, 120_000);
+    return { t0: first, t1: last + pad };
+  }
+
+  function drawCandles(ctx, box, sx, sy, candles, intervalMs) {
+    if (!candles.length) return;
+    const iv = Q.num(intervalMs, 60_000);
+    const bw = Math.max(2.2, Math.min(14, (sx(iv) - sx(0)) * 0.62));
+    const posC = Q.token('--pos', '#22c55e');
+    const negC = Q.token('--neg', '#ef4444');
+    // TRACE comparte deliberadamente el eje Y con strikes/niveles. Cuando el precio
+    // se mueve pocos centavos y el mapa cubre 8–15 strikes, un cuerpo OHLC real puede
+    // medir <1 px y desaparecer aunque existan 100+ velas. La geometría vertical
+    // mínima es SÓLO de rasterización: el centro sigue exactamente en el precio real,
+    // no cambia el eje ni se inventa movimiento.
+    const MIN_BODY_PX = 3.0;
+    const MIN_WICK_PX = 5.0;
+    ctx.save();
+    ctx.lineWidth = 1.35;
+    for (const c of candles) {
+      const t = Q.parseTime(c.t);
+      if (!Q.isNum(t)) continue;
+      const x = sx(t + iv / 2);
+      if (x < box.x - bw || x > box.x + box.w + bw) continue;
+      const o = Q.num(c.o, NaN), h = Q.num(c.h, NaN), l = Q.num(c.l, NaN), cl = Q.num(c.c, NaN);
+      if (![o, h, l, cl].every(Q.isNum)) continue;
+      const up = cl >= o;
+      const col = up ? posC : negC;
+
+      let wickTop = Math.min(sy(h), sy(l));
+      let wickBot = Math.max(sy(h), sy(l));
+      if ((wickBot - wickTop) < MIN_WICK_PX) {
+        const mid = (wickTop + wickBot) / 2;
+        wickTop = mid - MIN_WICK_PX / 2;
+        wickBot = mid + MIN_WICK_PX / 2;
+      }
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, wickTop);
+      ctx.lineTo(Math.round(x) + 0.5, wickBot);
+      ctx.stroke();
+
+      let bodyTop = Math.min(sy(o), sy(cl));
+      let bodyBot = Math.max(sy(o), sy(cl));
+      if ((bodyBot - bodyTop) < MIN_BODY_PX) {
+        const mid = (bodyTop + bodyBot) / 2;
+        bodyTop = mid - MIN_BODY_PX / 2;
+        bodyBot = mid + MIN_BODY_PX / 2;
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(x - bw / 2, bodyTop, bw, bodyBot - bodyTop);
+    }
+    ctx.restore();
+  }
+
+  function drawPriceLine(ctx, box, sx, sy, candles) {
+    if (!candles.length) return;
+    ctx.save();
+    ctx.strokeStyle = Q.token('--price', '#7aa2f7');
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let started = false;
+    for (const c of candles) {
+      const t = Q.parseTime(c.t);
+      const v = Q.num(c.c, NaN);
+      if (!Q.isNum(t) || !Q.isNum(v)) continue;
+      const x = sx(t), y = sy(v);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPrints(ctx, box, sx, sy, prints) {
+    if (!prints.length) return;
+    let peak = 0;
+    for (const p of prints) peak = Math.max(peak, Math.abs(Q.num(p.premium)));
+    if (peak <= 0) return;
+    ctx.save();
+    for (const p of prints) {
+      const t = Q.parseTime(p.t), px = Q.num(p.price, NaN), prem = Math.abs(Q.num(p.premium));
+      if (!Q.isNum(t) || !Q.isNum(px) || prem <= 0) continue;
+      const x = sx(t), y = sy(px);
+      if (x < box.x - 10 || x > box.x + box.w + 10) continue;
+      const rel = prem / peak;
+      if (rel < 0.08) continue;
+      const r = 2 + rel * 6;
+      const dir = Q.num(p.direction, 0);
+      const col = dir > 0 ? Q.token('--pos', '#22c55e') : dir < 0 ? Q.token('--neg', '#ef4444') : Q.token('--gold', '#d9a441');
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = Q.alpha(col, 0.55); ctx.fill();
+      ctx.strokeStyle = Q.alpha(col, 0.95); ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawLevels(ctx, box, sy, levels) {
+    const items = [];
+    for (const lv of levels) {
+      const p = Q.num(lv.price, NaN);
+      if (!Q.isNum(p)) continue;
+      const y = sy(p);
+      if (y < box.y - 2 || y > box.y + box.h + 2) continue;
+      const st = LEVEL_STYLE[lv.kind] || { color: '--text-dim', order: 9 };
+      items.push({ y, price: p, name: lv.name || st.label || lv.kind, color: Q.token(st.color, '#8494ad'), order: st.order || 9 });
+    }
+    if (!items.length) return;
+    items.sort((a, b) => a.order - b.order);
+    // La línea se dibuja para todos los niveles; la etiqueta sólo para los seis más
+    // relevantes, porque con más el bloque de texto tapa la zona del precio.
+    for (const it of items) Q.levelLine(ctx, box, it.y, Q.alpha(it.color, 0.45), { dash: [6, 5] });
+    const shown = items.slice(0, 6);
+    const placed = Q.stackLabels(shown.map(it => ({ ...it })), 17);
+    for (const it of placed) {
+      const digits = it.price >= 1000 ? 0 : 2;
+      Q.chip(ctx, box.x + 8, Q.clamp(it.y, box.y + 9, box.y + box.h - 9),
+        `${it.name} ${it.price.toFixed(digits)}`,
+        { bg: Q.alpha(it.color, 0.9), color: '#06101c' });
+    }
+  }
+
+  function drawCrosshair(ctx, box, sx, sy) {
+    const p = S.panels.main.pointer;
+    if (!Q.isNum(p.x) || !Q.isNum(p.y)) return;
+    if (p.x < box.x || p.x > box.x + box.w || p.y < box.y || p.y > box.y + box.h) return;
+    ctx.save();
+    ctx.strokeStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.6);
+    ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(box.x, Math.round(p.y) + 0.5); ctx.lineTo(box.x + box.w, Math.round(p.y) + 0.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(Math.round(p.x) + 0.5, box.y); ctx.lineTo(Math.round(p.x) + 0.5, box.y + box.h); ctx.stroke();
+    ctx.restore();
+    const price = sy.invert(p.y);
+    Q.chip(ctx, box.x + box.w + 4, p.y, price.toFixed(price >= 1000 ? 1 : 2),
+      { align: 'left', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7') });
+    const t = sx.invert(p.x);
+    Q.chip(ctx, p.x, box.y + box.h + 12, Q.hhmm(t),
+      { align: 'center', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7') });
+  }
+
+  /* -------------------------------------------------------- interacción */
+
+  function onMainWheel(ev, panel) {
+    ev.preventDefault();
+    const box = { x: GUT.left, w: panel.w - GUT.left - GUT.right };
+    if (!Q.isNum(S.link.t0)) return;
+    const sx = Q.scale(S.link.t0, S.link.t1, box.x, box.x + box.w);
+    const anchor = sx.invert(panel.pointer.x);
+    S.link.zoomAt(ev.deltaY > 0 ? 1.12 : 0.89, anchor);
+  }
+
+  let dragX = NaN;
+  function onMainDown(pointer) { dragX = pointer.x; }
+  function onMainMove(pointer, ev, panel) {
+    // strike bajo el cursor: sincroniza el resaltado de los tres paneles
+    const box = { y: PAD.top, h: panel.h - PAD.top - PAD.bottom };
+    const sy = priceScale(box);
+    if (sy) S.hoverStrike = nearestStrike(sy.invert(pointer.y));
+    if (pointer.down && Q.isNum(dragX)) {
+      const box2 = { x: GUT.left, w: panel.w - GUT.left - GUT.right };
+      const perPx = S.link.span() / Math.max(1, box2.w);
+      S.link.panBy(-(pointer.x - dragX) * perPx);
+      dragX = pointer.x;
+    }
+    invalidateAll();
+  }
+  function onMainUp() { dragX = NaN; }
+
+  function onSideMove(side) {
+    return function (pointer, ev, panel) {
+      const box = { y: PAD.top, h: panel.h - PAD.top - PAD.bottom };
+      const sy = priceScale(box);
+      if (sy) S.hoverStrike = nearestStrike(sy.invert(pointer.y));
+      invalidateAll();
+    };
+  }
+
+  /**
+   * Un clic FIJA el strike. Pasar el ratón por encima ya resaltaba la fila, pero
+   * para leer sus números hay que poder soltar el ratón sin que desaparezcan.
+   * Volver a hacer clic en el mismo strike lo suelta.
+   */
+  function onSideClick(side) {
+    return function (pointer, ev, panel) {
+      const box = { y: PAD.top, h: panel.h - PAD.top - PAD.bottom };
+      const sy = priceScale(box);
+      if (!sy) return;
+      const k = nearestStrike(sy.invert(pointer.y));
+      S.pinnedStrike = (Q.isNum(S.pinnedStrike) && Math.abs(S.pinnedStrike - k) < 1e-9) ? NaN : k;
+      emitStrike();
+      invalidateAll();
+    };
+  }
+
+  function emitStrike() {
+    if (typeof S.onStrike !== 'function') return;
+    const k = Q.isNum(S.pinnedStrike) ? S.pinnedStrike : NaN;
+    try { S.onStrike(Q.isNum(k) ? strikeRow(k) : null); }
+    catch (err) { console.error('[TRACE] onStrike', err); }
+  }
+
+  /** Todo lo que el motor publica de un strike, con su desglose call/put. */
+  function strikeRow(k) {
+    const row = (S.rows || []).find(r => Math.abs(Q.num(r.strike) - Q.num(k)) < 1e-9);
+    if (!row) return null;
+    // S.spot es un GlideValue (animación del eje), no un número: su valor se lee
+    // con get(). El spot publicado por el motor es la referencia correcta.
+    const spot = Q.num((S.data && S.data.profiles || {}).spot,
+      (S.spot && typeof S.spot.get === 'function') ? S.spot.get() : NaN);
+    return {
+      strike: Q.num(row.strike),
+      distance: Q.isNum(spot) ? Q.num(row.strike) - spot : null,
+      distance_pct: Q.isNum(spot) && spot ? (Q.num(row.strike) - spot) / spot * 100 : null,
+      gex: Q.num(row.gamma_m) * 1e6,
+      gex_call: Q.num(row.call_gamma_m) * 1e6,
+      gex_put: Q.num(row.put_gamma_m) * 1e6,
+      gex_live: Q.num(row.gamma_change_m) * 1e6,
+      dex: Q.num(row.delta_m) * 1e6,
+      dex_call: Q.num(row.call_delta_m) * 1e6,
+      dex_put: Q.num(row.put_delta_m) * 1e6,
+      dex_live: Q.num(row.delta_change_m) * 1e6,
+      vex: Q.num(row.vanna_1vol_m) * 1e6,
+      chex: Q.num(row.charm_10m_m) * 1e6,
+      oi: Q.num(row.oi), call_oi: Q.num(row.call_oi), put_oi: Q.num(row.put_oi),
+      net_oi: Q.num(row.net_oi),
+      volume: Q.num(row.volume_snapshot),
+      call_volume: Q.num(row.call_volume), put_volume: Q.num(row.put_volume),
+      net_volume: Q.num(row.net_volume),
+      liquidity: Q.num(row.liquidity_score),
+      gravity: Q.num(row.gravity_score),
+      state: row.gamma_delta_state,
+      joint: Q.num(row.gamma_delta_joint_score),
+      opra_contracts_5m: Q.num(row.opra_contracts_5m),
+      opra_premium_5m: Q.num(row.opra_premium_5m),
+    };
+  }
+
+  function nearestStrike(price) {
+    if (!Q.isNum(price) || !S.strikes.length) return NaN;
+    let best = NaN, bd = Infinity;
+    for (const k of S.strikes) { const d = Math.abs(k - price); if (d < bd) { bd = d; best = k; } }
+    return best;
+  }
+
+  function invalidateAll() { for (const k in S.panels) S.panels[k].invalidate(); }
+
+  /* ------------------------------------------------------------- datos */
+
+  function applyData(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    const prof = payload.profiles || {};
+    const lastCandle = (payload.candles || []).slice(-1)[0] || {};
+    // La última vela recibe ticks entre snapshots estructurales; para relaciones
+    // espaciales (Walls vs precio) manda ese spot observado más reciente.
+    const spot = Q.num(lastCandle.c, Q.num(prof.spot, NaN));
+    // Invariante de presentación: una Call Wall nunca se dibuja por debajo (o
+    // encima ya atravesada) del spot LIVE y una Put Wall nunca por encima. Si el
+    // precio cruza un muro entre dos snapshots estructurales, ocultamos ese nivel
+    // hasta que el motor recalcule; jamás lo "movemos" ni inventamos otro.
+    const safeLevels = (Array.isArray(payload.levels) ? payload.levels : []).filter(l => {
+      const p = Q.num(l && l.price, NaN);
+      if (!Q.isNum(p) || !Q.isNum(spot)) return Q.isNum(p);
+      if (l.kind === 'call_wall') return p > spot;
+      if (l.kind === 'put_wall') return p < spot;
+      return true;
+    });
+    S.data = Object.assign({}, payload, { levels: safeLevels });
+
+    S.rows = Array.isArray(prof.rows) ? prof.rows.filter(r => Q.isNum(Q.num(r.strike, NaN))) : [];
+    S.strikes = S.rows.map(r => Q.num(r.strike)).sort((a, b) => a - b);
+
+    if (Q.isNum(spot)) S.spot.set(spot);
+
+    const dom = computePriceDomain();
+    if (dom) { S.priceLo.set(dom.lo); S.priceHi.set(dom.hi); }
+
+    for (const side of ['left', 'right']) applyMetric(side);
+
+    try { buildHeatBitmap(); }
+    catch (err) { S.heat = null; S.heatKey = ''; console.warn('[TRACE] heatmap', err); }
+
+    // Ventana temporal: en modo seguimiento se re-ancla a la última vela.
+    const b = timeBounds(payload.candles || []);
+    if (b) {
+      if (!Q.isNum(S.link.t0) || S.link.follow) S.link.setWindow(b.t0, b.t1, { silent: true });
+      else if (b.t1 > S.link.t1) { /* histórico en pantalla: no se mueve solo */ }
+    }
+
+    for (const k in S.panels) { S.panels[k].animate(true); S.panels[k].invalidate(); }
+    try { renderHud(S.data); }
+    catch (err) { console.warn('[TRACE] hud', err); }
+    // El detalle del strike fijado se refresca con cada ciclo de datos.
+    if (Q.isNum(S.pinnedStrike)) emitStrike();
+  }
+
+  function renderHud(d) {
+    const set = (id, v) => { const x = document.getElementById(id); if (x) x.textContent = v === null || v === undefined || v === '' ? '—' : v; };
+    const prof = d.profiles || {};
+    const lastCandle = (d.candles || []).slice(-1)[0] || {};
+    const liveSpot = Q.num(lastCandle.c, Q.num(prof.spot, NaN));
+    const dec = d.decision || {};
+    const ms = d.market_state || {};
+    set('traceSpot', Q.isNum(liveSpot) ? liveSpot.toFixed(2) : '—');
+    set('traceGammaNet', Q.signedCompact(Q.num(prof.gamma_net_m) * 1e6, 2));
+    set('traceDeltaNet', Q.signedCompact(Q.num(prof.delta_net_m) * 1e6, 2));
+    set('traceGammaCenter', Q.isNum(Q.num(prof.gamma_center, NaN)) ? Q.num(prof.gamma_center).toFixed(2) : '—');
+    set('traceDeltaCenter', Q.isNum(Q.num(prof.delta_center, NaN)) ? Q.num(prof.delta_center).toFixed(2) : '—');
+    set('traceDirection', dec.direction || '—');
+    set('traceEdge', dec.edge_state || '—');
+    set('tracePhase', ms.phase || '—');
+    set('traceFlow5m', Q.money(Q.num(prof.opra_directional_premium_5m), 1));
+    const lv = {};
+    for (const l of d.levels || []) lv[l.kind] = l.price;
+    set('traceCallWall', fmtLevel(lv.call_wall));
+    set('tracePutWall', fmtLevel(lv.put_wall));
+    set('traceFlip', fmtLevel(lv.flip));
+    set('traceVolTrigger', fmtLevel(lv.vol_trigger));
+    const age = Q.num(prof.snapshot_age_seconds, NaN);
+    set('traceSnapshotAge', Q.isNum(age) ? age.toFixed(0) + 's' : '—');
+  }
+
+  function fmtLevel(v) {
+    const x = Q.num(v, NaN);
+    return Q.isNum(x) ? x.toFixed(x >= 1000 ? 0 : 2) : '—';
+  }
+
+  /* ------------------------------------------------------------- setup */
+
+  function mount(ids) {
+    const mk = (host, draw, opts) => host ? new Q.Panel(host, draw, opts) : null;
+    S.panels.left = mk(ids.left, (ctx, env) => drawProfile(ctx, env, 'left'), {
+      id: 'trace:left', onPointer: onSideMove('left'), onClick: onSideClick('left'),
+      onPointerLeave: () => { S.hoverStrike = NaN; invalidateAll(); },
+    });
+    S.panels.main = mk(ids.main, drawMain, {
+      id: 'trace:main', onPointer: onMainMove, onDown: onMainDown, onUp: onMainUp, onWheel: onMainWheel,
+      onPointerLeave: () => { S.hoverStrike = NaN; invalidateAll(); },
+    });
+    S.panels.right = mk(ids.right, (ctx, env) => drawProfile(ctx, env, 'right'), {
+      id: 'trace:right', onPointer: onSideMove('right'), onClick: onSideClick('right'),
+      onPointerLeave: () => { S.hoverStrike = NaN; invalidateAll(); },
+    });
+    S.link.on(() => invalidateAll());
+    return S;
+  }
+
+  function setMetric(side, metric) {
+    if (!METRICS[metric] || (side !== 'left' && side !== 'right')) return;
+    S[side].metric = metric;
+    if (S.data) {
+      applyMetric(side);
+      const dom = computePriceDomain();
+      if (dom) { S.priceLo.set(dom.lo); S.priceHi.set(dom.hi); }
+    }
+    for (const k in S.panels) { S.panels[k].animate(true); S.panels[k].invalidate(); }
+  }
+
+  /** NETO ↔ CALL+PUT en los dos perfiles laterales. */
+  function setBreakdown(on) {
+    S.breakdown = !!on;
+    if (S.data) { applyMetric('left'); applyMetric('right'); }
+    for (const k in S.panels) { S.panels[k].animate(true); S.panels[k].invalidate(); }
+  }
+
+  function setHeatField(field) {
+    if (!HEATFIELDS[field] && field !== 'off') return;
+    S.heatField = field;
+    if (field === 'off') { S.heat = null; S.heatKey = ''; }
+    else buildHeatBitmap();
+    invalidateAll();
+  }
+
+  function setHeatOpacity(v) { S.heatOpacity = Q.clamp(Q.num(v, 0.55), 0, 1); invalidateAll(); }
+  function setPriceMode(mode) { S.priceMode = mode === 'line' ? 'line' : 'candles'; invalidateAll(); }
+  function setFollow(on) {
+    S.link.follow = !!on;
+    if (on && S.data) { const b = timeBounds(S.data.candles || []); if (b) S.link.setWindow(b.t0, b.t1); }
+    invalidateAll();
+  }
+  function toggle(flag, on) { S[flag] = !!on; invalidateAll(); }
+
+  global.ITMQTrace = {
+    mount, applyData, setMetric, setBreakdown, hasBreakdown, setHeatField, setHeatOpacity, setPriceMode, setFollow, toggle,
+    strikeRow, onStrike(cb) { S.onStrike = cb; },
+    clearStrike() { S.pinnedStrike = NaN; invalidateAll(); },
+    state: S, METRICS, HEATFIELDS,
+  };
+})(window);

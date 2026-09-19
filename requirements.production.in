@@ -1,0 +1,17 @@
+# ITM QUANT · dependencias DIRECTAS de runtime en VPS.
+# Este es el fichero que se edita a mano. El .lock.txt se genera:
+#   pip-compile --generate-hashes --output-file=requirements.production.lock.txt requirements.production.in
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn[standard]==0.48.0
+jinja2==3.1.6
+python-multipart==0.0.32
+itsdangerous==2.2.0
+pandas==2.2.3
+numpy==2.3.5
+scipy==1.17.0
+plotly==6.5.2
+requests==2.34.2
+websockets==16.0
+msgpack==1.2.2
+httpx==0.28.1

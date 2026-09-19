@@ -1,0 +1,26 @@
+ITM QUANT v1.42.7 — MULTI ASSET ALWAYS-ON
+
+1) INSTALAR_WEB.bat
+   Crea/actualiza el entorno Python aislado de esta carpeta.
+
+2) INICIAR_MOTOR_24_7.bat
+   Inicia el motor persistente. Puedes cerrar el navegador y el motor sigue trabajando mientras el host siga encendido.
+
+3) INICIAR_WEB.bat
+   NO reinicia el motor. Comprueba si ya está activo y abre la interfaz.
+
+4) INSTALAR_AUTOINICIO_MOTOR_24_7.bat
+   Opcional: hace que Windows arranque el motor automáticamente con tu sesión.
+
+5) PC APAGADA
+   Ningún proceso local puede continuar con el hardware apagado. Para que ITM QUANT trabaje mientras tu PC está apagada, despliega esta misma versión en un VPS/host 24/7 con deploy/ALWAYS_ON_VPS.md y docker-compose.always-on.yml.
+
+UNIVERSO VISIBLE
+DIA · YM · MYM · DJX · VXD.
+No se muestran otros activos. XLI/XLF/VIX pueden permanecer como contexto cuantitativo interno no seleccionable.
+
+CALENDARIO / GRÁFICOS
+El motor guarda paquetes READY con estado + tablas + gráficos. Las sesiones históricas persistidas se precomputan en background. Una fecha READY se abre directamente desde el paquete ya calculado. HOY vuelve al Hot State LIVE.
+
+DATOS
+No se incluyen claves reales en el paquete. Scanner conserva la autoridad direccional. El cache READY es presentación/recovery y no fabrica observaciones.

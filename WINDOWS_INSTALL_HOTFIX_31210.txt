@@ -1,0 +1,22 @@
+ITM QUANT v1.40.0 · WINDOWS INSTALL HOTFIX 31210
+
+Scope
+- Base: v1.40.0 checkpoint 1094M recovered 388/388.
+- Windows installer only: CPython 3.12.10 x64 exact.
+- Docker/Linux remains CPython 3.12.14 exactly as certified.
+- No app/core, quantitative engine, Scanner, runtime logic, provider logic, frontend, tests, lockfiles, or Dockerfile was modified.
+
+Reason
+- CPython 3.12.14 is source-only upstream and has no official Windows installer.
+- CPython 3.12.10 is the last CPython 3.12 maintenance release with official Windows installers.
+- CPython 3.12 wheels use the cp312 ABI across 3.12 patch releases.
+
+Windows flow
+1. Install CPython 3.12.10 x64 with Python Launcher.
+2. Run INSTALAR_WEB.bat.
+3. Run CONFIGURAR_WEB.bat.
+4. Run INICIAR_WEB.bat.
+
+Historical integrity
+- The original 388/388 recovered ZIP remains untouched and is the forensic checkpoint.
+- This hotfix is a derivative operational package and intentionally has a different ZIP SHA-256.

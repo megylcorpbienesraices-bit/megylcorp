@@ -1,0 +1,3 @@
+# Resolver input only. NEVER install directly in a certified release.
+# Generate a dedicated hash-pinned lock before enabling local Sophia voice.
+faster-whisper==1.1.0

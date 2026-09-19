@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ITM QUANT — Cobertura y salud de datos</title>
+  <style>
+    :root{color-scheme:dark;--bg:#071019;--panel:#0d1721;--line:#1d3448;--text:#e8f2fa;--muted:#8194a6;--ok:#40d6a0;--warn:#f0c85a;--bad:#ff6b80;--accent:#39d6ff}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",Arial,sans-serif}.wrap{max-width:1500px;margin:auto;padding:22px}.top{display:flex;gap:14px;align-items:center;justify-content:space-between;margin-bottom:18px}h1{font-size:22px;margin:0}.muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}.card,.metric{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}.provider-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.provider{font-weight:700;letter-spacing:.04em}.pct{font:700 20px Consolas,monospace}.bar{height:7px;background:#152431;border-radius:8px;overflow:hidden;margin:10px 0 12px}.fill{height:100%;background:var(--accent);width:0}
+    .rows{display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:12px}.rows span:nth-child(odd){color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{white-space:pre-wrap;word-break:break-word;background:#071019;border:1px solid var(--line);padding:10px;border-radius:7px;max-height:260px;overflow:auto;font-size:11px}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin:12px 0 18px}.metric b{display:block;font:700 18px Consolas,monospace;margin-top:3px;overflow-wrap:anywhere}button,a.btn{background:#10283a;color:var(--text);border:1px solid #27516c;border-radius:7px;padding:8px 11px;text-decoration:none;cursor:pointer}.note{margin-top:14px;border-left:3px solid var(--accent);padding:10px 12px;background:#0a1620}.channels{display:grid;gap:6px;margin-top:10px}.ch{display:grid;grid-template-columns:1fr auto auto;gap:8px;border-top:1px solid var(--line);padding-top:6px;font-size:11px}.ch span:first-child{overflow:hidden;text-overflow:ellipsis}.section-title{font-weight:800;letter-spacing:.06em;margin:18px 0 9px}
+  </style>
+</head>
+<body><div class="wrap">
+  <div class="top"><div><h1>ITM QUANT v{{ app_version }} · PROVIDER COVERAGE + DATA HEALTH</h1><div class="muted">HOT LIVE + WARM UNIVERSE + COLD DATA LAKE · NO FIXED PROVIDER RANK</div></div><div><a class="btn" href="/">VOLVER A ITM QUANT</a> <button id="refresh">ACTUALIZAR</button></div></div>
+  <div class="summary">
+    <div class="metric"><span class="muted">Data Lake</span><b id="lakeState">—</b></div>
+    <div class="metric"><span class="muted">Cola archivo</span><b id="queue">—</b></div>
+    <div class="metric"><span class="muted">Drops archivo</span><b id="drops">—</b></div>
+    <div class="metric"><span class="muted">Temporal Truth</span><b id="temporal">—</b></div>
+    <div class="metric"><span class="muted">State ID</span><b id="stateId">—</b></div>
+    <div class="metric"><span class="muted">WARM/COLD</span><b id="collector">—</b></div>
+    <div class="metric"><span class="muted">Última escritura</span><b id="lastWrite" style="font-size:12px">—</b></div>
+  </div>
+  <div class="section-title">COBERTURA REAL ARCHIVADA</div><div id="providers" class="grid"></div>
+  <div class="section-title">SALUD POR PROVEEDOR + CANAL</div><div id="health" class="grid"></div>
+  <div class="note"><b>Regla de verdad:</b> todos los proveedores conectados participan como fuentes de primera clase. La elegibilidad se decide por observación/canal usando timestamp, freshness, latencia, secuencia y calidad. Un canal stale se excluye temporalmente sin degradar por nombre al proveedor completo. Los porcentajes solo miden capacidades realmente implementadas y observadas/archivadas.</div>
+  <div class="grid" style="margin-top:12px"><div class="card"><div class="provider">TRANSPORTE</div><pre id="transport">—</pre></div><div class="card"><div class="provider">ÚLTIMO CICLO DE BIBLIOTECA</div><pre id="library">—</pre></div></div>
+</div>
+<script>
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+function cls(state){state=String(state||'');return /COMPLETE|LIVE|CONNECTED|OK|LOSSLESS|SAFE/.test(state)?'ok':/PARTIAL|NO_OBSERVATIONS|WARM|STALE/.test(state)?'warn':'bad'}
+async function load(){try{
+  const r=await fetch('/api/providers/coverage',{cache:'no-store'});const d=await r.json();const lake=d.data_lake||{},lib=d.library_collector||{},tt=d.temporal_truth||{},vs=d.versioned_market_state||{};
+  const lakeOk=!!lake.lossless_archive;document.getElementById('lakeState').textContent=lakeOk?'LOSSLESS':'AUDITAR';document.getElementById('lakeState').className=lakeOk?'ok':'warn';
+  document.getElementById('queue').textContent=`${lake.queue_depth||0}/${lake.queue_capacity||0}`;document.getElementById('drops').textContent=lake.dropped_archive_records||0;document.getElementById('drops').className=(lake.dropped_archive_records||0)===0?'ok':'bad';
+  document.getElementById('collector').textContent=lib.running?'RUNNING':(lib.enabled?'READY':'OFF');document.getElementById('collector').className=lib.running?'ok':'warn';document.getElementById('lastWrite').textContent=lake.last_write_at||'—';
+  document.getElementById('temporal').textContent=tt.decision_safe?'SAFE':'WAIT';document.getElementById('temporal').className=tt.decision_safe?'ok':'warn';document.getElementById('stateId').textContent=vs.state_id??'—';
+  const host=document.getElementById('providers');host.innerHTML='';for(const [name,p] of Object.entries(lake.providers||{})){const card=document.createElement('div');card.className='card';const pct=Number(p.coverage_pct||0);card.innerHTML=`<div class="provider-head"><div class="provider">${esc(name)}</div><div class="pct">${pct.toFixed(1)}%</div></div><div class="${cls(p.state)}">${esc(p.state)}</div><div class="bar"><div class="fill" style="width:${Math.max(0,Math.min(100,pct))}%"></div></div><div class="rows"><span>Capacidades</span><b>${p.capabilities_observed||0}/${p.capabilities_expected||0}</b><span>RAW vistos</span><b>${p.raw_records_seen||0}</b><span>Normalizados</span><b>${p.normalized_records_seen||0}</b><span>Símbolos</span><b>${(p.symbols_archived||[]).length}</b></div><pre>${esc(JSON.stringify(p.observed_capabilities||{},null,2))}</pre>`;host.appendChild(card)}
+  const hh=document.getElementById('health');hh.innerHTML='';for(const p of (tt.provider_health||[])){const card=document.createElement('div');card.className='card';const chans=Object.values(p.channels||{});card.innerHTML=`<div class="provider-head"><div class="provider">${esc(p.source)}</div><b class="${cls(p.status)}">${esc(p.status)}</b></div><div class="rows" style="margin-top:8px"><span>Canales elegibles</span><b>${p.live_channels||0}/${chans.length}</b><span>Calidad media</span><b>${Number(p.quality_mean||0).toFixed(1)}</b><span>Peor edad</span><b>${Number(p.worst_age_ms||0).toFixed(0)} ms</b></div><div class="channels">${chans.map(c=>`<div class="ch"><span>${esc(c.channel)}</span><b class="${c.eligible?'ok':'warn'}">${esc(c.status)}</b><span>${Number(c.latency_ms||0).toFixed(1)} ms</span></div>`).join('')}</div>`;hh.appendChild(card)}
+  if(!(tt.provider_health||[]).length)hh.innerHTML='<div class="card muted">Todavía no hay observaciones suficientes para medir salud por canal.</div>';
+  document.getElementById('transport').textContent=JSON.stringify(d.transport_policy||{},null,2);document.getElementById('library').textContent=JSON.stringify(lib,null,2);
+}catch(e){document.getElementById('lakeState').textContent='ERROR';document.getElementById('lakeState').className='bad'}}
+document.getElementById('refresh').onclick=load;load();setInterval(load,2500);
+</script></body></html>

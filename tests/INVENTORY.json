@@ -1,0 +1,2341 @@
+{
+ "_nota": "Regenerar solo de forma deliberada: 'python scripts/test_inventory.py --update'. El diff debe revisarse — una linea eliminada aqui es un test que dejo de existir.",
+ "ficheros": {
+  "tests/test_v111_expiry_window.py": {
+   "casos": 4,
+   "tests": [
+    "ExpiryWindowV111Tests::test_all_windows_filter",
+    "ExpiryWindowV111Tests::test_auto_weights_decay_but_activity_aware",
+    "ExpiryWindowV111Tests::test_expiry_confluence",
+    "ExpiryWindowV111Tests::test_global_state_switch_and_strict_json"
+   ]
+  },
+  "tests/test_v113_precision.py": {
+   "casos": 15,
+   "tests": [
+    "test_0dte_quote_recovers_iv_and_greeks_without_provider",
+    "test_calibration_lab_evaluates_mfe_mae_targets",
+    "test_calibration_respects_first_resolution_t1_before_later_invalidation",
+    "test_data_quality_closed_market_does_not_penalize_stale_clock",
+    "test_delta_gex_matrix_uses_previous_structural_snapshot",
+    "test_demo_volatility_exposes_model_and_market_implied_move",
+    "test_exposure_scenarios_are_finite_and_include_spot_shocks",
+    "test_large_print_summary_detects_repeated_zone_and_relative_size",
+    "test_macro_context_is_asset_aware_and_scanner_reads_nested_score",
+    "test_option_stream_pairs_trade_with_live_quote_and_fallback_greeks",
+    "test_option_stream_tick_rule_is_low_confidence_fallback",
+    "test_provider_greeks_dislocation_is_explicitly_flagged",
+    "test_regime_classifier_is_bounded_and_transparent",
+    "test_session_memory_reports_intraday_center_migration",
+    "test_unusable_quote_does_not_invent_iv"
+   ]
+  },
+  "tests/test_v1141_decorrelation.py": {
+   "casos": 6,
+   "tests": [
+    "test_decorrelated_basis_is_exposed_and_bounded",
+    "test_market_inputs_cache_keeps_phase2_asset_carry",
+    "test_net_tilt_noise_floor_neutralizes_without_injecting_mass",
+    "test_regime_confidence_has_no_artificial_floor_when_no_evidence",
+    "test_turnover_stabilizer_reduces_tiny_oi_explosion",
+    "test_vectorized_greeks_match_scalar_path"
+   ]
+  },
+  "tests/test_v1142_repricing_easy_ui.py": {
+   "casos": 5,
+   "tests": [
+    "test_dealer_inventory_greeks_are_repriced_to_live_spot",
+    "test_easy_interface_preserves_all_sections",
+    "test_gex_reconciliation_can_value_raw_chain_without_precomputed_gex",
+    "test_gex_reconciliation_keeps_models_separate",
+    "test_volatility_uses_parkinson_and_atm_forward_term_structure"
+   ]
+  },
+  "tests/test_v1143_ev_gate.py": {
+   "casos": 7,
+   "tests": [
+    "test_anchor_is_ignored_until_enough_sessions",
+    "test_expected_value_ranks_by_edge_not_by_evidence",
+    "test_historical_anchor_actually_preserves_physical_magnitude",
+    "test_isotonic_is_monotone_and_pooled",
+    "test_options_mode_measures_premium_not_underlying_move",
+    "test_options_mode_refuses_to_invent_missing_inputs",
+    "test_probability_calibration_beats_base_rate_and_is_honest_when_it_does_not"
+   ]
+  },
+  "tests/test_v1143_hardening.py": {
+   "casos": 4,
+   "tests": [
+    "test_ev_gate_needs_explicit_activation_even_when_calibrated",
+    "test_option_pnl_resolves_at_structural_event_not_horizon",
+    "test_scale_anchor_current_session_is_not_used",
+    "test_scale_anchors_are_separate_by_expiry_scope"
+   ]
+  },
+  "tests/test_v1144_instrument_consistency.py": {
+   "casos": 6,
+   "tests": [
+    "test_missing_resolution_time_refuses_option_rr",
+    "test_option_backtest_r_is_not_full_premium_anymore",
+    "test_option_economic_rr_uses_premium_and_time_not_stock_geometry",
+    "test_partial_pooling_backs_off_to_global_and_uses_sparse_scope",
+    "test_partial_pooling_scope_weight_grows_with_scope_sample",
+    "test_probability_calibration_reports_log_loss_oos"
+   ]
+  },
+  "tests/test_v1145_premarket_intelligence.py": {
+   "casos": 5,
+   "tests": [
+    "test_chain_totals_are_explicit_and_reconcile",
+    "test_dia_premarket_is_native_and_compact_near_spot",
+    "test_pending_related_sources_do_not_fake_confirmation",
+    "test_report_has_one_main_and_at_most_one_alternative_scenario",
+    "test_strike_rows_have_numeric_oi_volume_gamma_delta_totals"
+   ]
+  },
+  "tests/test_v1146_source_fusion.py": {
+   "casos": 5,
+   "tests": [
+    "test_asset_ecosystems_cover_all_platform_assets",
+    "test_chain_validation_is_provider_neutral",
+    "test_external_model_agreement_is_quantdata_corroboration_only",
+    "test_normal_refresh_only_exposes_retained_sources",
+    "test_source_fusion_cannot_flip_native_premarket_direction"
+   ]
+  },
+  "tests/test_v1147_live_validation.py": {
+   "casos": 4,
+   "tests": [
+    "test_alpaca_related_breadth_uses_existing_sip",
+    "test_blend_weight_is_selected_and_final_blend_has_own_metrics",
+    "test_live_validation_starts_at_zero_and_gate_off",
+    "test_premarket_live_only_confirmations_are_not_counted_as_missing"
+   ]
+  },
+  "tests/test_v114_dealer_institutional.py": {
+   "casos": 11,
+   "tests": [
+    "test_calibration_uses_purge_gap_and_cost_assumptions",
+    "test_call_buy_dealer_counterparty_implies_buy_hedge_when_opening_likely",
+    "test_counterparty_uncertainty_scales_hedge_pressure",
+    "test_dow_universe_assets_are_self_contained",
+    "test_external_market_layer_has_no_removed_bridges",
+    "test_hedge_pressure_has_multiple_windows_and_top_strikes",
+    "test_opening_likelihood_is_bounded_and_explicitly_uncertain",
+    "test_provider_health_is_primary_alpaca_only",
+    "test_research_store_persists_cycles",
+    "test_source_health_exposes_logical_components",
+    "test_synthetic_inventory_is_idempotent_and_reconciles_to_chain"
+   ]
+  },
+  "tests/test_v1150_trace_pro3.py": {
+   "casos": 23,
+   "tests": [
+    "test_absorbed_flag_survives_dataframe_return",
+    "test_absorption_is_not_confused_with_churn_or_with_confirmation",
+    "test_aggression_score_is_continuous_not_six_states",
+    "test_anchor_scaling_is_comparable_across_sessions",
+    "test_balanced_tape_is_not_reported_as_a_direction",
+    "test_bar_cadence_all_nan_duration_is_explicit_not_runtime_warning",
+    "test_bars_have_a_time_bound",
+    "test_cadence_separates_a_pin_from_an_active_tape",
+    "test_charm_pressure_proxy_is_repriced_delta_drift_not_charm_shortcut",
+    "test_churn_produces_bars_instead_of_disappearing",
+    "test_column_scaling_hides_magnitude_and_session_scaling_does_not",
+    "test_confirmation_fires_before_any_bar_would_close",
+    "test_confirmation_ignores_flow_from_an_earlier_visit",
+    "test_dealer_flow_is_delta_weighted_and_flips_with_the_flow",
+    "test_expected_move_asof_does_not_apply_current_dte_to_the_morning",
+    "test_expected_move_band_narrows_as_time_passes",
+    "test_expected_move_history_uses_each_snapshots_own_iv_and_dte",
+    "test_forward_profile_concentrates_gamma_toward_atm_near_expiry",
+    "test_forward_profile_reprices_delta_in_notional_and_zeros_expired_contracts",
+    "test_no_entry_is_left_hanging_after_the_budget",
+    "test_pinned_tape_zero_efficiency_does_not_emit_empty_slice_warning",
+    "test_strong_tape_keeps_its_direction_even_when_contested",
+    "test_walls_use_gamma_not_stale_open_interest"
+   ]
+  },
+  "tests/test_v1153_tape_timing_only.py": {
+   "casos": 3,
+   "tests": [
+    "test_research_store_dedupes_same_tape_state_transition",
+    "test_scanner_structure_is_invariant_to_opposite_live_tape",
+    "test_tape_confirmation_exposes_visit_identity_for_research"
+   ]
+  },
+  "tests/test_v1154_multitimeframe_tape.py": {
+   "casos": 5,
+   "tests": [
+    "test_dead_band_is_shadow_configurable",
+    "test_delta_z_uses_trade_size_variance_not_volume_power",
+    "test_missing_frame_is_collecting_not_balanced",
+    "test_multiframe_is_one_context_family_and_never_a_scanner_or_trigger_vote",
+    "test_time_context_is_strictly_causal_including_absorption_baseline"
+   ]
+  },
+  "tests/test_v1155_volatility_stop.py": {
+   "casos": 5,
+   "tests": [
+    "test_far_structure_does_not_drag_stop_into_different_thesis",
+    "test_higher_iv_widens_stop_and_changes_rr_geometry",
+    "test_missing_iv_is_explicit_fallback_not_fabricated_sigma",
+    "test_nearby_strong_structure_can_widen_invalidation",
+    "test_shadow_k_is_recorded_but_only_live_k_is_active"
+   ]
+  },
+  "tests/test_v1156_command_center_single_authority.py": {
+   "casos": 6,
+   "tests": [
+    "test_expected_value_label_only_when_gate_is_actually_active",
+    "test_flip_is_normalized_context_not_a_direction_vote",
+    "test_no_scanner_means_waiting_not_independent_bias",
+    "test_scanner_is_the_only_direction_authority_even_when_context_opposes",
+    "test_shadow_ev_does_not_masquerade_as_production_ev_gate",
+    "test_tape_is_timing_only_and_is_exposed_without_changing_scanner"
+   ]
+  },
+  "tests/test_v1157_relative_qflow_largeprints_trace_ui.py": {
+   "casos": 9,
+   "tests": [
+    "test_flow_anchor_samples_include_relative_families_and_bucketed_greeks",
+    "test_greek_component_no_longer_saturates_at_tiny_absolute_gamma",
+    "test_large_print_anchor_samples_are_notional_only",
+    "test_large_print_early_session_rank_is_shrunk_and_score_scale_is_true_100",
+    "test_large_print_historical_anchor_dominates_early_then_is_auditable",
+    "test_normalized_qflow_is_shadow_and_does_not_replace_legacy",
+    "test_proximity_kernel_is_sigma_relative_not_fixed_dollars",
+    "test_scanner_flow_bonus_uses_legacy_not_shadow_score",
+    "test_trace_ui_exposes_only_current_nextgen_presentation_controls"
+   ]
+  },
+  "tests/test_v1158_operativa_landscape.py": {
+   "casos": 5,
+   "tests": [
+    "test_gamma_flip_is_gamma_even_when_surface_lens_is_delta",
+    "test_landscape_height_is_real_millions_and_scale_only_changes_color",
+    "test_requested_lens_never_silently_falls_back_to_gamma",
+    "test_trace_landscape_plot_smoke",
+    "test_v1158_ui_has_18_tabs_and_no_artificial_conviction"
+   ]
+  },
+  "tests/test_v1160_trace_fusion.py": {
+   "casos": 7,
+   "tests": [
+    "test_dashboard_has_grouped_navigation_and_nextgen_controls",
+    "test_dex_profile_never_falls_back_to_gamma",
+    "test_exposure_cube_filters_calls_puts_and_missing_metric_is_unavailable",
+    "test_flow_bar_anchor_samples_are_bucket_magnitudes_for_tomorrow",
+    "test_flow_bars_are_causal_and_use_historical_anchor_when_ready",
+    "test_legacy_trace_and_surface_plotly_renderers_are_removed",
+    "test_session_wick_uses_same_calls_view_and_respects_asof"
+   ]
+  },
+  "tests/test_v1161_relaxed_ui.py": {
+   "casos": 6,
+   "tests": [
+    "test_alert_danger_is_single_semantic_rule",
+    "test_decide_context_audit_hierarchy_is_explicit",
+    "test_dense_grids_wrap_instead_of_squeezing_cards",
+    "test_design_system_owns_literal_colors",
+    "test_spacing_and_responsive_chart_tokens_exist",
+    "test_type_scale_has_no_micro_text_or_extreme_weight"
+   ]
+  },
+  "tests/test_v1162_multiasset_strict_expiry.py": {
+   "casos": 9,
+   "tests": [
+    "test_0dte_date_is_single_source_of_truth",
+    "test_disjoint_multi_expiry_does_not_self_confirm",
+    "test_flow_bucket_never_calls_tomorrow_0dte",
+    "test_horizon_is_derived_from_selected_expiries_not_fixed_three_days",
+    "test_instrument_clock_is_used_for_sigma",
+    "test_live_refresh_uses_sigma_chain_window_second_pass",
+    "test_net_drift_0dte_uses_expiration_date_not_fractional_dte",
+    "test_no_ticker_branch_in_signal_modules",
+    "test_same_relative_structure_same_sigma_window"
+   ]
+  },
+  "tests/test_v1163_multi_asset_board.py": {
+   "casos": 9,
+   "tests": [
+    "test_board_refresh_is_staggered_and_dynamic_universe",
+    "test_board_whitelist_blocks_invented_strength",
+    "test_ev_and_evidence_never_share_sort_slot",
+    "test_ev_shadow_is_not_treated_as_active_gate",
+    "test_no_old_multi_expiry_copy_survives",
+    "test_public_state_exposes_board",
+    "test_stale_rows_are_outside_operational_counts_and_sort",
+    "test_ui_keeps_18_navigation_tabs_and_board_inside_operativa",
+    "test_zone_reads_real_scanner_contract"
+   ]
+  },
+  "tests/test_v1164_global_replay.py": {
+   "casos": 8,
+   "tests": [
+    "test_backtest_readiness_is_separated_from_sample_coverage",
+    "test_filter_asof_is_inclusive_and_causal_for_any_event_family",
+    "test_replay_context_is_one_global_clock",
+    "test_replay_does_not_create_a_nineteenth_navigation_section",
+    "test_replay_ui_is_global_not_trace_local_and_stops_live_mutation",
+    "test_service_replay_applies_no_future_before_external_overlays_and_disables_current_model",
+    "test_session_coverage_is_temporal_not_snapshot_count",
+    "test_tape_archive_preserves_legitimate_same_prints_when_sequence_differs"
+   ]
+  },
+  "tests/test_v1165_gex_matrix_integrity.py": {
+   "casos": 6,
+   "tests": [
+    "test_auto_threshold_is_relative_and_does_not_change_data",
+    "test_categorical_axes_and_spot_overlay_work_in_real_plotly",
+    "test_delta_only_uses_common_strike_expiry_cells_real_plotly",
+    "test_missing_expiration_is_unavailable_not_inferred",
+    "test_open_baseline_is_only_called_open_when_near_0930_new_york",
+    "test_previous_baseline_is_explicit"
+   ]
+  },
+  "tests/test_v1166_plain_language_research_nav.py": {
+   "casos": 10,
+   "tests": [
+    "test_cross_asset_lab_runs_pca_kalman_as_shadow_when_common_history_exists",
+    "test_easy_expected_move_names_actual_expiry_not_assumes_today",
+    "test_easy_mode_calibrated_probability_is_model_estimate_not_observed_hit_rate",
+    "test_easy_mode_does_not_leak_blacklisted_quant_jargon",
+    "test_easy_mode_reads_nested_scanner_zone_and_keeps_uncertainty_visible",
+    "test_microprice_and_l1_imbalance_are_observed_not_l2_invented",
+    "test_ml_readiness_is_stricter_and_never_production_by_sample_count_alone",
+    "test_navigation_is_15_real_entry_points_with_access_to_merged_content",
+    "test_research_snapshot_all_families_are_non_authoritative",
+    "test_vol_forecast_is_shadow_and_garch_collects_until_sample_is_large"
+   ]
+  },
+  "tests/test_v1167_trace_trading_workspace.py": {
+   "casos": 9,
+   "tests": [
+    "test_auto_price_is_not_governed_by_strike_ladder_or_nearby_wall",
+    "test_design_system_still_owns_workspace_css_colors",
+    "test_live_has_no_local_plotly_trace_replay_and_replay_uses_global_timeline",
+    "test_nextgen_trace_has_one_renderer_authority_not_fusion_duplicate",
+    "test_structure_mode_can_expand_to_nearby_levels_but_not_far_levels",
+    "test_time_window_is_defined_from_price_timestamps",
+    "test_trace_layout_is_nextgen_price_dominant_and_flow_is_collapsible",
+    "test_trace_legacy_plotly_functions_are_removed_and_nextgen_is_symbol_agnostic",
+    "test_trace_workspace_controls_are_connected_to_nextgen"
+   ]
+  },
+  "tests/test_v1168_trace_timeframes.py": {
+   "casos": 5,
+   "tests": [
+    "test_api_accepts_only_standard_trace_timeframes_and_falls_back_to_1m",
+    "test_normal_and_fusion_support_3m_and_15m_causal_ohlc",
+    "test_timeframe_does_not_replace_tick_tape_or_visible_window",
+    "test_timeframe_is_sent_end_to_end_and_live_tick_bucketing_uses_selection",
+    "test_trace_timeframe_selector_is_visible_and_separate_from_window"
+   ]
+  },
+  "tests/test_v1170_persistent_memory.py": {
+   "casos": 7,
+   "tests": [
+    "test_v118_auditor_writes_daily_and_cumulative_without_touching_signal",
+    "test_v118_demo_does_not_contaminate_auditor",
+    "test_v118_explicit_legacy_migration_backs_up_and_routes_data",
+    "test_v118_never_auto_scans_sibling_installations",
+    "test_v118_no_source_boot_does_not_consume_later_explicit_migration",
+    "test_v118_rejects_generic_version_plus_storage_folder",
+    "test_v118_routed_dir_splits_only_canonical_storage"
+   ]
+  },
+  "tests/test_v1180_trace_terminal.py": {
+   "casos": 11,
+   "tests": [
+    "test_any_manual_plotly_axis_zoom_disables_follow",
+    "test_live_gamma_delta_pulse_reprices_spot_but_keeps_snapshot_fields_honest",
+    "test_migration_policy_never_scans_siblings_and_has_explicit_helper",
+    "test_old_benchmark_cmp_script_is_not_shipped",
+    "test_operativa_has_one_compact_quant_result_and_no_new_data_quant_section",
+    "test_plotly_legend_itemwidth_valid",
+    "test_quant_synthesis_is_internal_reducer_not_second_direction_engine",
+    "test_trace_chart_is_before_diagnostic_cards_and_focus_mode_compacts_global_docks",
+    "test_trace_supports_15m_end_to_end",
+    "test_trace_terminal_exposes_live_profiles_without_faking_option_volume",
+    "test_trace_terminal_has_professional_interaction_controls_and_presets"
+   ]
+  },
+  "tests/test_v1190_market_state_field.py": {
+   "casos": 5,
+   "tests": [
+    "test_gamma_is_friction_not_direction_vote",
+    "test_higher_order_state_is_computed_and_disclosed_as_proxy",
+    "test_internal_state_can_downgrade_timing_but_never_flip_scanner",
+    "test_no_new_visible_data_quant_section_was_added",
+    "test_trace_pulse_contains_signed_opra_and_higher_order_mechanics"
+   ]
+  },
+  "tests/test_v1200_nextgen_architecture.py": {
+   "casos": 10,
+   "tests": [
+    "test_causality_orderer_uses_event_time_not_arrival_order",
+    "test_causality_ordering_is_in_the_live_flow_path_not_only_visualization",
+    "test_cross_asset_normalization_prevents_raw_scale_domination",
+    "test_model_risk_is_explicit_in_ui_and_docs",
+    "test_nextgen_ui_is_native_first_and_simplified",
+    "test_required_nextgen_architecture_docs_are_shipped",
+    "test_surface_payload_has_multi_field_webgl_and_q_shadow_disclosure",
+    "test_trace_all_window_does_not_collapse_to_15_minutes",
+    "test_trace_payload_separates_structure_reprice_and_observed_flow",
+    "test_unified_stream_keeps_three_clocks_and_is_deterministic"
+   ]
+  },
+  "tests/test_v1210_dealer_terminal.py": {
+   "casos": 12,
+   "tests": [
+    "test_causal_nbbo_classification_and_stale_fallback",
+    "test_causal_underlying_uses_last_trade_before_option_print_only",
+    "test_dealer_intelligence_returns_estimated_field_quality_and_inventory_shift",
+    "test_hedge_confirmation_uses_real_futures_when_present_and_does_not_attribute_dealer",
+    "test_hedge_surface_prefers_persistent_inventory_surface",
+    "test_institutional_ui_and_dealer_docs_are_shipped",
+    "test_microstructure_quality_rewards_synced_nbbo_and_never_calls_it_probability",
+    "test_old_dealer_events_schema_migrates_without_reset",
+    "test_option_stream_pairs_trade_only_with_preceding_event_time_quote",
+    "test_package_candidate_detection_is_explicit_not_ground_truth",
+    "test_research_payload_persists_dealer_intelligence_context",
+    "test_trace_option_print_provenance_reaches_renderer"
+   ]
+  },
+  "tests/test_v1220_all_in_terminal.py": {
+   "casos": 8,
+   "tests": [
+    "test_dashboard_uses_local_plotly_and_all_in_assets",
+    "test_docs_exist",
+    "test_latency_summary_has_percentiles",
+    "test_native_js_has_linked_strike_and_uncertainty_shader",
+    "test_quantum_ready_uses_classical_fallback_without_qpu",
+    "test_readiness_never_claims_fpga_colo_qpu_without_config",
+    "test_scenario_lab_is_shadow_not_forecast",
+    "test_surface_has_confidence_and_all_fields"
+   ]
+  },
+  "tests/test_v1230_ultralowlatency.py": {
+   "casos": 18,
+   "tests": [
+    "test_accelerated_greeks_match_numpy_reference",
+    "test_actual_zeromq_binary_boundary_when_pyzmq_available",
+    "test_alpaca_streams_forward_normalized_events_without_changing_fallback",
+    "test_binary_event_roundtrip_crc_and_exact_length",
+    "test_equal_timestamp_quote_priority_precedes_option_trade",
+    "test_hot_dealer_inventory_is_ram_first_and_archive_is_explicit_checkpoint",
+    "test_python_alpaca_to_rust_ingress_binary_boundary",
+    "test_q_never_becomes_scanner_authority_even_with_oos_weights",
+    "test_rust_bridge_enriches_option_trade_with_prior_nbbo",
+    "test_rust_source_accepts_transitional_itmq_pull_ingress",
+    "test_service_consumes_rust_bridge_in_live_pipeline_source",
+    "test_surface_and_tick_binary_frames_reject_trailing_or_truncated_bytes",
+    "test_svi_basic_checks_reject_invalid_wing_slope",
+    "test_svi_preserves_observed_base_and_labels_stress_model",
+    "test_ultralow_latency_start_script_keeps_honest_fallback_contract",
+    "test_v123_frontend_native_terminal_and_trace_contracts",
+    "test_v123_rust_source_has_nonblocking_publisher_and_late_event_guard",
+    "test_wasm_bridge_exposes_pointer_as_usize_and_exact_frame_guard"
+   ]
+  },
+  "tests/test_v1240_nextgen_core_terminal.py": {
+   "casos": 16,
+   "tests": [
+    "test_contextual_help_explains_native_structure_and_surface_diagnostics",
+    "test_dashboard_contains_nextgen_surface_and_native_structure_contracts",
+    "test_feed_adapter_catalog_is_truthful_and_normalizes_event",
+    "test_frontend_native_renderers_have_structural_hud_diagnostics_and_perf",
+    "test_operational_readiness_exposes_new_core_boundaries",
+    "test_runtime_version_boundaries_use_single_current_release_source",
+    "test_rust_core_sources_have_safe_ring_clock_sentinel_arbitration_and_gex_formula",
+    "test_sentinel_states_never_claim_execution_connection",
+    "test_sequence_ring_commit_crc_and_overrun",
+    "test_solid_shell_is_aggregate_ui_only_and_versioned",
+    "test_solid_shell_is_wired_to_native_aggregate_event_bridge",
+    "test_source_arbitration_prefers_fresh_low_latency_feed_and_records_switch",
+    "test_trace_payload_carries_native_structure_but_scanner_remains_authority",
+    "test_v124_design_tokens_are_concrete_and_complete",
+    "test_version_file_is_1240",
+    "test_webgpu_surface_has_real_wireframe_contours_and_confidence_fog"
+   ]
+  },
+  "tests/test_v1241_trace_data_contract.py": {
+   "casos": 4,
+   "tests": [
+    "test_frontend_has_single_trace_contract_boundary",
+    "test_nextgen_collection_shapes_are_invariant",
+    "test_trace_pulse_wrong_rows_shape_fails_soft",
+    "test_version_bumped_without_persistence_reset"
+   ]
+  },
+  "tests/test_v1242_trace_live_interaction.py": {
+   "casos": 5,
+   "tests": [
+    "test_trace_contract_fails_soft_if_interaction_shape_is_wrong",
+    "test_trace_pulse_exposes_same_strike_gamma_delta_interaction_without_direction_authority",
+    "test_trace_renderer_has_real_pulse_interpolation_structure_mass_and_flow_halo",
+    "test_trace_ui_explains_live_motion_without_claiming_new_oi",
+    "test_v1242_version_is_consistent"
+   ]
+  },
+  "tests/test_v1243_graph_render_recovery.py": {
+   "casos": 8,
+   "tests": [
+    "test_frontend_contract_understands_plotly_bdata_and_shape",
+    "test_heatmap_axis_uses_strike_y_not_exposure_z",
+    "test_plotly6_binary_arrays_are_decoded_for_native_renderers",
+    "test_plotly6_heatmap_shape_is_restored_as_nested_lists",
+    "test_surface_decoder_never_constructs_float32array_at_unaligned_frame_offset",
+    "test_trace_price_range_uses_structure_when_candles_are_empty",
+    "test_version_1243_without_persistence_reset",
+    "test_wasm_probe_is_capability_based_and_does_not_blind_import"
+   ]
+  },
+  "tests/test_v1244_trace_spatial_gravity.py": {
+   "casos": 3,
+   "tests": [
+    "test_v1244_gravity_is_bounded_and_dia_grid_is_half_point",
+    "test_v1244_python_syntax",
+    "test_v1244_static_contract_and_layout"
+   ]
+  },
+  "tests/test_v1245_trace_fullscreen_timeframe.py": {
+   "casos": 3,
+   "tests": [
+    "test_v1245_layout_and_structured_lanes_contract",
+    "test_v1245_python_candles_are_aligned_to_selected_timeframe",
+    "test_v1245_python_syntax"
+   ]
+  },
+  "tests/test_v1246_trace_true_chart_scale.py": {
+   "casos": 5,
+   "tests": [
+    "test_v1246_auto_price_focus_does_not_force_all_far_levels_into_y_range",
+    "test_v1246_backend_timeframe_ohlc_remains_event_time_aligned",
+    "test_v1246_center_resets_temporal_viewport",
+    "test_v1246_python_syntax",
+    "test_v1246_true_x_scale_contract_is_present"
+   ]
+  },
+  "tests/test_v1247_flow_drift_navigation.py": {
+   "casos": 4,
+   "tests": [
+    "test_flow_pro_backend_declares_pan_free_axes_and_stable_uirevision",
+    "test_net_drift_backend_declares_pan_free_axes_and_stable_uirevision",
+    "test_plotly_fallback_keeps_scroll_zoom_enabled",
+    "test_ultra_native_flow_and_drift_have_mouse_navigation_and_persistent_view"
+   ]
+  },
+  "tests/test_v1248_runtime_render_recovery.py": {
+   "casos": 4,
+   "tests": [
+    "test_pointer_coordinates_use_domrect_but_layout_uses_chartrect",
+    "test_product_version_v1248",
+    "test_render_init_is_failure_isolated_so_one_canvas_does_not_block_surface",
+    "test_trace_chart_rect_geometry_method_exists_and_is_not_domrect_alias"
+   ]
+  },
+  "tests/test_v1249_gpu_surface_recovery.py": {
+   "casos": 6,
+   "tests": [
+    "test_product_version_v1249_without_persistence_reset",
+    "test_runtime_failure_replaces_canvas_before_webgl_fallback",
+    "test_webgpu_device_loss_and_uncaptured_error_are_guarded",
+    "test_webgpu_first_frame_is_validated_before_active_status",
+    "test_webgpu_triangle_winding_is_visible_with_backface_culling",
+    "test_webgpu_uniform_layout_matches_wgsl_96_bytes"
+   ]
+  },
+  "tests/test_v1250_trace_flow_dock_linked_strike.py": {
+   "casos": 6,
+   "tests": [
+    "test_dealer_mini_is_explicitly_estimated_and_data_backed",
+    "test_python_syntax_v1250",
+    "test_trace_flow_dock_exists_and_is_native",
+    "test_trace_flow_dock_uses_existing_live_pipeline_not_second_tick_socket",
+    "test_trace_linked_strike_is_hover_driven_and_crosses_all_lanes",
+    "test_v1250_backend_contract_and_version_without_memory_reset"
+   ]
+  },
+  "tests/test_v12510_universal_chart_continuity_switching.py": {
+   "casos": 8,
+   "tests": [
+    "test_asset_switch_fast_path_does_not_force_rest_flow_queries",
+    "test_atomic_browser_switch_pauses_reads_and_aborts_old_chart_request",
+    "test_full_day_flow_history_merge_does_not_drop_alpaca_cache",
+    "test_native_renderer_only_segments_when_chart_explicitly_requests_time_gap_policy",
+    "test_net_drift_underlying_uses_dense_full_day_price_history",
+    "test_nextgen_does_price_bootstrap_during_handoff_but_pauses_quant_reads",
+    "test_read_conflicts_remain_soft_but_write_conflicts_remain_real_409",
+    "test_version_and_soft_stale_read_contract"
+   ]
+  },
+  "tests/test_v12511_instant_asset_switch.py": {
+   "casos": 8,
+   "tests": [
+    "test_asset_endpoint_does_not_wait_for_full_refresh",
+    "test_asset_switch_commit_has_no_synchronous_quant_refresh",
+    "test_background_loop_does_not_duplicate_heavy_warmup",
+    "test_browser_releases_dashboard_before_quant_hydration",
+    "test_isolated_worker_does_not_own_shared_opra_universe",
+    "test_periodic_state_refresh_finishes_late_quant_hydration",
+    "test_surface_controls_use_fast_single_panel_endpoint",
+    "test_version_and_progressive_switch_contract"
+   ]
+  },
+  "tests/test_v12512_progressive_data_fusion_render.py": {
+   "casos": 11,
+   "tests": [
+    "test_cross_section_latest_request_wins_and_warm_requests_are_not_dropped",
+    "test_cross_section_net_oi_title_matches_requested_metric",
+    "test_dxlink_batches_chain_subscriptions_and_parses_mixed_compact_frames",
+    "test_provider_bus_has_no_fixed_primary_secondary_rank_and_fuses_comparable_prices",
+    "test_scanner_and_trace_can_use_quality_aware_consensus_spot_without_cross_instrument_mix",
+    "test_startup_yields_without_synchronous_full_chain_refresh",
+    "test_surface_backend_cache_and_revision_contract",
+    "test_surface_switch_is_local_first_and_single_rebuild",
+    "test_tastytrade_derivatives_hydrate_off_click_path_with_provider_streamer_symbols",
+    "test_tastytrade_oauth_and_dxlink_are_read_only_and_secret_safe",
+    "test_version_is_v12512"
+   ]
+  },
+  "tests/test_v12514_full_provider_coverage_data_lake.py": {
+   "casos": 9,
+   "tests": [
+    "test_alpaca_cold_library_functions_exist",
+    "test_data_lake_archives_raw_and_normalized_without_provider_rank",
+    "test_data_lake_never_archives_tastytrade_quote_token_path",
+    "test_main_exposes_coverage_and_data_lake_endpoints",
+    "test_provider_center_surfaces_coverage_auditor_and_cold_settings",
+    "test_provider_library_is_one_asset_per_cycle_and_non_hot",
+    "test_tastytrade_catalog_does_not_change_live_subscriptions_by_design",
+    "test_tastytrade_settings_include_background_catalog",
+    "test_version_and_product_marker_are_12514"
+   ]
+  },
+  "tests/test_v12515_universal_asset_ecosystems.py": {
+   "casos": 13,
+   "tests": [
+    "test_canonical_ecosystems_cover_tactical_assets",
+    "test_derivative_structure_is_observed_not_fake_dealer_gex",
+    "test_dow_ecosystem_roots_are_correct",
+    "test_ecosystem_feature_can_fuse_index_future_related_without_raw_price_addition",
+    "test_ecosystem_runtime_is_nonblocking_and_normalized",
+    "test_feature_bus_and_scanner_accept_new_semantic_channels",
+    "test_library_expands_related_alpaca_components_without_hot_subscription_explosion",
+    "test_main_starts_runtime_and_exposes_ecosystem_diagnostics",
+    "test_tasty_derivative_feature_uses_observed_delta_oi_balance_without_fake_gex",
+    "test_tastytrade_resolves_provider_futures_and_all_derivative_families",
+    "test_tradestation_is_an_explicit_observed_capability_provider",
+    "test_ui_surfaces_etf_index_future_derivatives",
+    "test_version_and_product_marker"
+   ]
+  },
+  "tests/test_v12516_market_truth_decision_charttw.py": {
+   "casos": 13,
+   "tests": [
+    "test_decision_intelligence_scanner_only_and_no_fake_p_up_down",
+    "test_decision_intelligence_uses_calibrated_target_probability_only_when_ready",
+    "test_feature_intelligence_is_shadow_and_cannot_change_scanner",
+    "test_low_latency_health_exposes_causality_and_chart_cache",
+    "test_operativa_exposes_nextgen_intelligence_and_tasty_runtime_without_new_network_probe",
+    "test_provider_bus_records_sequence_and_market_truth_has_no_fixed_rank",
+    "test_research_cycle_persists_nextgen_intelligence_state",
+    "test_research_validation_never_invents_probability_without_gate",
+    "test_tastytrade_passes_source_sequence_into_provider_bus",
+    "test_temporal_causality_reorders_with_watermark",
+    "test_temporal_heatmap_preserves_separate_gamma_delta_matrices",
+    "test_trace_receives_temporal_heatmap_without_removing_existing_value_map",
+    "test_version_12516"
+   ]
+  },
+  "tests/test_v12517_unified_market_intelligence.py": {
+   "casos": 14,
+   "tests": [
+    "test_derivatives_intelligence_separates_observed_and_model_proxy",
+    "test_dow_ecosystems_have_own_primary_and_dow_futures_only",
+    "test_expiry_intelligence_uses_actual_dates_and_never_zero_equals_0dte",
+    "test_ndjson_route_is_progressive_cache_provider_then_binary_live_handoff",
+    "test_profile_engine_is_universal_and_does_not_silently_fallback_to_gamma",
+    "test_provider_bus_uses_bounded_event_time_cohort_not_arrival_order",
+    "test_provider_coverage_page_exposes_channel_health_and_temporal_truth",
+    "test_scanner_authority_remains_final_and_new_layers_are_context_only",
+    "test_service_publishes_one_versioned_state_for_multiple_consumers",
+    "test_structural_intelligence_has_migration_tilt_velocity_acceleration_and_proximity",
+    "test_temporal_truth_reports_health_per_provider_and_channel",
+    "test_transport_is_benchmark_driven_and_keeps_ndjson_and_binary_hot_paths",
+    "test_version_and_product_marker_are_12517",
+    "test_versioned_state_changes_only_changed_component_versions"
+   ]
+  },
+  "tests/test_v12518_system_recovery_flow_kinematics.py": {
+   "casos": 12,
+   "tests": [
+    "test_flow_kinematics_api_is_read_only_context",
+    "test_flow_kinematics_is_observed_time_derivative_context_not_greek_relabeling",
+    "test_generic_stock_helpers_keep_rth_contract_while_trace_explicitly_requests_full_day",
+    "test_london_reference_is_dst_aware_and_does_not_claim_synthetic_bars",
+    "test_net_drift_keeps_sparse_real_gamma_delta_snapshots_visible_and_breaks_long_holes",
+    "test_release_identity_v12518",
+    "test_replay_context_exposes_derived_mode_without_corrupting_replay",
+    "test_solid_shell_is_low_frequency_ecosystem_control_not_a_second_data_engine",
+    "test_tactical_ui_dark_from_frame_zero_and_existing_selector_is_reused",
+    "test_trace_crosshair_is_canvas_native_smoothed_but_reduced_motion_safe",
+    "test_ultra_charts_use_visual_only_lod_and_controlled_drift_bloom",
+    "test_visual_motion_is_presentation_only_bounded_and_accessible"
+   ]
+  },
+  "tests/test_v12519_instant_boot.py": {
+   "casos": 7,
+   "tests": [
+    "test_alpaca_contracts_and_chain_start_concurrently",
+    "test_backend_primes_price_history_and_publishes_core_before_enrichment",
+    "test_boot_ui_does_not_publish_false_zero_expiry_while_loading",
+    "test_core_publish_becomes_usable_before_final_enrichment",
+    "test_instant_boot_window_hint_roundtrip",
+    "test_release_identity_and_boot_contract",
+    "test_warmup_progress_never_rolls_back_phase"
+   ]
+  },
+  "tests/test_v1251_adaptive_live_scheduler.py": {
+   "casos": 7,
+   "tests": [
+    "test_backend_adaptive_scheduler_transitions_and_intervals",
+    "test_backend_scheduler_is_scheduling_only_and_wakes_fast",
+    "test_client_scheduler_loaded_before_renderers_and_has_adaptive_cadence",
+    "test_python_syntax_v1251",
+    "test_tick_hot_path_is_frame_coalesced_and_not_double_ingested",
+    "test_trace_and_pulse_use_adaptive_loops_not_old_fixed_hot_intervals",
+    "test_v1251_version_and_persistence_compatibility"
+   ]
+  },
+  "tests/test_v1252_session_bootstrap_interactive_analytics.py": {
+   "casos": 6,
+   "tests": [
+    "test_alpaca_session_backfill_uses_ny_rth_and_session_anchored_3m",
+    "test_cross_section_net_oi_net_volume_and_true_peak_render",
+    "test_exposure_cube_net_oi_and_net_volume_semantics",
+    "test_platform_trace_session_bootstrap_contract_and_cache",
+    "test_v1252_frontend_contract_has_bootstrap_multirender_and_node_inspector",
+    "test_v1252_version_and_persistence_compatibility"
+   ]
+  },
+  "tests/test_v1253_performance_interaction_core.py": {
+   "casos": 9,
+   "tests": [
+    "test_adaptive_quality_only_changes_visual_css_and_render_resolution",
+    "test_dashboard_loads_performance_core_before_binary_transport_and_has_diagnostics_toggle",
+    "test_existing_binary_transport_is_reused_and_feeds_display_bus",
+    "test_governor_is_display_aware_and_has_hysteresis",
+    "test_performance_core_is_presentation_only_and_singleton",
+    "test_ring_queue_and_time_budget_replace_array_shift_microtask_hot_loop",
+    "test_surface_minimal_copy_has_safe_ownership_rules",
+    "test_trace_uses_independent_cached_layers_and_hover_only_dirties_interaction",
+    "test_version_and_persistence_contract_are_preserved"
+   ]
+  },
+  "tests/test_v1254_chart_state_session_continuity.py": {
+   "casos": 10,
+   "tests": [
+    "test_chart_state_is_authoritative_and_stale_requests_are_discarded",
+    "test_cross_section_olas_and_true_peaks_share_same_metric_data",
+    "test_flow_price_series_also_uses_explicit_gap_breaks",
+    "test_native_surface_alternative_honors_spline_and_node_inspector",
+    "test_net_drift_breaks_restart_gaps_and_never_connects_them",
+    "test_projection_overlay_is_separate_from_render_and_scanner_owned",
+    "test_session_memory_persists_call_put_decomposition_without_becoming_signal",
+    "test_surface_controls_are_above_graph_and_support_all_presentations",
+    "test_surface_presentation_switches_gpu_vs_2d_without_recomputing_scanner",
+    "test_v1254_version_and_persistence_compatibility"
+   ]
+  },
+  "tests/test_v1255_universal_multiasset_integrity.py": {
+   "casos": 9,
+   "tests": [
+    "test_alpaca_full_day_bootstrap_uses_explicit_clock_range_and_no_bar_count_semantics",
+    "test_atomic_symbol_switch_has_epoch_and_clears_symbol_scoped_state",
+    "test_browser_switch_is_progressive_symbol_scoped_and_discards_stale_responses",
+    "test_internal_structural_flow_native_structure_and_opra_diagnostics_are_visibly_separate",
+    "test_itm_structural_flow_is_symbol_scoped_context_not_external_orderflow",
+    "test_trace_bootstrap_can_load_qqq_without_mutating_active_dia",
+    "test_trace_pulse_filters_opra_to_active_underlying_and_has_epoch_guards",
+    "test_universal_trace_scale_not_replaced_by_fixed_plus_minus_four_percent",
+    "test_version_and_universal_contract_metadata"
+   ]
+  },
+  "tests/test_v1256_alpaca_trace_bootstrap_recovery.py": {
+   "casos": 8,
+   "tests": [
+    "test_alpaca_sip_failure_falls_back_to_iex_display_only",
+    "test_api_exposes_cache_only_and_display_fallback_contract",
+    "test_cache_only_bootstrap_is_immediate_and_does_not_require_quant_state",
+    "test_failed_provider_refresh_does_not_clear_visible_bootstrap_and_symbol_switch_resets",
+    "test_initial_trace_starts_history_before_heavy_quant_request",
+    "test_nextgen_bootstrap_is_cache_first_then_provider_refresh_and_short_retry",
+    "test_no_synthetic_candles_and_bootstrap_diagnostic_is_visible",
+    "test_version_1256_and_product_badge"
+   ]
+  },
+  "tests/test_v1257_native_canvas_hot_path.py": {
+   "casos": 7,
+   "tests": [
+    "test_gap_segmentation_is_time_aware",
+    "test_performance_authority_unchanged",
+    "test_trace_ring_buffer_is_circular_and_price_line_breaks_gaps",
+    "test_ultra_canvas_uses_cached_base_and_overlay_hover",
+    "test_version_and_cache_bust",
+    "test_visible_range_y_autoscale_and_pixel_width",
+    "test_windows_webgpu_warning_removed"
+   ]
+  },
+  "tests/test_v1258_universal_institutional_charts.py": {
+   "casos": 4,
+   "tests": [
+    "test_frontend_has_generic_profile_value_map_unusual_flow_and_theme_engine",
+    "test_full_available_opra_print_window_is_sent_to_trace_visual_layer",
+    "test_trace_profiles_expose_call_put_net_oi_and_volume_for_any_symbol",
+    "test_version_and_universal_controls_present"
+   ]
+  },
+  "tests/test_v1259_global_renderer_recovery.py": {
+   "casos": 6,
+   "tests": [
+    "test_flow_figure_marks_bridge_policy",
+    "test_mini_panels_have_explicit_empty_states_instead_of_blank_canvas",
+    "test_missing_interaction_methods_can_no_longer_abort_compose",
+    "test_native_time_series_support_honest_session_gap_bridges",
+    "test_net_drift_figure_marks_bridge_policy",
+    "test_version_and_global_renderer_contract"
+   ]
+  },
+  "tests/test_v1260_lean_intelligent_terminal.py": {
+   "casos": 3,
+   "tests": [
+    "test_api_charts_supports_view_projection",
+    "test_frontend_requests_view_scoped_charts",
+    "test_version_1260"
+   ]
+  },
+  "tests/test_v1261_quant_terminal_repair.py": {
+   "casos": 8,
+   "tests": [
+    "test_backend_chart_calculation_is_view_gated",
+    "test_chart_views_do_not_default_to_command_for_non_chart_screens",
+    "test_dow_specialized_navigation_is_visible",
+    "test_surface_gpu_is_lazy_loaded",
+    "test_surface_restores_gex_dex_oi_volume_fields",
+    "test_trace_has_single_active_render_target_and_polling_is_gated",
+    "test_tradingview_style_symbol_search_replaces_visible_ecosystem_picker",
+    "test_v1261_release_markers"
+   ]
+  },
+  "tests/test_v1262_graph_runtime_data_flow.py": {
+   "casos": 9,
+   "tests": [
+    "test_flow_health_reports_actual_observations_and_queue_pressure_without_network_calls",
+    "test_generic_chart_runtime_contract_rehydrates_after_section_activation",
+    "test_option_fabric_keeps_alpaca_and_tasty_as_redundant_lanes",
+    "test_price_fabric_failover_uses_observed_quality_not_provider_name",
+    "test_price_fabric_is_provider_neutral_and_does_not_sum_sources",
+    "test_surface_binary_socket_is_lazy_and_has_safe_lifecycle",
+    "test_tastytrade_provides_own_instrument_structural_failover_without_network_call",
+    "test_trace_has_live_price_line_big_profiles_and_stronger_temporal_heatmap",
+    "test_v1262_release_markers"
+   ]
+  },
+  "tests/test_v1262_graph_runtime_recovery.py": {
+   "casos": 8,
+   "tests": [
+    "test_auditor_exposes_nonblocking_provider_flow_fabric",
+    "test_chart_runtime_rehydrates_after_section_becomes_visible",
+    "test_option_flow_is_published_semantically_by_parent_symbol",
+    "test_provider_flow_health_is_nonblocking_and_reports_redundancy",
+    "test_provider_flow_health_reports_quantdata_without_network_probe",
+    "test_tasty_derivatives_subscribe_trade_and_publish_option_flow",
+    "test_tasty_option_trade_runtime_really_builds_parent_flow_row",
+    "test_trace_keeps_flow_and_drift_as_full_sections_not_mini_panels"
+   ]
+  },
+  "tests/test_v1262_provider_activation_audit.py": {
+   "casos": 4,
+   "tests": [
+    "test_native_structure_has_no_provider_dependency",
+    "test_provider_status_does_not_call_credentials_alone_active",
+    "test_quantdata_configured_is_not_same_as_observed_provider",
+    "test_source_context_uses_quantdata_feature_bus_without_network_io"
+   ]
+  },
+  "tests/test_v1263_london_unusual_flow.py": {
+   "casos": 5,
+   "tests": [
+    "test_activity_score_is_causal_prior_bars_only",
+    "test_flow_figure_accepts_london_underlying_anomaly_without_faking_options",
+    "test_flow_session_phase_starts_at_london_before_us_premarket",
+    "test_london_open_is_dst_aware_and_not_symbol_specific",
+    "test_scheduler_has_london_cadence_instead_of_closed_cadence"
+   ]
+  },
+  "tests/test_v1264_chain_startup_failover.py": {
+   "casos": 7,
+   "tests": [
+    "test_alpaca_transient_gateway_retries_but_auth_does_not",
+    "test_asset_switch_prepares_tasty_before_quant_warmup",
+    "test_background_prepare_task_keeps_a_strong_reference",
+    "test_boot_order_and_quant_retry_contract_are_enforced_in_source",
+    "test_release_keeps_dow_truth_and_persistence_contracts",
+    "test_tasty_failover_wait_uses_only_real_in_memory_chain",
+    "test_transient_chain_classifier_is_narrow"
+   ]
+  },
+  "tests/test_v1265_always_on_instant_calendar_dow.py": {
+   "casos": 8,
+   "tests": [
+    "test_browser_start_does_not_restart_engine_and_vps_artifacts_exist",
+    "test_calendar_date_only_prefers_causal_raw_archive_with_ready_package_as_migration_fallback",
+    "test_current_open_uses_ready_state_and_ready_chart_cache",
+    "test_frontend_calendar_is_global_and_date_selection_enters_causal_replay",
+    "test_historical_precompute_never_overwrites_live_ready",
+    "test_persistence_identity_matches_specialized_release",
+    "test_release_identity_keeps_dow_core_while_picker_allows_dynamic_etfs",
+    "test_visible_universe_is_direct_dow_only"
+   ]
+  },
+  "tests/test_v1270_sophia_aggression.py": {
+   "casos": 10,
+   "tests": [
+    "test_aggression_historical_precomputes_all_timeframes",
+    "test_aggression_live_buy_and_all_timeframes",
+    "test_aggression_live_sell",
+    "test_dashboard_contains_minimal_aggression_and_sophia_ui",
+    "test_main_wires_local_voice_and_event_websockets",
+    "test_sophia_full_digest_has_platform_modules",
+    "test_sophia_local_llm_rejects_non_loopback",
+    "test_sophia_parses_unusual_flow_watch_and_ignores_old_event",
+    "test_sophia_price_watch_is_one_shot",
+    "test_version_is_1270"
+   ]
+  },
+  "tests/test_v12710_return_anomalies_section.py": {
+   "casos": 20,
+   "tests": [
+    "test_el_base_rate_se_declara_como_descriptivo",
+    "test_el_modulo_no_importa_nada_del_motor",
+    "test_el_salto_overnight_se_clasifica_aparte_del_intradia",
+    "test_el_umbral_sale_del_bootstrap_y_no_de_un_dos_sigma_fijo",
+    "test_entradas_degeneradas_no_revientan",
+    "test_la_politica_es_explicita_y_viaja_en_la_salida",
+    "test_la_seccion_nunca_emite_direccion",
+    "test_la_seccion_permanece_siempre_activa_sin_feature_flag",
+    "test_marca_el_shock_real_en_la_barra_exacta",
+    "test_ningun_modulo_del_motor_importa_esta_seccion",
+    "test_no_dispara_mas_de_lo_declarado_sobre_ruido",
+    "test_precios_no_positivos_se_descartan_sin_producir_infinitos",
+    "test_sin_muestra_suficiente_no_se_inventa_un_umbral",
+    "test_umbral_bootstrap_devuelve_nan_con_muestra_ridicula",
+    "test_una_cadena_de_opciones_se_colapsa_a_un_precio_por_instante"
+   ]
+  },
+  "tests/test_v12711_anomalies_momentum_shadow.py": {
+   "casos": 18,
+   "tests": [
+    "test_absorcion_es_fail_closed_si_falta_precio_en_el_ultimo_bucket",
+    "test_candidate_es_causal_as_of_time_y_no_reescribe_el_pasado",
+    "test_candidate_no_expone_compra_venta_como_senal",
+    "test_contexto_flow_es_solo_contexto_y_no_autoridad",
+    "test_current_de_flow_se_preserva_y_candidate_vive_aparte",
+    "test_endpoint_anomalias_permanece_activo_incluso_con_env_legacy",
+    "test_episodios_agrupan_mismo_signo_y_separan_opuesto",
+    "test_gap_de_sesion_no_se_une_como_un_episodio_continuo",
+    "test_main_solo_lee_snapshots_publicados_para_esta_seccion",
+    "test_modulo_aislado_sigue_sin_importar_motor",
+    "test_paquete_multiframe_preserva_current_y_candidate_shadow",
+    "test_permutation_candidate_calibrado_en_ruido_de_signos",
+    "test_permutation_candidate_detecta_flujo_unidireccional_fuerte",
+    "test_release_identity_v12711",
+    "test_ruido_iid_no_se_convierte_en_lluvia_de_anomalias",
+    "test_shock_grande_se_detecta_en_el_timestamp_correcto",
+    "test_ui_no_dibuja_linea_de_precio_entre_shocks_de_sesiones",
+    "test_ui_tiene_una_sola_seccion_y_no_ruta_de_ordenes"
+   ]
+  },
+  "tests/test_v12711_release_artifact_verifier.py": {
+   "casos": 10,
+   "tests": [
+    "test_inventory_identity_rejects_internally_inconsistent_inventory",
+    "test_journal_credit_is_reused_only_for_same_validation_identity",
+    "test_parse_junit_preserves_skip_as_release_blocker",
+    "test_partition_timeout_carries_partition_files_and_log_tail",
+    "test_safe_extract_accepts_normal_tree",
+    "test_safe_extract_rejects_zip_path_traversal",
+    "test_verifier_exists_and_is_bound_to_artifact_plan_inventory_and_environment",
+    "test_zip_preflight_rejects_packaged_build_residue",
+    "test_zip_preflight_rejects_packaged_secret",
+    "test_zip_preflight_rejects_release_preparation_residue"
+   ]
+  },
+  "tests/test_v12712_foundation_hardening.py": {
+   "casos": 13,
+   "tests": [
+    "test_bs_clock_uses_exact_calendar_seconds_near_expiry",
+    "test_calibration_gate_sessions_are_shadow_then_provisional",
+    "test_calibration_gate_uses_validation_final_oos_and_session_bootstrap",
+    "test_foundation_hardening_survives_current_release_identity",
+    "test_proxy_headers_require_verified_direct_peer",
+    "test_rate_limiter_failure_cache_is_bounded",
+    "test_rate_limiter_reads_do_not_allocate_attacker_keys",
+    "test_sophia_post_llm_governor_blocks_opposite_but_understands_negation",
+    "test_source_arbitration_uses_channel_policy_for_open_interest",
+    "test_source_hysteresis_prevents_near_equal_flapping",
+    "test_svi_counterexample_is_hard_rejected_by_durrleman",
+    "test_svi_forward_uses_carry_not_spot_proxy",
+    "test_trading_clock_is_separate_and_holiday_aware"
+   ]
+  },
+  "tests/test_v12713_truth_decision_hardening.py": {
+   "casos": 18,
+   "tests": [
+    "test_causality_envelope_rejects_invalid_market_event_time",
+    "test_dockerignore_excludes_secret_env_and_keeps_example",
+    "test_expected_value_helper_requires_explicit_execution_cost",
+    "test_generic_futures_quote_uses_futures_policy_not_equity_policy",
+    "test_hypothetical_gex_is_linear_in_per_contract_multiplier",
+    "test_hypothetical_gex_uses_per_contract_r_q_multiplier_not_cfg_defaults",
+    "test_invalid_event_time_never_becomes_valid_now_in_provider_bus",
+    "test_legacy_master_token_cookie_is_forced_off_in_production",
+    "test_neutral_atm_zone_stays_neutral_instead_of_default_buy",
+    "test_receive_proxy_clock_is_penalized_by_arbitration",
+    "test_rust_pipeline_source_is_bounded_and_has_hard_heap_guard",
+    "test_scanner_ev_is_unavailable_when_execution_cost_not_measured",
+    "test_scanner_explicit_zero_cost_is_measured_not_implicit",
+    "test_scanner_fails_closed_when_only_zone_has_no_directional_evidence",
+    "test_silent_source_no_longer_beats_source_that_reports_bad_metrics",
+    "test_tasty_candle_provider_clock_keeps_real_provenance",
+    "test_tasty_quote_receive_time_is_explicit_proxy_not_observed_event_time",
+    "test_v12713_truth_decision_hardening_survives_descendant_releases"
+   ]
+  },
+  "tests/test_v12715_atomic_state_view.py": {
+   "casos": 6,
+   "tests": [
+    "test_lectura_directa_puede_romperse",
+    "test_par_simbolo_epoch_nunca_se_desempareja",
+    "test_stage_distingue_core_de_full",
+    "test_vista_cubre_campos_criticos_de_endpoints",
+    "test_vista_es_inmutable_y_no_cambia_tras_publicarse",
+    "test_vista_publicada_siempre_coherente"
+   ]
+  },
+  "tests/test_v12716_silent_degradation.py": {
+   "casos": 8,
+   "tests": [
+    "test_carry_fallback_declared_and_recorded",
+    "test_config_por_activo_declara_procedencia",
+    "test_freshness_exception_stays_fail_closed_and_observable",
+    "test_health_exposes_degradations",
+    "test_missing_anchors_are_observable",
+    "test_no_new_silent_default_handlers_in_selected_decision_paths",
+    "test_sql_count_failure_is_observable",
+    "test_unreadable_env_is_not_same_as_missing_credentials"
+   ]
+  },
+  "tests/test_v12717_rescued_invariants.py": {
+   "casos": 12,
+   "tests": [
+    "test_asset_without_direct_source_fails_loudly",
+    "test_canvas_interaction_cannot_trigger_backend_actions",
+    "test_current_chart_stack_is_packaged",
+    "test_frontend_does_not_own_directional_engine",
+    "test_human_readable_single_authority_contract_exists",
+    "test_live_providers_feed_shared_fabrics",
+    "test_no_hidden_cross_instrument_proxy",
+    "test_no_test_references_missing_release_asset",
+    "test_only_scanner_has_directional_authority",
+    "test_optional_prepared_assets_remain_fail_closed_for_final_artifact",
+    "test_provider_health_distinguishes_configuration_connection_observation",
+    "test_release_manifest_cannot_hide_skips_as_audited"
+   ]
+  },
+  "tests/test_v12718_session_revocation_supply_chain.py": {
+   "casos": 16,
+   "tests": [
+    "test_corrupt_session_state_fails_closed_and_state_file_is_private",
+    "test_docker_and_ci_require_hash_verification_and_no_deps",
+    "test_each_lock_has_reproducible_input_file",
+    "test_every_pinned_package_has_at_least_one_sha256",
+    "test_expired_or_malformed_credentials_do_not_pollute_revocation_list",
+    "test_logout_revokes_server_side_and_logout_all_is_protected",
+    "test_production_lock_contains_transitive_closure_sentinels",
+    "test_revocation_survives_restart_simulation",
+    "test_revoke_all_invalidates_every_old_session_without_rotating_master_token",
+    "test_revoke_all_persists_across_restart_simulation",
+    "test_revoke_one_session_does_not_revoke_another",
+    "test_session_credential_never_contains_master_token",
+    "test_sessions_have_unique_128bit_sid",
+    "test_v1_credentials_and_tampered_v2_credentials_are_rejected"
+   ]
+  },
+  "tests/test_v12719_vps_final_contract.py": {
+   "casos": 10,
+   "tests": [
+    "test_calibration_readiness_uses_same_conservative_default_everywhere",
+    "test_dealer_heuristic_is_labeled_score_not_calibrated_probability",
+    "test_descriptive_backtest_never_labels_unknown_cost_as_net",
+    "test_fallback_default_carry_blocks_scanner_publication_authority",
+    "test_no_skips_are_hidden_as_release_policy",
+    "test_presentation_only_ticks_can_never_become_operational_canonical_lane",
+    "test_release_identity_is_single_and_at_least_v12719",
+    "test_svi_exposes_slice_and_global_calendar_readiness_separately",
+    "test_tasty_rest_missing_event_time_is_receive_proxy_and_presentation_only",
+    "test_vps_env_example_uses_conservative_release_defaults"
+   ]
+  },
+  "tests/test_v1271_dow_scope_contract.py": {
+   "casos": 20,
+   "tests": [
+    "test_architecture_string_matches_the_declared_scope",
+    "test_context_only_assets_are_not_selectable",
+    "test_dia_index_root_is_the_optionable_one",
+    "test_ecosystem_of_unsupported_symbol_degrades_instead_of_raising",
+    "test_every_asset_declares_its_own_provider_and_window",
+    "test_full_assets_have_their_own_option_chain_path",
+    "test_no_asset_maps_to_another_instruments_math",
+    "test_product_marker_declares_the_same_scope",
+    "test_retired_symbols_raise_typed_error_not_silent_fallback",
+    "test_unsupported_error_names_the_visible_universe",
+    "test_visible_universe_is_exactly_the_dow_set"
+   ]
+  },
+  "tests/test_v1271_hardening.py": {
+   "casos": 14,
+   "tests": [
+    "test_codemods_are_idempotent",
+    "test_expiry_window_uses_fresh_macro_not_cached",
+    "test_guard_returns_default_and_records",
+    "test_loopback_detection",
+    "test_no_silent_exception_handlers_remain",
+    "test_non_loopback_bind_without_token_is_refused",
+    "test_numeric_col_helper_returns_series_for_missing_column",
+    "test_obs_counts_and_classifies_degradations",
+    "test_source_health_has_one_definition_for_both_paths",
+    "test_swallow_does_not_propagate_but_records",
+    "test_temporal_heatmap_survives_missing_volume_column",
+    "test_token_comparison_rejects_empty_and_wrong",
+    "test_unsupported_asset_raises_typed_error_with_universe",
+    "test_version_has_a_single_source_of_truth"
+   ]
+  },
+  "tests/test_v1271_provider_truthfulness.py": {
+   "casos": 12,
+   "tests": [
+    "test_adapter_catalog_and_data_lake_do_not_contradict_each_other",
+    "test_data_lake_does_not_claim_total_external_coverage",
+    "test_data_lake_lists_exactly_the_implemented_providers",
+    "test_every_listed_adapter_has_a_declared_transport_and_detail",
+    "test_no_adapter_claims_active_without_configuration",
+    "test_replay_adapter_is_never_a_live_market_source",
+    "test_retired_adapters_are_absent_not_listed_as_inactive",
+    "test_status_contract_is_stable"
+   ]
+  },
+  "tests/test_v12720_windows_installer_hardening.py": {
+   "casos": 5,
+   "tests": [
+    "test_release_identity_advanced_to_12720_without_quant_logic_change_claim",
+    "test_windows_configuration_and_provider_tools_do_not_fallback_to_global_python",
+    "test_windows_install_never_compiles_scientific_stack_from_source",
+    "test_windows_installer_requires_cpython_312_x64_and_private_venv",
+    "test_windows_lock_is_hash_complete_and_excludes_linux_only_uvloop"
+   ]
+  },
+  "tests/test_v12721_runtime_symbol_scope.py": {
+   "casos": 3,
+   "tests": [
+    "test_api_state_defines_hsym_before_use",
+    "test_live_scheduler_defines_hsym_before_use",
+    "test_no_other_endpoint_loads_hsym_without_assignment"
+   ]
+  },
+  "tests/test_v12722_calibration_quarantine.py": {
+   "casos": 4,
+   "tests": [
+    "test_flow_concat_preserves_union_schema_without_pandas_futurewarning",
+    "test_malformed_scanner_csv_quarantines_only_bad_rows",
+    "test_release_identity_at_least_v12722",
+    "test_same_malformed_file_uses_stable_recovery_without_duplicate_quarantine"
+   ]
+  },
+  "tests/test_v12723_live_stale_backtest_access.py": {
+   "casos": 5,
+   "tests": [
+    "test_historical_calendar_is_always_reachable_without_stale_popup",
+    "test_live_gate_remains_fail_closed_but_visual_warning_is_removed",
+    "test_live_stale_never_blurs_or_disables_active_page",
+    "test_release_identity_at_least_v12723",
+    "test_replay_apply_uses_visible_calendar_date"
+   ]
+  },
+  "tests/test_v1273_time_resolution.py": {
+   "casos": 18,
+   "tests": [
+    "test_bucket_rejects_non_positive_width",
+    "test_bucket_width_is_real_milliseconds",
+    "test_epoch_ms_is_correct_in_every_pandas_resolution",
+    "test_epoch_seconds_preserves_subsecond_resolution",
+    "test_every_version_declaration_is_in_sync",
+    "test_nat_gets_an_isolated_bucket_and_never_joins_real_data",
+    "test_no_module_assumes_nanosecond_resolution",
+    "test_pandas_is_pinned_to_a_tested_major",
+    "test_sweep_and_multileg_are_distinguished_not_collapsed",
+    "test_timezone_aware_input_is_handled",
+    "test_trades_minutes_apart_are_never_one_package"
+   ]
+  },
+  "tests/test_v1274_release_integrity.py": {
+   "casos": 4,
+   "tests": [
+    "test_demo_refresh_is_network_free_for_macro",
+    "test_guard_scripts_fail_check_mode_when_findings_exist",
+    "test_no_module_level_quarantine_and_all_skip_reasons_are_retired_surfaces",
+    "test_release_gate_runs_complete_suite_not_named_subsets"
+   ]
+  },
+  "tests/test_v1275_network_guard.py": {
+   "casos": 3,
+   "tests": [
+    "test_external_guard_rejects_http_and_websocket_without_token",
+    "test_healthz_is_minimal_public_probe",
+    "test_query_token_is_exchanged_for_cookie_and_cookie_authenticates"
+   ]
+  },
+  "tests/test_v1276_freshness_breaker.py": {
+   "casos": 28,
+   "tests": [
+    "test_acepta_epoch_datetime_pandas_e_iso",
+    "test_assess_age_equivale_a_assess_con_timestamp",
+    "test_basura_devuelve_none_en_vez_de_reventar",
+    "test_con_mercado_cerrado_rige_el_limite_amplio",
+    "test_data_quality_abre_el_circuito_con_subyacente_rancio",
+    "test_data_quality_bloquea_desde_la_primera_cadena_rancia",
+    "test_data_quality_expone_el_circuito_cerrado_con_datos_frescos",
+    "test_data_quality_latch_open_en_segundo_ciclo_rancio_y_rearma_en_tres_frescos",
+    "test_dato_reciente_es_fresco",
+    "test_el_rearme_exige_varias_lecturas_frescas_seguidas",
+    "test_fallos_consecutivos_abren_el_circuito",
+    "test_guard_impide_publicar_cifras_con_el_circuito_abierto",
+    "test_guard_no_estorba_con_el_circuito_cerrado",
+    "test_modo_demo_no_finge_frescura_perfecta_en_el_gate",
+    "test_naive_se_interpreta_como_utc_no_como_hora_local",
+    "test_ni_con_mercado_cerrado_se_acepta_un_dato_de_la_semana_pasada",
+    "test_politicas_por_defecto_estan_ordenadas_por_exigencia",
+    "test_por_encima_del_limite_es_rancio",
+    "test_require_fresh_deja_pasar_el_dato_bueno",
+    "test_require_fresh_lanza_con_el_diagnostico_adjunto",
+    "test_reset_manual_cierra_el_circuito",
+    "test_sin_timestamps_el_gate_no_asume_que_el_dato_sirve",
+    "test_snapshot_expone_el_estado_para_diagnostico",
+    "test_timestamp_ausente_no_se_confunde_con_fresco",
+    "test_timestamp_en_el_futuro_se_trata_como_fallo",
+    "test_un_solo_fallo_no_abre_el_circuito",
+    "test_una_lectura_buena_reinicia_el_contador_de_fallos",
+    "test_zona_intermedia_avisa_sin_bloquear"
+   ]
+  },
+  "tests/test_v1276_golden_numerics.py": {
+   "casos": 20,
+   "tests": [
+    "test_columna_ausente_es_rechazada_con_el_nombre",
+    "test_delta_call_menos_delta_put_es_el_factor_de_dividendo",
+    "test_delta_y_gamma_de_dos_caminos_del_motor_concuerdan",
+    "test_dex_por_contrato_coincide_con_la_formula_declarada",
+    "test_gamma_center_es_la_media_ponderada_por_gex_bruto",
+    "test_gamma_decrece_al_alejarse_del_strike",
+    "test_gamma_es_identica_para_call_y_put_mismo_strike",
+    "test_gamma_flip_interpola_linealmente_el_cruce_por_cero",
+    "test_gex_por_contrato_coincide_con_la_formula_declarada",
+    "test_greeks_completos_coinciden_con_valores_congelados",
+    "test_gross_gex_es_la_suma_de_magnitudes_y_signed_la_suma_con_signo",
+    "test_iv_devuelve_nan_si_el_precio_viola_no_arbitraje",
+    "test_iv_en_porcentaje_en_vez_de_decimal_no_pasa_silenciosamente",
+    "test_iv_invertida_reproduce_la_sigma_original",
+    "test_los_valores_congelados_los_reproduce_un_oraculo_independiente",
+    "test_open_interest_negativo_es_rechazado",
+    "test_paridad_put_call_se_cumple",
+    "test_precio_bs_coincide_con_valor_congelado"
+   ]
+  },
+  "tests/test_v1276_proxy_auth_hardening.py": {
+   "casos": 19,
+   "tests": [
+    "test_el_freno_se_aplica_por_origen",
+    "test_el_websocket_tambien_se_frena",
+    "test_exposicion_declarada_sin_token_fuerte_aborta_el_arranque",
+    "test_healthz_sigue_siendo_sonda_publica",
+    "test_https_terminado_en_el_proxy_se_detecta_por_cabecera",
+    "test_install_monta_el_middleware_en_loopback_protegido",
+    "test_la_cookie_de_sesion_autentica_peticiones_posteriores",
+    "test_la_cookie_emitida_no_contiene_el_token_maestro",
+    "test_la_sesion_caduca",
+    "test_loopback_detras_de_proxy_sigue_exigiendo_token",
+    "test_los_intentos_fallidos_se_frenan",
+    "test_require_token_explicito_protege_aunque_no_haya_bind_externo",
+    "test_rotar_el_token_invalida_las_sesiones_vivas",
+    "test_sobre_http_plano_no_se_marca_secure",
+    "test_sobre_https_si_se_marca_secure",
+    "test_token_configurado_en_loopback_activa_la_proteccion",
+    "test_un_acierto_limpia_el_historial_de_fallos",
+    "test_una_sesion_falsificada_no_pasa",
+    "test_uso_local_puro_sigue_sin_friccion"
+   ]
+  },
+  "tests/test_v1277_fusion.py": {
+   "casos": 19,
+   "tests": [
+    "test_browser_login_uses_post_session_and_not_query_token",
+    "test_build_data_quality_propaga_la_autoridad_y_no_la_cadena",
+    "test_el_gate_ya_no_exige_un_total_exacto_de_tests",
+    "test_el_inventario_de_tests_existe_y_es_coherente",
+    "test_el_inventario_detecta_la_desaparicion_de_un_test_por_nombre",
+    "test_el_unico_camino_que_declara_replay_verdadero_es_el_bundle_de_replay",
+    "test_frontend_keeps_stale_data_gate_internal_without_intrusive_surface",
+    "test_is_replay_false_bloquea_aunque_meta_declare_replay",
+    "test_la_autoridad_del_contexto_si_exime_aunque_meta_no_lo_diga",
+    "test_la_cadena_replay_por_si_sola_ya_no_abre_el_gate",
+    "test_live_publication_gate_blocks_immediately_latches_then_requires_three_fresh_cycles",
+    "test_query_token_bootstrap_defaults_off_in_production",
+    "test_release_gate_keeps_hardening_and_zero_skip_policy",
+    "test_release_identity_is_synchronized_everywhere_critical",
+    "test_replay_bypasses_wall_clock_freshness_but_missing_live_gate_fails_closed",
+    "test_same_quality_clock_never_replays_a_fresh_result_over_stale_inputs",
+    "test_scanner_is_made_non_actionable_when_freshness_blocks",
+    "test_sophia_treats_missing_or_closed_publication_gate_as_blocked",
+    "test_todas_las_llamadas_de_servicio_declaran_la_autoridad"
+   ]
+  },
+  "tests/test_v1279_quant_evolution.py": {
+   "casos": 18,
+   "tests": [
+    "test_black_scholes_extremes_remain_finite_and_inside_basic_bounds",
+    "test_candidate_cannot_promote_for_complexity_without_measured_gain",
+    "test_candidate_cannot_trade_a_small_score_gain_for_materially_worse_drawdown",
+    "test_candidate_promotes_only_after_oos_shadow_baseline_improvement",
+    "test_data_quality_exposes_oi_and_greeks_provenance_without_relabeling_probability",
+    "test_gamma_flip_ui_is_explicitly_approximate_while_internal_value_remains_numeric",
+    "test_gex_reconciliation_exposes_structural_and_estimated_dealer_models_separately",
+    "test_governance_contract_keeps_current_as_only_authority",
+    "test_observability_severity_distinguishes_critical_data_from_normal_degradation",
+    "test_oi_structural_freshness_accepts_friday_on_monday",
+    "test_oi_structural_freshness_is_shadow_not_hard_gate_yet",
+    "test_oi_structural_freshness_marks_previous_expected_session_stale",
+    "test_oi_structural_freshness_never_calls_missing_timestamp_fresh",
+    "test_sophia_digest_receives_oi_and_greeks_provenance_without_gaining_directional_authority",
+    "test_ui_never_labels_structural_gex_as_observed_dealer_inventory"
+   ]
+  },
+  "tests/test_v1279_release_traceability.py": {
+   "casos": 5,
+   "tests": [
+    "test_historical_release_archive_is_not_shipped_in_runtime_artifact",
+    "test_one_complete_active_release_document_set_matches_marker",
+    "test_operational_banners_report_current_version",
+    "test_release_gate_checks_artifact_cleanliness_before_running_suite",
+    "test_release_identity_is_synchronized_across_runtime_surfaces"
+   ]
+  },
+  "tests/test_v1280_platform_coherence.py": {
+   "casos": 16,
+   "tests": [
+    "test_backtest_is_not_a_navigation_or_page_mode_anymore",
+    "test_black76_delta_gamma_match_finite_difference",
+    "test_black76_put_call_parity_and_iv_roundtrip",
+    "test_cme_trade_date_maps_sunday_evening_to_monday",
+    "test_date_only_replay_starts_from_archived_clock_not_hidden_precompute_gate",
+    "test_future_engine_uses_own_multiplier_and_black76_model",
+    "test_future_option_selection_accepts_expires_at_and_never_defaults_multiplier_to_100",
+    "test_global_calendar_has_session_playback_controls",
+    "test_live_stale_blocks_actionability_not_historical_navigation",
+    "test_persist_tape_does_not_force_cme_local_calendar_date",
+    "test_provider_neutral_store_builds_cross_calendar_cme_clock",
+    "test_release_identity_at_least_v1280",
+    "test_replay_clock_starts_at_first_quant_reconstructible_snapshot",
+    "test_research_range_lives_under_auditor_not_separate_backtest",
+    "test_tasty_candles_are_archived_incrementally_for_global_replay",
+    "test_ym_and_mym_are_full_own_chain_assets_without_dia_proxy"
+   ]
+  },
+  "tests/test_v1281_premarket_publication.py": {
+   "casos": 7,
+   "tests": [
+    "test_build_data_quality_propagates_premarket_structural_publication",
+    "test_calendar_and_nav_share_one_sticky_shell_without_overlap",
+    "test_premarket_accepts_previous_session_option_structure_with_fresh_underlying",
+    "test_premarket_still_blocks_if_underlying_itself_is_stale",
+    "test_same_old_option_timestamp_is_blocked_during_regular_session",
+    "test_tastytrade_structural_meta_exports_real_freshness_clocks",
+    "test_tastytrade_ym_chain_meta_is_complete_and_uses_observed_underlying_clock"
+   ]
+  },
+  "tests/test_v1290_spotgamma_trace_levels.py": {
+   "casos": 12,
+   "tests": [
+    "test_hedge_wall_is_not_drawn_twice_when_it_lands_on_the_call_wall",
+    "test_hedge_wall_is_published_when_it_is_a_level_of_its_own",
+    "test_hiro_series_empty_without_flow_events",
+    "test_hiro_series_never_raises_on_malformed_events",
+    "test_hiro_series_schema_and_disclosure_when_ready",
+    "test_nextgen_js_has_hiro_panel",
+    "test_nextgen_js_has_spotgamma_level_colors",
+    "test_release_identity_at_least_v1290",
+    "test_structure_levels_adds_spotgamma_walls_when_aggregate_available",
+    "test_structure_levels_never_raises_on_bad_aggregate",
+    "test_structure_levels_without_curagg_keeps_legacy_shape",
+    "test_trace_contract_validates_hiro_field"
+   ]
+  },
+  "tests/test_v1300_gamma_model_split.py": {
+   "casos": 7,
+   "tests": [
+    "test_call_gamma_is_never_negative_and_put_gamma_never_positive",
+    "test_call_plus_put_gamma_reconstructs_net_gamma",
+    "test_empty_chain_never_raises",
+    "test_nextgen_js_has_spotgamma_split_bars",
+    "test_nextgen_js_renames_lanes_to_spotgamma_models",
+    "test_pulse_rows_carry_call_put_split_never_only_net",
+    "test_release_identity_at_least_v1300"
+   ]
+  },
+  "tests/test_v1310_key_levels_report.py": {
+   "casos": 8,
+   "tests": [
+    "test_dashboard_html_has_key_levels_hud",
+    "test_key_levels_report_degrades_without_raising",
+    "test_key_levels_report_expected_move_uses_same_t_convention_as_engine",
+    "test_key_levels_report_matches_structural_walls_exactly",
+    "test_key_levels_report_max_pain_matches_shared_function",
+    "test_nextgen_js_reads_key_levels_report_into_hud",
+    "test_premarket_and_trace_analytics_share_one_max_pain_implementation",
+    "test_release_identity_at_least_v1310"
+   ]
+  },
+  "tests/test_v1320_skew_model_svi.py": {
+   "casos": 9,
+   "tests": [
+    "test_app_js_plots_skew_chart",
+    "test_dashboard_has_skew_model_panel_distinct_from_observed_skew",
+    "test_release_identity_at_least_v1320",
+    "test_service_has_skew_figure_and_current",
+    "test_skew_25d_not_ready_without_fitted_slice",
+    "test_skew_25d_positive_for_standard_negative_equity_skew",
+    "test_skew_25d_self_consistent_with_evaluate_svi",
+    "test_skew_term_structure_empty_chain_degrades_without_raising",
+    "test_skew_term_structure_sorted_by_dte_and_excludes_unfitted_slices"
+   ]
+  },
+  "tests/test_v1330_gamma_squeeze_score.py": {
+   "casos": 7,
+   "tests": [
+    "test_dashboard_and_js_render_squeeze_hud",
+    "test_diagnostic_no_true_root_never_scores_at_full_proximity_weight",
+    "test_gamma_squeeze_never_raises_on_missing_fields",
+    "test_gamma_squeeze_present_in_market_state_field",
+    "test_negative_gamma_fast_flip_scores_higher_than_calm_positive_gamma",
+    "test_nextgen_payload_forwards_gamma_squeeze",
+    "test_release_identity_at_least_v1330"
+   ]
+  },
+  "tests/test_v1340_named_level_watches.py": {
+   "casos": 9,
+   "tests": [
+    "test_named_level_check_precedes_generic_gamma_delta_catch_all",
+    "test_named_level_watch_fires_against_current_report_value",
+    "test_named_level_watch_never_raises_when_report_not_yet_published",
+    "test_named_level_watch_tracks_the_level_moving_session_to_session",
+    "test_numeric_level_watch_still_works_unchanged",
+    "test_parse_watch_named_level_relation_directions",
+    "test_parse_watch_recognizes_all_named_levels",
+    "test_public_state_publishes_key_levels_report_for_watches",
+    "test_release_identity_at_least_v1340"
+   ]
+  },
+  "tests/test_v1350_demo_freshness_gate.py": {
+   "casos": 4,
+   "tests": [
+    "test_demo_meta_block_publishes_timestamps_the_freshness_gate_can_read",
+    "test_demo_shaped_meta_with_timestamps_opens_the_publication_gate",
+    "test_demo_shaped_meta_without_timestamps_is_the_bug_this_fixes",
+    "test_release_identity_at_least_v1350"
+   ]
+  },
+  "tests/test_v1360_equity_hub_monte_carlo.py": {
+   "casos": 13,
+   "tests": [
+    "test_app_js_wires_equity_hub_charts_and_render",
+    "test_dashboard_has_equity_hub_section_and_nav",
+    "test_gbm_paths_are_positive_and_finite",
+    "test_gbm_paths_shape_and_start_at_spot",
+    "test_gbm_terminal_mean_matches_risk_neutral_drift_within_monte_carlo_error",
+    "test_monte_carlo_cone_widens_with_horizon",
+    "test_monte_carlo_degrades_without_raising_on_bad_inputs",
+    "test_monte_carlo_higher_vol_increases_touch_probability_of_a_fixed_level",
+    "test_monte_carlo_report_ready_and_schema",
+    "test_monte_carlo_touch_probability_never_below_finish_probability",
+    "test_public_state_exposes_gamma_regime_for_equity_hub",
+    "test_release_identity_at_least_v1360",
+    "test_service_has_equity_hub_functions"
+   ]
+  },
+  "tests/test_v1370_nextgen_cleanup.py": {
+   "casos": 8,
+   "tests": [
+    "test_chart_router_no_longer_builds_legacy_trace_or_primary_surface",
+    "test_dashboard_has_11_primary_destinations_and_grouped_subnavigation",
+    "test_dead_trace_controls_are_gone_and_nextgen_controls_remain",
+    "test_key_levels_and_expected_move_drive_nextgen_renderer_directly",
+    "test_legacy_sqlite_auth_configuration_is_removed",
+    "test_legacy_trace_and_auth_files_are_physically_removed",
+    "test_only_current_release_evidence_is_active_at_root",
+    "test_release_identity_is_1370_and_equity_hub_is_preserved"
+   ]
+  },
+  "tests/test_v1380_trace_renderer.py": {
+   "casos": 4,
+   "tests": [
+    "test_lightweight_price_bridge_is_optional_and_loaded_before_nextgen",
+    "test_obsolete_trace_docs_are_removed_and_current_doc_exists",
+    "test_temporal_heatmap_exports_independent_charm_field",
+    "test_trace_defaults_are_dex_left_gex_right_and_charm_is_selectable"
+   ]
+  },
+  "tests/test_v1390_session_visual_system.py": {
+   "casos": 8,
+   "tests": [
+    "test_3d_links_reuse_surface_engine_and_iv_is_supported",
+    "test_flow_unusual_is_full_width_reference_terminal_without_legacy_rail",
+    "test_institutional_chart_system_covers_requested_workspaces",
+    "test_london_cash_is_structural_not_red_failure",
+    "test_london_futures_still_require_live_price",
+    "test_provider_health_code_distinguishes_expected_idle_from_stale",
+    "test_release_identity_is_current_and_at_least_1390",
+    "test_weekend_safe_underlying_closed_clock_covers_friday_to_monday"
+   ]
+  },
+  "tests/test_v1391_runtime_hygiene.py": {
+   "casos": 5,
+   "tests": [
+    "test_alpaca_history_reads_disable_chunked_dtype_inference",
+    "test_calibration_quarantine_works_on_canonical_persistent_root",
+    "test_quarantine_is_first_class_persistent_category",
+    "test_replay_concat_has_no_futurewarning_and_preserves_all_na_schema",
+    "test_timeout_diagnostics_respect_market_session"
+   ]
+  },
+  "tests/test_v1392_chart_visibility_line_terminals.py": {
+   "casos": 6,
+   "tests": [
+    "test_after_hours_cash_is_not_strict_red_feed_requirement",
+    "test_freshness_gate_blocks_actionability_not_chart_visibility",
+    "test_net_drift_main_chart_is_line_only_and_contains_core_components",
+    "test_noncritical_structural_state_has_no_intrusive_popup",
+    "test_requested_charts_remain_wired_and_navigable",
+    "test_unusual_flow_main_chart_is_reference_multipane_terminal"
+   ]
+  },
+  "tests/test_v1393_runtime_hygiene.py": {
+   "casos": 8,
+   "tests": [
+    "test_chart_cache_busting_tracks_current_app_version",
+    "test_expected_runtime_control_flow_is_not_reported_as_degradation",
+    "test_living_architecture_docs_are_version_neutral",
+    "test_missing_optional_metrics_do_not_pollute_degradation_health",
+    "test_missing_resolution_times_are_absence_not_calibration_errors",
+    "test_orderly_shutdown_cancellation_is_not_logged_as_degraded",
+    "test_runtime_artifact_does_not_ship_retired_release_history_or_oneoff_validators",
+    "test_transient_hot_chain_probe_does_not_create_false_degradation"
+   ]
+  },
+  "tests/test_v1394_market_terminals.py": {
+   "casos": 8,
+   "tests": [
+    "test_v1394_chain_and_gex_matrix_publish_every_strike_level",
+    "test_v1394_chart_state_mismatch_only_blocks_surface",
+    "test_v1394_generic_canvas_no_longer_owns_financial_line_terminals_or_matrices",
+    "test_v1394_large_prints_expose_renderer_roles_and_no_text_clutter",
+    "test_v1394_lightweight_market_terminals_are_loaded_and_routed_before_generic_canvas",
+    "test_v1394_plotly_hover_formats_do_not_use_unsupported_explicit_plus_flag",
+    "test_v1394_structure_exposes_surface_3d_clearly",
+    "test_v1394_xr_runtime_probe_is_lazy"
+   ]
+  },
+  "tests/test_v1400_tool_runtime_architecture.py": {
+   "casos": 57,
+   "tests": [
+    "test_all_runtime_and_test_locks_have_sha256_hashes",
+    "test_app_js_wires_gamma_migration_and_exact_gex_drilldown",
+    "test_artifact_structural_guard_requires_native_locks_and_vendor_assets",
+    "test_artifact_verifier_default_plan_is_21_partitions_with_bounded_timeout",
+    "test_artifact_verifier_enforces_expected_zip_sha256",
+    "test_artifact_verifier_runs_zip_preflight_before_extraction",
+    "test_bootstrap_pip_pin_matches_test_lock_pin",
+    "test_ci_builds_real_container_and_smokes_runtime_import",
+    "test_ci_uses_declared_toolchains_and_never_generates_locks",
+    "test_ci_uses_immutable_runner_and_action_revisions",
+    "test_cleanliness_guard_rejects_python_native_frontend_and_prepare_residue",
+    "test_cleanup_function_is_limited_to_deterministic_python_test_caches",
+    "test_conditional_outcomes_preserve_scanner_direction_and_quality_gate",
+    "test_dashboard_exposes_gamma_migration_drilldown_conditional_evidence_and_tool_runtime",
+    "test_dependency_audit_and_ruff_require_exact_locked_versions",
+    "test_docker_base_is_patch_and_digest_pinned_and_runtime_copy_is_minimal",
+    "test_docker_installs_hash_pinned_wheels_only",
+    "test_dockerignore_excludes_secrets_and_native_build_outputs",
+    "test_every_github_workflow_pins_actions_and_release_workflow_is_fail_closed",
+    "test_frontend_tool_runtime_uses_snapshot_then_incremental_ws_and_coalescing",
+    "test_gamma_migration_figure_declares_model_risk_semantics",
+    "test_gamma_migration_value_and_difference_are_distinct_and_causal",
+    "test_gex_matrix_uses_robust_display_scale_but_keeps_exact_values",
+    "test_github_workflows_avoid_ambiguous_single_line_run_scalars",
+    "test_legacy_requirements_delegates_to_production_lock",
+    "test_liquidity_zones_are_adaptive_context_not_direction",
+    "test_main_exposes_tool_digest_alert_conditional_gex_and_ws_contracts",
+    "test_native_build_scripts_are_lock_closed",
+    "test_official_packager_certifies_before_writing_and_verifies_before_publish",
+    "test_official_packager_is_byte_deterministic_for_same_tree",
+    "test_official_packager_never_overwrites_or_writes_inside_release_tree",
+    "test_official_packager_rolls_back_if_sidecar_publication_fails",
+    "test_optional_package_lock_validation_rejects_untrusted_registry",
+    "test_optional_sophia_installer_is_fail_closed_without_hash_pinned_lock",
+    "test_production_preflight_reports_all_blockers_instead_of_first_only",
+    "test_release_locks_are_hash_pinned_and_bootstrap_is_pip_only",
+    "test_release_preparer_accepts_structurally_valid_cratesio_lock",
+    "test_release_preparer_rejects_non_cratesio_cargo_sources_and_bad_checksum",
+    "test_release_publication_is_transactional_and_has_rollback_markers",
+    "test_release_traceability_is_bound_to_inventory_case_and_file_counts",
+    "test_rust_certification_uses_temporary_target_outside_repository",
+    "test_solid_shell_is_reference_optional_not_production_runtime",
+    "test_sophia_read_tool_data_is_read_only_structured_digest",
+    "test_tool_digest_does_not_invent_direction",
+    "test_tool_registry_contracts_are_bounded_and_capability_driven",
+    "test_tool_registry_has_single_directional_authority",
+    "test_tool_worker_uses_typed_arrays_and_declared_jobs",
+    "test_vendor_offline_mode_rejects_wrong_integrity_and_wrong_package",
+    "test_vendor_payload_binds_bundle_license_dashboard_and_csp",
+    "test_vendor_preparation_supports_offline_verified_tarball_without_network",
+    "test_vendor_preparation_verifies_npm_integrity_and_removes_remote_cdn_contract",
+    "test_vps_manual_never_mutates_an_already_verified_artifact",
+    "test_vps_requires_prepared_assets_and_never_resolves_locks_in_gate_path",
+    "test_vps_uses_external_credentials_and_external_release_venv",
+    "test_windows_installer_requires_exact_python_patch_and_bootstrap_lock",
+    "test_windows_lock_is_production_lock_without_uvloop",
+    "test_zero_skip_is_a_hard_release_invariant"
+   ]
+  },
+  "tests/test_v1405_native_options_structure.py": {
+   "casos": 2,
+   "tests": [
+    "test_native_structure_replaces_structural_level_contract",
+    "test_zero_gamma_is_not_promoted_when_engine_reports_no_crossing"
+   ]
+  },
+  "tests/test_v1405_provider_center_native_feature_fusion.py": {
+   "casos": 7,
+   "tests": [
+    "test_dashboard_exposes_native_structure_not_provider_specific_overlay",
+    "test_env_template_has_quantdata_and_tastytrade",
+    "test_feature_bus_fuses_by_semantic_channel_without_provider_rank",
+    "test_provider_bus_quote_survives_non_price_event_from_same_provider",
+    "test_provider_center_has_retained_providers_only",
+    "test_provider_status_exposes_quantdata_as_corroboration_only",
+    "test_scanner_source_contains_provider_feature_fusion_contract"
+   ]
+  },
+  "tests/test_v1406_flow_reference_anomalies_active.py": {
+   "casos": 5,
+   "tests": [
+    "test_v1406_flow_ui_is_full_width_and_removes_legacy_rail",
+    "test_v1406_gamma_flip_is_not_published_without_real_crossing",
+    "test_v1407_anomalies_always_active_immediate_and_still_observational",
+    "test_v1407_flow_reference_has_price_bubbles_four_panels_and_native_levels",
+    "test_v1407_owned_renderer_has_reference_panes_markers_and_price_lines"
+   ]
+  },
+  "tests/test_v1407_runtime_visual_fixes.py": {
+   "casos": 6,
+   "tests": [
+    "test_v1407_0dte_trace_keeps_live_gex_and_dex_until_actual_expiry",
+    "test_v1407_anomalies_has_no_feature_flag_or_off_collecting_ui",
+    "test_v1407_scanner_uses_nonempty_current_when_current_delta_placeholder_is_empty",
+    "test_v1407_stale_feed_warning_and_non_actionable_badge_are_removed_forever",
+    "test_v1407_structural_flow_shows_current_gex_dex_before_two_history_snapshots",
+    "test_v1407_unusual_flow_matches_reference_layout_and_forces_owned_plotly_renderer"
+   ]
+  },
+  "tests/test_v1408_quantdata_netdrift_etf_universe.py": {
+   "casos": 12,
+   "tests": [
+    "test_dynamic_etfs_do_not_expand_board_or_history_precompute_loops",
+    "test_dynamic_provider_etfs_are_searchable_and_full_only_with_own_alpaca_options",
+    "test_nextgen_net_drift_mini_uses_quantdata_call_put_net_names",
+    "test_provider_etf_classifier_covers_names_and_quantdata_asset_management_taxonomy",
+    "test_provider_etf_merge_is_union_not_intersection",
+    "test_quantdata_dynamic_etf_target_is_direct",
+    "test_quantdata_net_drift_chart_does_not_plot_zero_direct_price",
+    "test_quantdata_net_drift_chart_is_provider_observed_not_native_dex_gex",
+    "test_quantdata_net_drift_preserves_signed_buckets_and_cumsum",
+    "test_quantdata_net_drift_rejects_zero_price_placeholder",
+    "test_static_core_universe_is_not_redefined_by_provider_catalog",
+    "test_symbol_search_keeps_all_provider_etfs_searchable_without_thousands_of_dom_nodes"
+   ]
+  },
+  "tests/test_v1410_terminal_parity_quantdata_pages.py": {
+   "casos": 28,
+   "tests": [
+    "test_bundle_converts_profile_millions_into_absolute_units",
+    "test_bundle_exposes_every_terminal_section",
+    "test_bundle_levels_carry_distance_to_spot",
+    "test_bundle_prefers_native_engine_breakdown_over_provider",
+    "test_bundle_reports_missing_data_instead_of_inventing_it",
+    "test_bundle_statistics_are_built_from_observed_prints",
+    "test_catalog_covers_every_built_in_page",
+    "test_exposure_page_covers_all_four_greeks_on_both_axes",
+    "test_fusion_falls_back_to_best_peer_when_sources_diverge",
+    "test_fusion_weights_agreeing_peers_by_quality",
+    "test_gex_is_never_averaged_between_providers",
+    "test_intelligence_lane_is_independent_from_engine_lane",
+    "test_low_quality_observation_is_excluded_with_a_reason",
+    "test_missing_tool_is_detected_and_cooled_down",
+    "test_missing_values_are_not_rendered_as_zero",
+    "test_new_terminal_routes_are_registered",
+    "test_normalizers_tolerate_alternative_provider_envelopes",
+    "test_options_channels_have_their_own_arbitration_policy",
+    "test_options_peers_are_all_first_class_without_confirmation_role",
+    "test_parity_report_marks_every_provider_as_peer",
+    "test_provider_name_never_adds_weight",
+    "test_quality_decides_channel_not_provider_order",
+    "test_render_core_avoids_short_circuiting_animation_steps",
+    "test_source_fusion_no_longer_limits_quantdata_to_confirmation",
+    "test_terminal_is_served_at_root_and_legacy_dashboard_is_kept",
+    "test_terminal_template_and_assets_exist",
+    "test_tools_declare_candidate_paths_and_a_cadence",
+    "test_trace_panels_share_one_price_axis"
+   ]
+  },
+  "tests/test_v1411_live_data_recovery.py": {
+   "casos": 39,
+   "tests": [
+    "test_backfill_also_covers_a_half_empty_tick_fabric",
+    "test_blocked_publication_still_serves_observed_price",
+    "test_bundle_carries_the_block_so_the_header_can_warn",
+    "test_cadence_is_derived_from_the_plan_not_hardcoded",
+    "test_channel_coverage_reads_quality_from_its_real_nesting",
+    "test_client_reports_rate_limit_to_the_shared_budget",
+    "test_diagnostics_attributes_structural_gaps_to_one_cause",
+    "test_diagnostics_names_the_reason_for_every_empty_panel",
+    "test_diagnostics_reports_the_backfill_source_when_it_worked",
+    "test_diagnostics_route_is_registered",
+    "test_engine_lane_keeps_a_reserved_share_of_the_quota",
+    "test_engine_lane_publishes_raw_payloads_for_sharing",
+    "test_engine_loop_uses_the_quota_derived_interval",
+    "test_engine_tiers_endpoints_by_how_fast_they_actually_move",
+    "test_frontend_lint_contract_exists",
+    "test_generous_plan_refreshes_faster_than_a_small_one",
+    "test_iv_rank_is_found_however_the_provider_nests_it",
+    "test_iv_rank_is_read_from_the_engine_summary",
+    "test_live_trace_backfills_candles_when_tick_fabric_is_cold",
+    "test_nearly_exhausted_quota_backs_off_on_its_own",
+    "test_pages_lane_reuses_every_endpoint_the_engine_already_fetched",
+    "test_panel_failure_cannot_stop_the_data_cycle",
+    "test_prints_render_without_a_price_curve",
+    "test_quantdata_freshness_decides_live_not_merely_having_a_key",
+    "test_quota_snapshot_never_deadlocks",
+    "test_rate_limit_stops_both_lanes_not_just_one",
+    "test_raw_cache_expires_so_stale_data_is_never_shown_as_fresh",
+    "test_render_failures_are_recorded_for_inspection",
+    "test_side_panels_do_not_advance_the_shared_price_axis",
+    "test_skipped_structural_blocks_reuse_their_last_payload",
+    "test_stale_stream_is_degraded_not_live",
+    "test_symbol_change_drops_the_previous_symbol_payloads",
+    "test_tastytrade_live_is_read_from_its_real_health_keys",
+    "test_terminal_modules_parse_under_node",
+    "test_trace_profile_has_no_undeclared_identifier",
+    "test_unknown_quota_advances_slowly_instead_of_blindly",
+    "test_unknown_window_assumes_the_most_restrictive_one",
+    "test_vwap_is_absent_rather_than_zero_without_volume",
+    "test_vwap_is_computed_on_the_backend_from_the_same_candles"
+   ]
+  },
+  "tests/test_v1413_asset_switch_and_profiles.py": {
+   "casos": 18,
+   "tests": [
+    "test_asset_select_endpoint_still_declares_a_query_parameter",
+    "test_asset_select_is_called_with_a_query_parameter",
+    "test_breakdown_control_is_exposed_and_wired",
+    "test_breakdown_lanes_are_animated_every_frame",
+    "test_breakdown_scale_covers_the_components_not_only_the_net",
+    "test_call_and_put_have_their_own_colors",
+    "test_failed_switch_is_surfaced_instead_of_looping_silently",
+    "test_flow_levels_include_the_walls_and_the_gamma_flip",
+    "test_flow_panel_draws_the_same_structural_levels_as_trace",
+    "test_gex_breakdown_uses_the_chain_call_put_split",
+    "test_header_is_not_overwritten_while_switching",
+    "test_level_styles_have_a_single_definition",
+    "test_metrics_without_a_split_keep_working",
+    "test_profile_metrics_declare_their_call_put_components",
+    "test_replay_clock_is_not_disturbed_by_live_repricing",
+    "test_reprice_interval_is_configurable_and_bounded",
+    "test_switch_waits_for_the_engine_to_confirm_the_new_symbol",
+    "test_trace_cache_key_lets_profiles_reprice_against_live_spot"
+   ]
+  },
+  "tests/test_v1414_macro_scenarios_quota.py": {
+   "casos": 56,
+   "tests": [
+    "test_a_single_factor_is_not_a_bias",
+    "test_a_small_dip_is_not_mistaken_for_a_reset",
+    "test_asset_stress_reads_the_key_the_engine_publishes",
+    "test_bundle_exposes_the_four_new_sections",
+    "test_bundle_survives_a_completely_empty_state",
+    "test_channel_quality_reflects_live_tools_and_freshness",
+    "test_coverage_is_optional_and_never_breaks_the_report",
+    "test_dark_pool_declares_its_price_and_print_coverage",
+    "test_dark_pool_levels_take_their_shares_from_the_provider",
+    "test_dark_pool_publishes_the_real_zone_fields",
+    "test_dark_pool_table_matches_the_published_fields",
+    "test_dead_tools_do_not_claim_a_channel",
+    "test_declared_plan_beats_the_provider_headers",
+    "test_declared_plan_sets_the_cadence",
+    "test_duration_formatter_is_shared_not_reinvented",
+    "test_every_id_the_renderer_writes_exists_in_the_template",
+    "test_every_new_section_has_a_view_and_a_nav_button",
+    "test_exposure_forecast_explains_that_the_split_is_not_a_breakdown_of_the_net",
+    "test_exposure_forecast_labels_the_hedging_regime",
+    "test_exposure_forecast_projects_the_price_where_hedging_flips",
+    "test_exposure_forecast_reports_why_it_is_empty",
+    "test_exposure_forecast_scenarios_are_ordered_by_shift",
+    "test_exposure_forecast_splits_gamma_around_each_scenario_price",
+    "test_exposure_forecast_without_a_profile_leaves_the_split_empty",
+    "test_interval_map_handles_series_nested_under_each_strike",
+    "test_interval_map_is_trimmed_to_what_fits_on_screen",
+    "test_interval_map_normalises_a_list_of_cells",
+    "test_interval_map_reports_an_unreadable_payload",
+    "test_iv_scenarios_are_ordered_from_low_to_high_vol",
+    "test_macro_degrades_with_a_reason_instead_of_a_blank_panel",
+    "test_macro_estimates_the_new_york_session_range_from_traded_iv",
+    "test_macro_history_is_normalised_for_the_chart",
+    "test_macro_never_invents_an_analyst_consensus",
+    "test_macro_publishes_rates_curve_credit_and_calendar",
+    "test_macro_stress_widens_the_distribution",
+    "test_main_feeds_the_real_coverage_into_parity",
+    "test_montecarlo_caps_the_paths_sent_to_the_browser",
+    "test_montecarlo_keeps_its_shadow_authority_visible",
+    "test_montecarlo_says_why_when_it_cannot_simulate",
+    "test_montecarlo_surfaces_the_quantiles_the_engine_already_computed",
+    "test_net_gex_is_a_regime_not_a_direction",
+    "test_new_panels_are_rendered_on_every_tick",
+    "test_plan_variables_are_documented",
+    "test_projected_flip_reaches_the_screen",
+    "test_quantdata_appears_in_the_channel_coverage",
+    "test_recommended_interval_is_bounded",
+    "test_scanner_direction_is_recognised_in_both_languages",
+    "test_scenario_lab_is_called_with_the_measured_stress",
+    "test_session_bias_flips_with_the_evidence",
+    "test_session_bias_is_a_vote_of_measured_factors",
+    "test_session_range_is_absent_rather_than_invented_without_iv",
+    "test_session_without_agreement_does_not_pick_a_side",
+    "test_snapshot_does_not_deadlock",
+    "test_the_heatmap_panel_exists_for_the_interval_map",
+    "test_window_is_learned_from_the_counter_resetting",
+    "test_without_any_telemetry_the_daily_window_is_assumed"
+   ]
+  },
+  "tests/test_v1414_quant_engine_formula_audit.py": {
+   "casos": 18,
+   "tests": [
+    "test_accelerated_backend_is_identical_to_the_reference",
+    "test_black_76_greeks_match_its_own_price",
+    "test_black_76_put_call_parity",
+    "test_call_delta_is_bounded_and_put_delta_is_its_mirror",
+    "test_charm_is_delta_decaying_with_calendar_time",
+    "test_deep_in_and_out_of_the_money_converge_to_their_limits",
+    "test_delta_is_the_derivative_of_the_price",
+    "test_exposure_scenarios_reprice_gamma_instead_of_scaling_it",
+    "test_gamma_is_never_negative",
+    "test_gamma_is_the_second_derivative_of_the_price",
+    "test_gamma_vanna_and_speed_do_not_depend_on_the_option_type",
+    "test_max_pain_is_exactly_the_argmin_of_the_payout_curve",
+    "test_max_pain_minimises_the_total_payout",
+    "test_put_call_delta_parity_holds_exactly",
+    "test_speed_is_gamma_moving_with_spot",
+    "test_the_flip_grid_uses_the_same_gamma_as_the_rest_of_the_engine",
+    "test_vanna_is_delta_moving_with_volatility"
+   ]
+  },
+  "tests/test_v1415_native_iv_rank_and_volume_provenance.py": {
+   "casos": 51,
+   "tests": [
+    "test_a_flat_history_has_no_rank_but_still_has_a_percentile",
+    "test_a_flat_profile_does_not_divide_by_zero",
+    "test_a_partial_enriched_frame_is_not_trusted",
+    "test_a_rejected_canonical_route_is_actionable",
+    "test_a_resolved_path_stops_the_search",
+    "test_a_short_history_refuses_to_publish_a_rank",
+    "test_average_print_size_needs_prints",
+    "test_balance_reaches_its_extremes_when_everything_is_on_one_side",
+    "test_balance_says_which_side_of_price_the_hedging_sits_on",
+    "test_chain_rows_do_not_invent_premium_trades_or_bias",
+    "test_concentration_measures_how_much_lives_in_the_top_strikes",
+    "test_coverage_publishes_the_attempts_and_the_candidates",
+    "test_declared_paths_keep_their_priority",
+    "test_dominant_strike_is_the_largest_absolute_exposure",
+    "test_engine_aggregate_is_the_last_resort",
+    "test_engine_persists_the_volatility_it_observes",
+    "test_engine_publishes_the_native_rank_in_its_state",
+    "test_every_attempt_is_recorded_with_what_the_provider_answered",
+    "test_every_exposure_consumer_receives_the_enriched_frame",
+    "test_every_terminal_module_is_served_from_the_app_itself",
+    "test_every_tool_declares_exactly_one_canonical_route",
+    "test_exposure_frame_falls_back_without_ever_raising",
+    "test_exposure_section_carries_the_shape_and_shows_it",
+    "test_iv_at_the_extremes_ranks_at_the_extremes",
+    "test_iv_rank_places_the_current_reading_inside_its_observed_range",
+    "test_iv_rank_provenance_reaches_the_screen",
+    "test_missing_history_and_missing_iv_are_reported_separately",
+    "test_observed_prints_always_win_over_the_chain",
+    "test_official_chain_volume_replaces_a_misleading_zero",
+    "test_plotly_is_vendored_not_fetched",
+    "test_rank_and_percentile_are_different_numbers",
+    "test_rank_is_scoped_to_the_expiry_window",
+    "test_retrying_the_same_path_replaces_its_previous_attempt",
+    "test_routes_are_canonical_and_never_derived",
+    "test_shape_without_a_profile_says_so_instead_of_returning_zeros",
+    "test_shape_without_a_spot_still_reports_concentration",
+    "test_the_engine_hands_over_the_enriched_frame",
+    "test_the_engine_reading_wins_when_it_has_enough_history",
+    "test_the_enriched_frame_produces_the_real_breakdown",
+    "test_the_four_wrong_routes_are_corrected",
+    "test_the_legacy_page_degrades_instead_of_breaking_without_its_cdn",
+    "test_the_provider_covers_the_engine_while_it_has_no_history",
+    "test_the_raw_snapshot_cannot_produce_a_greek_breakdown",
+    "test_the_screen_turns_an_unavailable_tool_into_something_actionable",
+    "test_the_terminal_loads_nothing_from_the_internet",
+    "test_the_two_readings_are_compared_never_averaged",
+    "test_variants_are_bounded",
+    "test_volatility_argument_is_optional_for_older_callers",
+    "test_volume_provenance_reaches_the_screen",
+    "test_with_no_source_at_all_the_reason_is_explicit",
+    "test_without_either_source_the_reason_travels_instead_of_a_number"
+   ]
+  },
+  "tests/test_v1416_live_tape_replay_and_interval_map.py": {
+   "casos": 31,
+   "tests": [
+    "test_a_price_only_endpoint_exists_and_calculates_nothing",
+    "test_a_ragged_matrix_is_padded_never_truncated_into_misalignment",
+    "test_a_rejected_parameter_is_remembered_per_endpoint",
+    "test_a_session_clock_endpoint_exposes_the_archived_marks",
+    "test_an_unknown_greek_falls_back_to_gamma_instead_of_failing",
+    "test_an_unreadable_payload_publishes_its_shape",
+    "test_every_greek_has_its_own_matrix",
+    "test_liquidity_and_live_exposure_drift_are_selectable_metrics",
+    "test_liquidity_feeds_relevance_not_the_exposure_value",
+    "test_only_parameters_actually_sent_are_dropped",
+    "test_option_trades_no_longer_sends_the_parameter_alpaca_rejects",
+    "test_playback_waits_for_each_step_instead_of_stacking_requests",
+    "test_price_polls_much_faster_than_structure",
+    "test_replay_is_visually_impossible_to_confuse_with_live",
+    "test_returning_to_live_clears_the_replay_state",
+    "test_seeking_replays_every_section_not_only_trace",
+    "test_the_client_learns_which_parameters_an_endpoint_rejects",
+    "test_the_clock_step_is_bounded",
+    "test_the_engine_is_the_first_source_of_the_interval_map",
+    "test_the_engine_reprices_exposure_against_live_spot",
+    "test_the_greek_selector_reaches_the_backend",
+    "test_the_live_cycle_never_overwrites_the_instant_being_replayed",
+    "test_the_live_tick_extends_the_forming_candle_only",
+    "test_the_price_travels_with_the_map",
+    "test_the_provider_cell_list_is_still_understood",
+    "test_the_provider_covers_the_engine_with_parallel_axes",
+    "test_the_replay_bar_has_a_calendar_and_transport_controls",
+    "test_the_tick_declares_its_source_and_replay_state",
+    "test_the_tick_refuses_a_stale_symbol_and_a_replay_clock"
+   ]
+  },
+  "tests/test_v1417_roster_backtest_calendar_and_audit.py": {
+   "casos": 37,
+   "tests": [
+    "test_a_holiday_on_a_weekend_is_observed_on_the_adjacent_weekday",
+    "test_a_mistyped_roster_never_leaves_the_terminal_without_providers",
+    "test_a_model_worse_than_the_base_rate_shows_a_negative_improvement",
+    "test_a_retired_provider_disappears_from_the_report",
+    "test_a_retired_provider_is_not_even_connected",
+    "test_a_retired_provider_is_not_reported_as_a_gap",
+    "test_a_single_tick_already_moves_the_exposure",
+    "test_a_tick_never_flips_the_sign_of_a_bar",
+    "test_an_invalid_range_reports_instead_of_raising",
+    "test_an_unpromoted_model_decides_nothing",
+    "test_channels_of_a_retired_provider_are_filtered_too",
+    "test_each_day_declares_what_it_can_actually_replay",
+    "test_every_gex_and_dex_bar_moves_when_the_price_moves",
+    "test_good_friday_moves_with_easter",
+    "test_hydration_declares_that_it_brings_price_not_structure",
+    "test_improvement_is_measured_against_the_base_rate",
+    "test_interval_map_scales_millions_to_units_and_keeps_the_sign",
+    "test_iv_rank_and_percentile_match_their_definitions",
+    "test_macro_stress_widens_the_range_by_exactly_the_declared_factor",
+    "test_missing_validation_is_unmeasured_not_failed",
+    "test_recurring_nyse_holidays_are_derived_not_hardcoded",
+    "test_the_backtest_section_reaches_the_screen",
+    "test_the_backtest_shows_its_out_of_sample_validation",
+    "test_the_calendar_never_offers_the_future",
+    "test_the_calendar_says_what_a_price_day_cannot_do_before_opening_it",
+    "test_the_calendar_states_that_price_never_becomes_causal",
+    "test_the_default_roster_is_alpaca_and_quantdata",
+    "test_the_engine_publishes_the_live_drift_of_each_bar",
+    "test_the_gamma_center_travels_with_the_price",
+    "test_the_projected_flip_is_the_zero_of_the_interpolated_line",
+    "test_the_roster_is_configurable_without_touching_code",
+    "test_the_roster_lets_it_back_in_without_code_changes",
+    "test_the_session_range_is_the_traded_iv_scaled_to_the_remaining_time",
+    "test_the_two_sigma_band_is_exactly_double_the_published_one",
+    "test_transport_names_resolve_to_their_provider",
+    "test_weekends_and_holidays_are_not_offered_as_sessions",
+    "test_without_a_provider_unarchived_days_are_unavailable_not_promised"
+   ]
+  },
+  "tests/test_v1418_boot_walls_strike_detail_and_speed.py": {
+   "casos": 26,
+   "tests": [
+    "test_a_chain_without_option_type_does_not_break_the_aggregation",
+    "test_a_click_pins_a_strike_and_a_second_click_releases_it",
+    "test_a_replay_without_structure_degrades_instead_of_being_rejected",
+    "test_a_retired_provider_is_never_even_scheduled",
+    "test_heavy_payloads_are_compressed_for_the_vps",
+    "test_the_aggregation_now_carries_the_call_put_split",
+    "test_the_application_actually_boots",
+    "test_the_cache_hands_out_a_copy_not_its_own_dict",
+    "test_the_cached_state_still_refreshes_the_live_price",
+    "test_the_call_wall_is_where_call_gamma_concentrates",
+    "test_the_clock_reports_both_starts",
+    "test_the_detail_card_exists_and_is_wired",
+    "test_the_env_flag_can_no_longer_smuggle_a_retired_provider",
+    "test_the_fallback_clock_starts_at_the_first_structural_instant",
+    "test_the_monotonic_clock_helper_avoids_the_datetime_time_shadow",
+    "test_the_pinned_strike_refreshes_with_every_data_cycle",
+    "test_the_public_state_is_memoised_by_analytics_revision",
+    "test_the_quote_rule_always_wins_and_the_method_travels",
+    "test_the_startup_announces_the_active_roster",
+    "test_the_startup_imports_what_it_logs_with",
+    "test_the_strike_detail_carries_the_call_put_split_and_the_total",
+    "test_the_tick_rule_is_less_confident_than_a_quote",
+    "test_the_tick_rule_refuses_to_guess",
+    "test_the_tick_rule_rescues_the_tape_that_had_no_quote",
+    "test_walls_stay_on_their_side_of_spot",
+    "test_without_the_split_the_net_method_still_works_and_says_so"
+   ]
+  },
+  "tests/test_v1419_multiasset_sophia_and_flow_coverage.py": {
+   "casos": 18,
+   "tests": [
+    "test_a_dynamic_etf_without_an_alpaca_chain_is_not_promised",
+    "test_an_etf_keeps_its_declared_provider",
+    "test_an_index_moves_to_the_provider_that_can_serve_it",
+    "test_an_unclassifiable_tape_explains_itself_instead_of_drawing_nothing",
+    "test_capability_is_by_instrument_type_not_by_preference",
+    "test_futures_have_no_substitute_and_say_so",
+    "test_putting_the_provider_back_restores_its_assets",
+    "test_recalculation_reports_what_it_changed",
+    "test_sophia_answers_by_the_same_channel_she_was_asked",
+    "test_sophia_costs_nothing",
+    "test_sophia_declares_where_her_answer_came_from",
+    "test_sophia_never_takes_directional_authority",
+    "test_the_bias_is_measured_over_classified_premium_only",
+    "test_the_classification_coverage_reaches_the_screen",
+    "test_the_panel_exists_and_is_wired",
+    "test_the_startup_recalculates_the_catalog",
+    "test_unclassified_premium_is_counted_separately",
+    "test_voice_failures_degrade_instead_of_breaking_the_panel"
+   ]
+  },
+  "tests/test_v1420_universal_quantitative_truth.py": {
+   "casos": 44,
+   "tests": [
+    "test_economic_a_crossed_quote_degrades_data_and_the_decision",
+    "test_economic_a_true_challenger_wins_and_a_flat_one_never_does",
+    "test_economic_ambiguous_tape_does_not_manufacture_conviction",
+    "test_economic_deep_itm_put_has_material_early_exercise_premium",
+    "test_economic_factor_model_recovers_betas_and_rejects_spurious_ones",
+    "test_economic_gbm_understates_touch_probability_versus_the_bootstrap",
+    "test_economic_replay_prices_the_spread_and_the_fees",
+    "test_economic_the_dispatcher_changes_the_answer_for_a_future_option",
+    "test_golden_american_call_without_dividend_equals_european",
+    "test_golden_cox_calibration_slope_is_one_for_a_true_model",
+    "test_golden_gex_unit_conversions_are_exact",
+    "test_golden_ssvi_recovers_its_own_parameters",
+    "test_golden_vega_matches_finite_difference_of_price",
+    "test_property_a_mid_print_with_no_tick_history_carries_no_direction",
+    "test_property_a_replay_leaking_the_future_is_a_critical_failure",
+    "test_property_a_short_sample_never_produces_betas",
+    "test_property_a_symbol_without_a_provider_chain_is_never_promised",
+    "test_property_an_adjusted_contract_never_uses_the_standard_multiplier",
+    "test_property_an_inferred_series_cannot_be_published_without_confidence",
+    "test_property_comparability_requires_all_seven_conditions",
+    "test_property_corrected_prints_are_never_classified",
+    "test_property_counterparty_share_is_a_prior_not_a_constant",
+    "test_property_dark_pool_separates_facts_from_derivations",
+    "test_property_dealer_pressure_is_a_band_and_is_deterministic",
+    "test_property_gex_is_never_averaged_across_providers",
+    "test_property_iv_without_vega_is_declared_unidentifiable",
+    "test_property_no_hardcoded_contract_multiplier_in_money_paths",
+    "test_property_no_module_bypasses_the_greeks_dispatcher",
+    "test_property_notional_is_linear_in_price_and_quantity",
+    "test_property_oi_change_is_never_inferred_from_volume",
+    "test_property_replay_never_uses_a_quote_from_the_future",
+    "test_property_ssvi_never_takes_authority_from_svi",
+    "test_property_winning_one_window_is_not_enough_to_promote",
+    "test_unit_architecture_endpoint_publishes_the_contracts",
+    "test_unit_contract_spec_parses_osi_and_resolves_multiplier",
+    "test_unit_crossed_and_out_of_bounds_quotes_are_invalid",
+    "test_unit_equities_and_etfs_register_through_the_same_path",
+    "test_unit_ev_without_costs_is_a_critical_decision_failure",
+    "test_unit_multiplier_series_matches_row_by_row_resolution",
+    "test_unit_net_drift_belongs_to_quantdata_only",
+    "test_unit_open_interest_always_carries_its_effective_date",
+    "test_unit_product_identity_is_multi_asset",
+    "test_unit_scanner_direction_fails_closed_without_its_authority",
+    "test_unit_sweep_at_ask_is_a_confident_buy_distribution"
+   ]
+  },
+  "tests/test_v1421_session_truth_and_provider_state.py": {
+   "casos": 36,
+   "tests": [
+    "test_a_404_on_the_canonical_route_names_what_to_do",
+    "test_a_constant_series_yields_undefined_not_zero",
+    "test_a_growing_schema_no_longer_writes_malformed_rows",
+    "test_a_provider_out_of_the_roster_is_not_reported_as_a_gap",
+    "test_a_quiet_provider_at_night_is_not_an_alarm",
+    "test_alpaca_stock_snapshot_uses_freshest_observed_price_not_stale_trade",
+    "test_an_errored_tool_scores_zero_because_it_was_measured",
+    "test_atomic_write_never_leaves_a_half_file",
+    "test_badges_and_counter_can_no_longer_contradict_each_other",
+    "test_bootstrap_window_is_made_of_completed_sessions",
+    "test_correlation_is_never_called_when_undefined",
+    "test_correlation_still_works_where_it_is_defined",
+    "test_every_phase_resolves_to_a_session_with_data",
+    "test_flow_pro_figure_tolerates_missing_activity_score_column",
+    "test_flow_pro_summary_tolerates_missing_activity_score_column",
+    "test_fresh_quote_prevents_false_premarket_publication_retention",
+    "test_london_activity_summary_tolerates_partial_bars_without_score",
+    "test_market_closed_is_not_a_failure_but_an_open_market_gap_is",
+    "test_no_module_calls_corrcoef_directly_anymore",
+    "test_no_tool_derives_invented_routes",
+    "test_premarket_freshness_does_not_invent_live_clock_when_providers_are_stale",
+    "test_premarket_freshness_uses_live_provider_event_not_slow_structural_clock",
+    "test_premarket_tells_the_truth_per_data_kind",
+    "test_quality_distinguishes_unmeasured_from_measured_zero",
+    "test_quality_gate_meta_prefers_fresh_quote_over_25s_structural_snapshot",
+    "test_quantdata_catalog_bodies_all_build_without_nameerror",
+    "test_quantdata_ticker_filter_is_canonical_for_affected_tools",
+    "test_the_candle_bootstrap_no_longer_asks_for_todays_clock",
+    "test_the_client_checks_capability_before_recording",
+    "test_the_early_morning_case_that_emptied_trace",
+    "test_the_provider_own_health_signal_is_not_overridden",
+    "test_the_routes_that_were_404_in_production_are_fixed",
+    "test_the_same_staleness_is_a_problem_when_the_market_is_open",
+    "test_transcribing_without_an_engine_is_501_not_503",
+    "test_voice_capability_is_declared_before_it_is_offered",
+    "test_writers_go_through_the_atomic_store"
+   ]
+  },
+  "tests/test_v1422_finish_terminal.py": {
+   "casos": 11,
+   "tests": [
+    "test_architecture_fallback_column_is_explicitly_policy_not_live_failure",
+    "test_auto_accelerator_does_not_select_jax_cpu_only",
+    "test_line_panels_render_one_real_observation_instead_of_calling_it_no_data",
+    "test_native_max_pain_timeline_reaches_open_interest_without_quantdata",
+    "test_orderflow_large_print_markers_are_bucketed_and_anchored_to_price_curve",
+    "test_orderflow_net_lane_uses_directional_option_premium_not_underlying_volume",
+    "test_premarket_has_one_gamma_wall_authority_and_separate_oi_peaks",
+    "test_quantdata_default_timeout_allows_slow_analytics_without_blocking_core",
+    "test_quantdata_timeout_uses_backoff_and_success_resets_it",
+    "test_sources_never_presents_external_qd_zero_as_core_exposure_zero",
+    "test_trace_candles_remain_visible_on_shared_strike_axis"
+   ]
+  },
+  "tests/test_v1422_quant_audit_corrections.py": {
+   "casos": 19,
+   "tests": [
+    "test_days_axis_is_in_real_days_not_step_indices",
+    "test_deep_itm_iv_is_recovered_through_put_call_parity",
+    "test_every_contract_with_identifiable_vega_inverts",
+    "test_flip_is_a_true_root_of_net_gex",
+    "test_flip_is_deterministic_across_repeated_calls",
+    "test_flip_without_crossing_is_not_reported_as_a_flip",
+    "test_iv_is_never_fabricated_at_the_bracket_bound",
+    "test_recovered_iv_always_reprices_the_original_quote",
+    "test_touch_probability_is_not_merely_the_finish_probability",
+    "test_touch_probability_matches_continuous_first_passage",
+    "test_touch_probability_never_below_finish_probability",
+    "test_unidentifiable_iv_still_returns_nan_not_a_fabricated_number"
+   ]
+  },
+  "tests/test_v1423_equity_live_resilience.py": {
+   "casos": 11,
+   "tests": [
+    "test_blocked_trace_still_reaches_session_backfill_for_dark_pool_and_flow",
+    "test_dark_pool_ui_says_off_exchange_instead_of_relabeling_every_equity_print",
+    "test_dark_pool_uses_only_confirmed_off_exchange_not_all_large_prints",
+    "test_live_spot_immediately_enforces_wall_side_in_trace_and_flow",
+    "test_option_freshness_still_uses_newer_trade_when_trade_is_newer",
+    "test_option_freshness_uses_newer_quote_when_last_trade_is_old",
+    "test_orderflow_scale_cannot_clip_current_directional_bars",
+    "test_quantdata_page_lane_is_bounded_and_not_motor_authority",
+    "test_stale_structure_blocks_actionability_not_trace_visibility",
+    "test_trace_stale_context_is_labeled_not_disguised_as_live",
+    "test_windows_atomic_store_does_not_attempt_directory_fsync"
+   ]
+  },
+  "tests/test_v1423_frame_guards.py": {
+   "casos": 10,
+   "tests": [
+    "test_dark_pool_survives_a_tape_without_precomputed_notional",
+    "test_empty_frame_and_non_frame_do_not_raise",
+    "test_first_numeric_column_picks_the_first_present_alias",
+    "test_garbage_values_become_the_default_not_a_loose_nan",
+    "test_missing_column_degrades_to_the_declared_default",
+    "test_missing_column_keeps_the_frame_index",
+    "test_nan_default_preserves_nan_for_masks_that_depend_on_it",
+    "test_text_column_degrades_without_raising",
+    "test_the_broken_guard_pattern_is_gone_from_the_engine",
+    "test_trace_payload_survives_ticks_without_signed_volume"
+   ]
+  },
+  "tests/test_v1423_wall_barrier_semantics.py": {
+   "casos": 9,
+   "tests": [
+    "test_sections_do_not_contradict_each_other_on_the_walls",
+    "test_the_previous_value_stays_published_as_a_diagnostic",
+    "test_walls_are_not_just_the_atm_strike_reported_twice",
+    "test_walls_find_the_seeded_concentration_at_every_horizon",
+    "test_walls_stay_on_their_own_side_of_spot",
+    "test_without_the_chain_the_previous_method_still_works_and_declares_itself"
+   ]
+  },
+  "tests/test_v1424_reported_field_defects.py": {
+   "casos": 13,
+   "tests": [
+    "test_a_lit_exchange_is_never_labelled_off_exchange",
+    "test_bucketed_heatmap_averages_within_a_bucket_and_never_sums",
+    "test_canvas_places_the_heatmap_by_coordinates_not_by_stretching",
+    "test_dark_pool_summary_counts_prints_without_any_venue_catalogue",
+    "test_every_shipped_script_parses",
+    "test_heatmap_covers_the_whole_session_not_just_the_tail",
+    "test_heatmap_declares_its_strike_extent",
+    "test_heatmap_payload_does_not_grow_with_session_length",
+    "test_hedge_wall_does_not_stack_a_second_label_on_the_call_wall",
+    "test_no_two_scripts_define_the_same_global_helper_with_different_signatures",
+    "test_the_anomalies_poller_can_be_stopped",
+    "test_the_sip_venue_code_alone_confirms_an_off_exchange_print",
+    "test_the_two_argument_api_signature_is_the_one_that_survives"
+   ]
+  },
+  "tests/test_v1425_live_terminal_layout.py": {
+   "casos": 11,
+   "tests": [
+    "test_dark_pool_kpi_grid_matches_its_card_count",
+    "test_dark_pool_publishes_the_share_of_flow_executed_off_exchange",
+    "test_dark_pool_section_renders_the_new_fields",
+    "test_off_exchange_share_is_none_without_a_denominator",
+    "test_order_flow_has_the_five_stacked_lanes",
+    "test_the_flow_grid_declares_one_row_per_lane",
+    "test_the_live_trace_owns_its_time_axis_while_following",
+    "test_the_live_trace_places_the_heatmap_by_real_coordinates",
+    "test_the_root_route_serves_the_live_terminal_and_its_scripts",
+    "test_the_volume_lane_is_registered_and_drawn",
+    "test_the_volume_lane_uses_data_the_buckets_already_carry"
+   ]
+  },
+  "tests/test_v1426_qflow_layer.py": {
+   "casos": 37,
+   "tests": [
+    "test_a_level_needs_prices_and_says_so_when_there_are_none",
+    "test_an_explicit_net_field_still_wins_over_the_derived_one",
+    "test_concentration_events_are_exceptional_not_routine",
+    "test_concentration_events_are_marked_on_price_and_mirrored_in_total",
+    "test_dow_futures_and_indices_stay_declared_as_context_not_proxy",
+    "test_every_failure_mode_is_named_instead_of_zeroed",
+    "test_every_supported_asset_queries_its_own_ticker_as_direct_evidence",
+    "test_old_data_is_marked_stale_instead_of_passing_as_live",
+    "test_qflow_reaches_every_asset_with_the_same_code_path",
+    "test_qflow_series_is_cumulative_not_a_copy_of_the_bars",
+    "test_recent_flow_pulls_the_level_more_than_old_flow",
+    "test_the_backend_never_hardcodes_a_ticker_for_qflow",
+    "test_the_level_is_a_price_weighted_by_traded_premium",
+    "test_the_normalizer_reads_the_fields_quant_data_actually_publishes",
+    "test_the_qflow_layer_is_wired_from_the_bundle",
+    "test_the_qflow_line_coexists_with_the_existing_bars",
+    "test_the_qflow_price_level_is_drawn_like_the_other_levels"
+   ]
+  },
+  "tests/test_v1427_net_drift_official.py": {
+   "casos": 60,
+   "tests": [
+    "test_a_fresh_curve_is_data_ok",
+    "test_a_provider_failure_is_not_a_flat_session",
+    "test_a_repeated_timestamp_replaces_instead_of_adding",
+    "test_a_session_whose_last_bucket_already_closed_declares_it",
+    "test_a_stale_curve_says_so_instead_of_passing_as_live",
+    "test_an_absent_provider_order_flow_names_its_fallback_instead_of_going_silent",
+    "test_buckets_are_ordered_by_time_whatever_order_they_arrive_in",
+    "test_dark_flow_normalizes_volume_and_share",
+    "test_dark_pool_borrows_the_providers_price_series_when_the_tape_has_no_candles",
+    "test_dark_pool_never_turns_an_absent_provider_into_a_zero",
+    "test_equity_prints_from_the_provider_take_precedence_over_inferred_ones",
+    "test_every_absence_declares_its_own_reason",
+    "test_every_catalogued_tool_has_a_consumer",
+    "test_every_declared_grid_width_degrades_on_narrow_screens",
+    "test_every_kpi_grid_in_every_section_fills_its_rows",
+    "test_net_drift_carries_the_providers_order_flow_and_says_which_tape_it_is",
+    "test_net_drift_declares_and_keeps_its_independence",
+    "test_net_drift_lives_inside_the_existing_order_flow_section",
+    "test_no_section_derives_net_drift_from_another_magnitude",
+    "test_no_ticker_is_written_into_the_net_drift_path",
+    "test_open_interest_falls_back_to_the_provider_by_strike",
+    "test_open_interest_publishes_the_providers_history",
+    "test_quant_data_adds_no_sections_only_feeds_the_existing_ones",
+    "test_selecting_a_point_lists_the_trades_of_that_interval",
+    "test_several_points_match_a_hand_computed_cumulative",
+    "test_statistics_uses_the_providers_contract_and_side_tables_when_there_is_no_tape",
+    "test_the_bundle_feeds_the_renderer_separately_from_qflow",
+    "test_the_bundle_publishes_net_drift_and_qflow_as_separate_blocks",
+    "test_the_bundle_reports_the_reason_when_the_provider_block_is_missing",
+    "test_the_bundle_takes_the_ticker_from_the_state",
+    "test_the_catalog_declares_the_dark_flow_tool_with_its_canonical_route",
+    "test_the_curve_builder_reads_nothing_but_the_rows_it_is_given",
+    "test_the_dashboard_context_reaches_resumen_labelled_as_context",
+    "test_the_engine_profile_still_wins_over_the_provider",
+    "test_the_exposure_page_backs_the_section_when_the_engine_has_no_profile",
+    "test_the_exposure_page_finally_reads_the_shape_the_provider_returns",
+    "test_the_exposure_tools_are_wired_to_the_new_reader",
+    "test_the_interface_says_sin_datos_and_never_draws_a_zero_line",
+    "test_the_list_shape_still_works_exactly_as_before",
+    "test_the_local_tape_still_wins_over_the_providers_price_series",
+    "test_the_net_drift_module_never_imports_any_other_exposure_magnitude",
+    "test_the_normalizer_keeps_every_field_the_endpoint_publishes",
+    "test_the_open_bucket_is_marked_and_the_closed_total_excludes_it",
+    "test_the_option_order_flow_keeps_the_whole_contract",
+    "test_the_order_flow_block_travels_even_when_there_is_no_curve",
+    "test_the_provider_share_beats_the_venue_classification_when_both_exist",
+    "test_the_published_curve_is_mathematically_identical_to_summing_the_raw_response",
+    "test_the_put_sign_is_the_providers_and_is_not_flipped",
+    "test_the_reader_understands_the_map_shape_the_provider_actually_returns",
+    "test_the_renderer_draws_the_four_required_elements",
+    "test_the_renderer_prefers_the_providers_tape_and_names_the_source",
+    "test_the_same_response_gives_the_same_curve_for_every_ticker",
+    "test_the_summary_card_stops_reconstructing_net_drift_from_the_local_tape",
+    "test_the_two_panels_share_one_time_axis",
+    "test_the_venue_classification_still_holds_the_view_alone"
+   ]
+  }
+ },
+ "total_minimo": 1694,
+ "version": "1.42.7"
+}

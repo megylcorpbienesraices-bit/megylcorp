@@ -1,0 +1,57 @@
+name: ITM QUANT CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements.bootstrap.lock.txt
+            requirements.production.lock.txt
+            requirements.test.lock.txt
+            requirements.rust-bridge.lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Verificar Node y npm exactos
+        run: |
+          test "$(node --version | sed 's/^v//')" = "$(tr -d '[:space:]' < .node-version)"
+          test "$(npm --version)" = "$(tr -d '[:space:]' < .npm-version)"
+
+      - name: Bootstrap pip exacto
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.bootstrap.lock.txt
+
+      - name: Instalar runtime y herramientas hash-pinned
+        run: |
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.production.lock.txt
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.test.lock.txt
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.rust-bridge.lock.txt
+          python -m pip check
+
+      - name: Rust toolchain exacto
+        run: |
+          rustup toolchain install "$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)" --profile minimal
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
+          rustc --version
+          cargo --version
+
+      - name: Release gate completo
+        run: python scripts/release_gate_full.py --production
+
+      - name: Build real del contenedor
+        run: |
+          docker build --pull=false -t itm-quant-ci .
+          docker run --rm --entrypoint python itm-quant-ci -c "import sys; assert sys.version.split()[0] == open('/app/.python-version').read().strip(); import app.main; print('container import PASS')"

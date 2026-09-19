@@ -1,0 +1,542 @@
+/* ITM QUANT · Núcleo de render fluido v1.41.0
+ *
+ * Un solo bucle requestAnimationFrame para toda la terminal. Cada panel declara
+ * un draw(ctx, view) y el núcleo se encarga de:
+ *   - escalado por devicePixelRatio (nitidez real en cualquier pantalla)
+ *   - ResizeObserver (el canvas nunca se queda con tamaño viejo al cambiar de sección)
+ *   - interpolación de valores entre snapshots (las barras se deslizan, no saltan)
+ *   - zoom/pan compartido en el eje temporal entre paneles enlazados
+ *   - redibujado sólo cuando hay algo que dibujar (no quema CPU en reposo)
+ *
+ * No contiene matemática de mercado. Sólo presentación.
+ */
+(function (global) {
+  'use strict';
+
+  const PANELS = new Map();
+  const RENDER_ERRORS = [];
+  let rafId = null;
+  let lastFrame = 0;
+
+  /* ---------------------------------------------------------------- utils */
+
+  const clamp = (v, lo, hi) => v < lo ? lo : (v > hi ? hi : v);
+  const isNum = v => typeof v === 'number' && Number.isFinite(v);
+  // Number(null) es 0 y Number('') es 0: sin este filtro un dato ausente se
+  // mostraría como un cero real, que en un panel de exposición es una afirmación
+  // falsa, no un hueco. Ausente y cero deben poder distinguirse.
+  const num = (v, d = 0) => {
+    if (v === null || v === undefined || v === '') return d;
+    const x = Number(v);
+    return Number.isFinite(x) ? x : d;
+  };
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  /** Interpolación exponencial independiente del framerate. */
+  function approach(current, target, dt, halfLifeMs) {
+    if (!isNum(current)) return target;
+    if (!isNum(target)) return current;
+    if (halfLifeMs <= 0) return target;
+    const k = 1 - Math.pow(0.5, dt / halfLifeMs);
+    const next = lerp(current, target, k);
+    return Math.abs(next - target) < 1e-9 ? target : next;
+  }
+
+  function compact(v, digits) {
+    const x = num(v, 0);
+    const a = Math.abs(x);
+    const d = digits === undefined ? 1 : digits;
+    if (a >= 1e12) return (x / 1e12).toFixed(d) + 'T';
+    if (a >= 1e9) return (x / 1e9).toFixed(d) + 'B';
+    if (a >= 1e6) return (x / 1e6).toFixed(d) + 'M';
+    if (a >= 1e3) return (x / 1e3).toFixed(d) + 'K';
+    return x.toFixed(a < 10 ? d : 0);
+  }
+
+  function money(v, digits) {
+    const x = num(v, 0);
+    return (x < 0 ? '-$' : '$') + compact(Math.abs(x), digits);
+  }
+
+  function signedCompact(v, digits) {
+    const x = num(v, 0);
+    return (x > 0 ? '+' : x < 0 ? '−' : '') + compact(Math.abs(x), digits);
+  }
+
+  /** Minutos como duración legible: 47 min, 2h 15m, 3d 4h. */
+  function fmtMinutes(v) {
+    const m = Math.max(0, Math.round(num(v, 0)));
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), rm = m % 60;
+    if (h < 24) return rm ? `${h}h ${rm}m` : `${h}h`;
+    const d = Math.floor(h / 24), rh = h % 24;
+    return rh ? `${d}d ${rh}h` : `${d}d`;
+  }
+
+  function hhmm(ts) {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (Number.isNaN(d.getTime())) return '';
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function parseTime(v) {
+    if (v === null || v === undefined) return NaN;
+    if (typeof v === 'number') return v;
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return t;
+    // Marcas de tiempo sin zona horaria: el backend las emite en hora local de mercado.
+    const t2 = Date.parse(String(v) + 'Z');
+    return Number.isFinite(t2) ? t2 : NaN;
+  }
+
+  /** Lee un token del sistema de diseño para que el canvas siga al tema activo. */
+  const themeCache = new Map();
+  let themeStamp = '';
+  function token(name, fallback) {
+    const stamp = document.documentElement.getAttribute('data-theme') || 'dark';
+    if (stamp !== themeStamp) { themeCache.clear(); themeStamp = stamp; }
+    if (themeCache.has(name)) return themeCache.get(name);
+    let v = '';
+    try { v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); } catch (_) { v = ''; }
+    const out = v || fallback;
+    themeCache.set(name, out);
+    return out;
+  }
+
+  /** rgba() a partir de un token hex del tema. */
+  function alpha(hex, a) {
+    const h = String(hex || '').trim();
+    if (h.startsWith('rgb')) return h.replace(/rgba?\(([^)]+)\)/, (_, inner) => {
+      const parts = inner.split(',').map(s => s.trim()).slice(0, 3);
+      return `rgba(${parts.join(',')},${a})`;
+    });
+    const m = /^#?([0-9a-f]{6})$/i.exec(h);
+    if (!m) return `rgba(148,163,184,${a})`;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  /* --------------------------------------------------------------- escalas */
+
+  /** Escala lineal reversible. */
+  function scale(d0, d1, r0, r1) {
+    const span = (d1 - d0) || 1e-9;
+    const f = v => r0 + (v - d0) / span * (r1 - r0);
+    f.invert = p => d0 + (p - r0) / ((r1 - r0) || 1e-9) * span;
+    f.domain = [d0, d1];
+    f.range = [r0, r1];
+    return f;
+  }
+
+  /** Ticks "redondos" para un eje de precio/valor. */
+  function niceTicks(lo, hi, count) {
+    if (!isNum(lo) || !isNum(hi) || hi <= lo) return [];
+    const target = Math.max(2, count || 6);
+    const raw = (hi - lo) / target;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = (norm >= 7.5 ? 10 : norm >= 3.5 ? 5 : norm >= 1.5 ? 2 : 1) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Number(v.toFixed(10)));
+    return out;
+  }
+
+  /* -------------------------------------------------- estado interpolado */
+
+  /**
+   * Mantiene un mapa clave->valor que se desliza hacia el objetivo.
+   * Se usa para perfiles por strike: al llegar un snapshot nuevo las barras
+   * viajan a su nueva longitud en lugar de parpadear.
+   */
+  class Glide {
+    constructor(halfLifeMs) {
+      this.half = halfLifeMs === undefined ? 130 : halfLifeMs;
+      this.cur = new Map();
+      this.tgt = new Map();
+    }
+    set(key, value) { this.tgt.set(key, num(value, 0)); }
+    setAll(entries) {
+      this.tgt = new Map();
+      for (const [k, v] of entries) this.tgt.set(k, num(v, 0));
+      for (const k of Array.from(this.cur.keys())) if (!this.tgt.has(k)) this.tgt.set(k, 0);
+    }
+    get(key) { const v = this.cur.get(key); return isNum(v) ? v : 0; }
+    /** @returns {boolean} true mientras siga habiendo movimiento pendiente */
+    step(dt) {
+      let moving = false;
+      for (const [k, t] of this.tgt) {
+        const c = this.cur.has(k) ? this.cur.get(k) : 0;
+        const n = approach(c, t, dt, this.half);
+        if (Math.abs(n - t) > 1e-7) moving = true;
+        this.cur.set(k, n);
+      }
+      if (!moving) {
+        for (const [k, t] of this.tgt) if (t === 0 && Math.abs(this.cur.get(k) || 0) < 1e-7) this.cur.delete(k);
+      }
+      return moving;
+    }
+  }
+
+  /** Escalar que se desliza (spot, máximos de eje, etc.). */
+  class GlideValue {
+    constructor(halfLifeMs, initial) {
+      this.half = halfLifeMs === undefined ? 160 : halfLifeMs;
+      this.cur = isNum(initial) ? initial : NaN;
+      this.tgt = this.cur;
+    }
+    set(v) { if (isNum(v)) { this.tgt = v; if (!isNum(this.cur)) this.cur = v; } }
+    get() { return isNum(this.cur) ? this.cur : this.tgt; }
+    step(dt) {
+      if (!isNum(this.tgt)) return false;
+      const n = approach(this.cur, this.tgt, dt, this.half);
+      const moving = Math.abs(n - this.tgt) > 1e-7;
+      this.cur = n;
+      return moving;
+    }
+  }
+
+  /* ----------------------------------------------------------- eje enlazado */
+
+  /**
+   * Ventana temporal compartida. TRACE y el panel de flujo miran el mismo reloj,
+   * así que el zoom/pan de uno mueve al otro sin recalcular nada del motor.
+   */
+  class TimeLink {
+    constructor() {
+      this.t0 = NaN; this.t1 = NaN;
+      this.follow = true;
+      this.listeners = new Set();
+      this.cursor = NaN;
+    }
+    on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+    emit() { for (const fn of this.listeners) { try { fn(this); } catch (_) { } } }
+    setWindow(t0, t1, opts) {
+      if (!isNum(t0) || !isNum(t1) || t1 <= t0) return;
+      this.t0 = t0; this.t1 = t1;
+      if (!opts || opts.silent !== true) this.emit();
+    }
+    setCursor(t) { this.cursor = t; this.emit(); }
+    span() { return (this.t1 - this.t0) || 0; }
+    zoomAt(factor, anchorT) {
+      if (!isNum(this.t0) || !isNum(this.t1)) return;
+      const a = isNum(anchorT) ? anchorT : (this.t0 + this.t1) / 2;
+      const s = this.span();
+      const ns = clamp(s * factor, 60_000, 30 * 24 * 3600_000);
+      const ratio = (a - this.t0) / (s || 1);
+      this.t0 = a - ns * ratio;
+      this.t1 = this.t0 + ns;
+      this.follow = false;
+      this.emit();
+    }
+    panBy(ms) {
+      if (!isNum(this.t0)) return;
+      this.t0 += ms; this.t1 += ms;
+      this.follow = false;
+      this.emit();
+    }
+  }
+
+  /* --------------------------------------------------------------- Panel */
+
+  /**
+   * Un panel = un <canvas> dentro de un contenedor + una función de dibujo.
+   * El núcleo llama a draw(ctx, env) sólo cuando el panel está visible.
+   */
+  class Panel {
+    constructor(host, draw, opts) {
+      this.host = typeof host === 'string' ? document.getElementById(host) : host;
+      if (!this.host) throw new Error('ITMQ: host de panel inexistente');
+      this.opts = opts || {};
+      this.draw = draw;
+      this.canvas = document.createElement('canvas');
+      this.canvas.className = 'itmq-canvas';
+      this.host.appendChild(this.canvas);
+      this.ctx = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
+      this.w = 0; this.h = 0; this.dpr = 1;
+      this.dirty = true;
+      this.animating = false;
+      this.data = null;
+      this.pointer = { x: NaN, y: NaN, inside: false, down: false };
+      this.id = this.opts.id || (this.host.id || 'panel') + ':' + Math.random().toString(36).slice(2, 7);
+
+      this._ro = new ResizeObserver(() => { this.resize(); });
+      this._ro.observe(this.host);
+
+      this._io = new IntersectionObserver(entries => {
+        for (const e of entries) this.visible = e.isIntersecting;
+        if (this.visible) { this.resize(); this.invalidate(); }
+      }, { threshold: 0.01 });
+      this._io.observe(this.host);
+      this.visible = true;
+
+      this._bindPointer();
+      this.resize();
+      PANELS.set(this.id, this);
+      ensureLoop();
+    }
+
+    _bindPointer() {
+      const c = this.canvas;
+      const pos = ev => {
+        const r = c.getBoundingClientRect();
+        this.pointer.x = ev.clientX - r.left;
+        this.pointer.y = ev.clientY - r.top;
+      };
+      c.addEventListener('pointermove', ev => {
+        pos(ev); this.pointer.inside = true;
+        if (this.opts.onPointer) this.opts.onPointer(this.pointer, ev, this);
+        this.invalidate();
+      });
+      c.addEventListener('pointerleave', () => {
+        this.pointer.inside = false; this.pointer.x = NaN; this.pointer.y = NaN;
+        if (this.opts.onPointerLeave) this.opts.onPointerLeave(this);
+        this.invalidate();
+      });
+      c.addEventListener('pointerdown', ev => {
+        pos(ev); this.pointer.down = true;
+        try { c.setPointerCapture(ev.pointerId); } catch (_) { }
+        if (this.opts.onDown) this.opts.onDown(this.pointer, ev, this);
+      });
+      c.addEventListener('pointerup', ev => {
+        this.pointer.down = false;
+        try { c.releasePointerCapture(ev.pointerId); } catch (_) { }
+        if (this.opts.onUp) this.opts.onUp(this.pointer, ev, this);
+      });
+      if (this.opts.onWheel) {
+        c.addEventListener('wheel', ev => { this.opts.onWheel(ev, this); }, { passive: false });
+      }
+      if (this.opts.onClick) {
+        c.addEventListener('click', ev => { pos(ev); this.opts.onClick(this.pointer, ev, this); });
+      }
+    }
+
+    resize() {
+      const r = this.host.getBoundingClientRect();
+      const dpr = clamp(global.devicePixelRatio || 1, 1, 2.5);
+      const w = Math.max(1, Math.round(r.width));
+      const h = Math.max(1, Math.round(r.height));
+      if (w === this.w && h === this.h && dpr === this.dpr) return;
+      this.w = w; this.h = h; this.dpr = dpr;
+      this.canvas.width = Math.round(w * dpr);
+      this.canvas.height = Math.round(h * dpr);
+      this.canvas.style.width = w + 'px';
+      this.canvas.style.height = h + 'px';
+      this.invalidate();
+    }
+
+    setData(data) { this.data = data; this.invalidate(); }
+    invalidate() { this.dirty = true; ensureLoop(); }
+    /** Declara que hay una transición en curso: el panel se redibuja cada frame. */
+    animate(on) { this.animating = !!on; if (on) ensureLoop(); }
+
+    destroy() {
+      try { this._ro.disconnect(); } catch (_) { }
+      try { this._io.disconnect(); } catch (_) { }
+      try { this.canvas.remove(); } catch (_) { }
+      PANELS.delete(this.id);
+    }
+
+    _frame(dt) {
+      if (!this.visible || this.w <= 1 || this.h <= 1) return;
+      if (!this.dirty && !this.animating) return;
+      const ctx = this.ctx;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.clearRect(0, 0, this.w, this.h);
+      this.dirty = false;
+      try {
+        const keep = this.draw(ctx, { w: this.w, h: this.h, dt, panel: this });
+        this.animating = keep === true;
+      } catch (err) {
+        this.animating = false;
+        drawFailure(ctx, this.w, this.h, err);
+        // Un error dentro de draw() deja el panel congelado y sin datos en pantalla.
+        // Se registra en un sitio consultable para que una regresión así no pueda
+        // pasar inadvertida ni en revisión ni en las pruebas de navegador.
+        RENDER_ERRORS.push({ panel: this.id, message: String((err && err.message) || err), at: Date.now() });
+        if (RENDER_ERRORS.length > 50) RENDER_ERRORS.shift();
+        if (global.console) console.error('[ITMQ panel]', this.id, err);
+      }
+    }
+  }
+
+  function drawFailure(ctx, w, h, err) {
+    ctx.save();
+    ctx.fillStyle = alpha(token('--danger', '#ef4444'), 0.10);
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = token('--text-dim', '#94a3b8');
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('RENDER NO DISPONIBLE · ' + String((err && err.message) || err).slice(0, 60), w / 2, h / 2);
+    ctx.restore();
+  }
+
+  function ensureLoop() {
+    if (rafId !== null) return;
+    lastFrame = performance.now();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function tick(now) {
+    rafId = null;
+    const dt = clamp(now - lastFrame, 0, 64);
+    lastFrame = now;
+    let busy = false;
+    for (const p of PANELS.values()) {
+      p._frame(dt);
+      if (p.animating || p.dirty) busy = true;
+    }
+    if (busy) rafId = requestAnimationFrame(tick);
+  }
+
+  /* --------------------------------------------------------- primitivas */
+
+  function roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(Math.abs(r), Math.abs(w) / 2, Math.abs(h) / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  /** Rejilla horizontal + etiquetas de valor a la derecha. */
+  function gridY(ctx, box, sy, ticks, fmt, opts) {
+    const o = opts || {};
+    ctx.save();
+    ctx.strokeStyle = alpha(token('--grid', '#243044'), o.strong ? 0.9 : 0.55);
+    ctx.lineWidth = 1;
+    ctx.font = (o.font || '10px ui-monospace, monospace');
+    ctx.fillStyle = token('--text-dim', '#8494ad');
+    ctx.textBaseline = 'middle';
+    for (const t of ticks) {
+      const y = Math.round(sy(t)) + 0.5;
+      if (y < box.y - 1 || y > box.y + box.h + 1) continue;
+      ctx.beginPath(); ctx.moveTo(box.x, y); ctx.lineTo(box.x + box.w, y); ctx.stroke();
+      if (o.labels !== false) {
+        ctx.textAlign = o.labelSide === 'left' ? 'right' : 'left';
+        const lx = o.labelSide === 'left' ? box.x - 6 : box.x + box.w + 6;
+        ctx.fillText(fmt ? fmt(t) : String(t), lx, y);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Eje temporal inferior con saltos adaptados al ancho disponible. */
+  function axisX(ctx, box, sx, t0, t1, opts) {
+    const o = opts || {};
+    const span = t1 - t0;
+    if (!isNum(span) || span <= 0) return;
+    const targets = [60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3, 14400e3, 86400e3];
+    const want = span / Math.max(2, Math.floor(box.w / 84));
+    let step = targets[targets.length - 1];
+    for (const t of targets) if (t >= want) { step = t; break; }
+    ctx.save();
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillStyle = token('--text-dim', '#8494ad');
+    ctx.strokeStyle = alpha(token('--grid', '#243044'), 0.5);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.lineWidth = 1;
+    const start = Math.ceil(t0 / step) * step;
+    for (let t = start; t <= t1; t += step) {
+      const x = Math.round(sx(t)) + 0.5;
+      if (x < box.x || x > box.x + box.w) continue;
+      if (o.grid !== false) { ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + box.h); ctx.stroke(); }
+      ctx.fillText(hhmm(t), x, box.y + box.h + 5);
+    }
+    ctx.restore();
+  }
+
+  /** Etiqueta tipo "chip" usada para niveles y precios. */
+  function chip(ctx, x, y, text, opts) {
+    const o = opts || {};
+    ctx.save();
+    ctx.font = o.font || '10px ui-monospace, monospace';
+    const padX = o.padX === undefined ? 6 : o.padX;
+    const w = ctx.measureText(text).width + padX * 2;
+    const h = o.h || 16;
+    const align = o.align || 'left';
+    const bx = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
+    roundRect(ctx, bx, y - h / 2, w, h, o.radius === undefined ? 4 : o.radius);
+    ctx.fillStyle = o.bg || alpha(token('--accent', '#38bdf8'), 0.92);
+    ctx.fill();
+    if (o.border) { ctx.strokeStyle = o.border; ctx.lineWidth = 1; ctx.stroke(); }
+    ctx.fillStyle = o.color || '#04121f';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + padX, y + 0.5);
+    ctx.restore();
+    return { x: bx, y: y - h / 2, w, h };
+  }
+
+  /** Línea horizontal punteada de nivel estructural. */
+  function levelLine(ctx, box, y, color, opts) {
+    const o = opts || {};
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = o.width || 1;
+    if (o.dash !== false) ctx.setLineDash(o.dash || [5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(box.x, Math.round(y) + 0.5);
+    ctx.lineTo(box.x + box.w, Math.round(y) + 0.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Evita que las etiquetas de nivel se pisen entre sí. */
+  function stackLabels(items, minGap) {
+    const gap = minGap || 15;
+    const sorted = items.slice().sort((a, b) => a.y - b.y);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].y - sorted[i - 1].y < gap) sorted[i].y = sorted[i - 1].y + gap;
+    }
+    return sorted;
+  }
+
+  /* ------------------------------------------------ niveles estructurales */
+
+  /**
+   * Una sola definición de los niveles del motor: color, nombre corto y
+   * prioridad. TRACE y el panel de flujo la comparten para que un Call Wall se
+   * vea igual en los dos sitios y no haya dos verdades sobre el mismo precio.
+   */
+  const LEVELS = {
+    flip:        { color: '--accent',   label: 'Zero Gamma',  order: 1 },
+    call_wall:   { color: '--pos',      label: 'Call Wall',   order: 2 },
+    put_wall:    { color: '--neg',      label: 'Put Wall',    order: 2 },
+    vol_trigger: { color: '--warn',     label: 'Vol Trigger', order: 3 },
+    hedge_wall:  { color: '--violet',   label: 'Hedge Wall',  order: 4 },
+    gamma:       { color: '--accent-2', label: 'Γ Center',    order: 5 },
+    delta:       { color: '--accent-2', label: 'Δ Center',    order: 5 },
+    zone:        { color: '--text-dim', label: 'Zona',        order: 6 },
+    target:      { color: '--pos',      label: 'Objetivo',    order: 7 },
+    risk:        { color: '--neg',      label: 'Invalidación', order: 7 },
+  };
+
+  /** Niveles que el panel de flujo comparte con TRACE. */
+  const FLOW_LEVEL_KINDS = ['flip', 'call_wall', 'put_wall', 'vol_trigger', 'hedge_wall', 'gamma', 'delta'];
+
+  function levelStyle(kind) {
+    return LEVELS[String(kind || '')] || { color: '--text-dim', label: String(kind || ''), order: 9 };
+  }
+
+  /* --------------------------------------------------------------- export */
+
+  const ITMQ = {
+    Panel, Glide, GlideValue, TimeLink,
+    scale, niceTicks, clamp, lerp, approach, isNum, num,
+    compact, money, signedCompact, fmtMinutes, hhmm, parseTime,
+    token, alpha,
+    LEVELS, FLOW_LEVEL_KINDS, levelStyle,
+    roundRect, gridY, axisX, chip, levelLine, stackLabels,
+    panels: PANELS,
+    renderErrors: RENDER_ERRORS,
+    healthy() { return RENDER_ERRORS.length === 0; },
+    redrawAll() { for (const p of PANELS.values()) { p.resize(); p.invalidate(); } },
+  };
+
+  global.ITMQ = ITMQ;
+})(window);

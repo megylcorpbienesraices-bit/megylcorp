@@ -1,0 +1,83 @@
+name: ITM QUANT Release Artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-and-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements.bootstrap.lock.txt
+            requirements.production.lock.txt
+            requirements.test.lock.txt
+            requirements.rust-bridge.lock.txt
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Verificar toolchains declarados
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python -c 'import sys; print(sys.version.split()[0])')" = "$(tr -d '[:space:]' < .python-version)"
+          test "$(node --version | sed 's/^v//')" = "$(tr -d '[:space:]' < .node-version)"
+          test "$(npm --version)" = "$(tr -d '[:space:]' < .npm-version)"
+
+      - name: Bootstrap pip exacto
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.bootstrap.lock.txt
+
+      - name: Instalar runtime y herramientas hash-pinned
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.production.lock.txt
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.test.lock.txt
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements.rust-bridge.lock.txt
+          python -m pip check
+
+      - name: Rust exacto
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUST_TARGET="$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$RUST_TARGET" --profile minimal
+          rustup default "$RUST_TARGET"
+          test "$(rustc --version | awk '{print $2}')" = "$RUST_TARGET"
+
+      - name: Preparar locks nativos y vendor browser
+        run: python scripts/prepare_release_assets.py --all
+
+      - name: Verificar assets preparados
+        run: python scripts/prepare_release_assets.py --check
+
+      - name: Empaquetar y verificar bytes finales
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-out
+          VERSION="$(tr -d '[:space:]' < VERSION.txt)"
+          python scripts/package_release_artifact.py --output "release-out/ITM_QUANT_v${VERSION}_PRE_VPS_CERTIFIED.zip"
+
+      - name: Publicar artefacto certificado
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: itm-quant-certified-release
+          path: release-out/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -1,0 +1,5 @@
+# Resolver input only; optional acceleration is not part of the certified base runtime.
+# Create a dedicated hash-pinned lock before installation.
+redis>=5
+jax>=0.4
+# cupy must be resolved for the exact CUDA runtime separately.

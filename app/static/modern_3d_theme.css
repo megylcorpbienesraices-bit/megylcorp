@@ -1,0 +1,541 @@
+/* ITM QUANT modern 3D visual layer
+ * Presentation-only skin. It does not change market-data, Scanner, or execution logic.
+ */
+:root {
+  --iq3d-bg: #05070d;
+  --iq3d-panel: rgba(11, 18, 31, .74);
+  --iq3d-panel-strong: rgba(7, 12, 23, .92);
+  --iq3d-line: rgba(90, 180, 255, .22);
+  --iq3d-cyan: #55d8ff;
+  --iq3d-violet: #9d8cff;
+  --iq3d-green: #47e6aa;
+  --iq3d-red: #ff6b82;
+  --iq3d-shadow: 0 24px 70px rgba(0, 0, 0, .42);
+}
+
+body {
+  background:
+    radial-gradient(circle at 78% 4%, rgba(52, 143, 255, .16), transparent 26rem),
+    radial-gradient(circle at 8% 78%, rgba(100, 74, 255, .11), transparent 24rem),
+    linear-gradient(135deg, #03050a 0%, var(--iq3d-bg) 45%, #09121e 100%);
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .16;
+  background-image:
+    linear-gradient(rgba(91, 182, 255, .11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(91, 182, 255, .11) 1px, transparent 1px);
+  background-size: 54px 54px;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+  z-index: -1;
+}
+
+.topbar {
+  background: linear-gradient(180deg, rgba(5, 9, 17, .94), rgba(5, 9, 17, .70));
+  border-bottom-color: rgba(93, 188, 255, .26);
+  box-shadow: 0 12px 42px rgba(0, 0, 0, .32);
+}
+
+.brand-mark {
+  position: relative;
+  transform: translateZ(0);
+  box-shadow:
+    0 0 0 1px rgba(125, 228, 255, .32),
+    0 0 24px rgba(65, 189, 255, .32),
+    0 14px 32px rgba(0, 0, 0, .35);
+}
+
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(255, 255, 255, .30);
+  border-radius: inherit;
+  transform: translateZ(8px);
+}
+
+.layout {
+  perspective: 1400px;
+}
+
+.sidebar {
+  background:
+    linear-gradient(180deg, rgba(4, 8, 15, .96), rgba(7, 13, 23, .82)),
+    radial-gradient(circle at 50% 0, rgba(71, 180, 255, .12), transparent 18rem);
+  border-right-color: rgba(90, 180, 255, .22);
+}
+
+.nav-btn {
+  position: relative;
+  transition: transform .18s ease, background .18s ease, box-shadow .18s ease;
+}
+
+.nav-btn:hover {
+  transform: translateX(4px) translateZ(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .20);
+}
+
+.nav-btn.active {
+  background: linear-gradient(100deg, rgba(39, 111, 167, .32), rgba(17, 35, 58, .52));
+  box-shadow:
+    inset 3px 0 0 var(--iq3d-cyan),
+    0 0 22px rgba(69, 203, 255, .08);
+}
+
+.content {
+  position: relative;
+  isolation: isolate;
+}
+
+.content::after {
+  content: "";
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  right: -220px;
+  top: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(72, 158, 255, .13), transparent 68%);
+  filter: blur(12px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.panel,
+.hero-card,
+.highlight-card,
+.asset-dock,
+.expiry-dock,
+.replay-bar,
+.chart-panel,
+.ecosystem-dock {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(22, 35, 55, .84), rgba(7, 13, 23, .88));
+  border-color: var(--iq3d-line);
+  box-shadow: var(--iq3d-shadow), inset 0 1px 0 rgba(255, 255, 255, .05);
+  backdrop-filter: blur(18px) saturate(130%);
+  transform-style: preserve-3d;
+}
+
+.panel::before,
+.hero-card::before,
+.highlight-card::before,
+.asset-dock::before,
+.expiry-dock::before,
+.replay-bar::before,
+.chart-panel::before,
+.ecosystem-dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(112, 221, 255, .11), transparent 25%, transparent 70%, rgba(151, 113, 255, .08));
+  opacity: .7;
+}
+
+.hero-card,
+.highlight-card {
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+
+.hero-card:hover,
+.highlight-card:hover {
+  transform: translateY(-4px) rotateX(1deg) rotateY(-1deg);
+  border-color: rgba(100, 211, 255, .52);
+  box-shadow: 0 26px 54px rgba(0, 0, 0, .42), 0 0 24px rgba(69, 203, 255, .08);
+}
+
+.asset-dock {
+  display: grid;
+  grid-template-columns: minmax(220px, .75fr) minmax(320px, 1.25fr);
+  gap: 18px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.asset-active {
+  position: relative;
+  padding: 20px;
+  border: 1px solid rgba(80, 205, 255, .28);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(31, 102, 151, .22), rgba(6, 16, 28, .55));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+
+.asset-active strong {
+  display: block;
+  font-size: clamp(34px, 4vw, 58px);
+  line-height: .95;
+  letter-spacing: .04em;
+  color: #eafaff;
+  text-shadow: 0 0 24px rgba(84, 213, 255, .22);
+}
+
+.symbol-search-btn {
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid rgba(86, 206, 255, .34);
+  border-radius: 14px;
+  color: var(--iq3d-cyan);
+  background: rgba(5, 16, 29, .74);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 12px 28px rgba(0, 0, 0, .22);
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.symbol-search-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(112, 225, 255, .72);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, .34), 0 0 24px rgba(69, 203, 255, .10);
+}
+
+.chart-panel {
+  min-height: 460px;
+}
+
+.chart-panel .chart,
+.chart-panel canvas,
+.chart-panel .js-plotly-plot {
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, .22));
+}
+
+.chart,[id$="Chart"],[id$="Canvas"],#surfaceView{
+  position: relative;
+  border-radius: 12px;
+}
+
+.chart::before,[id$="Chart"]::before,#surfaceView::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(101, 208, 255, .12);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.iq-chart-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  z-index: 9;
+  pointer-events: none;
+  color: rgba(183, 232, 255, .82);
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .12em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .75);
+}
+
+.iq-chart-hud::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--iq3d-green);
+  box-shadow: 0 0 12px var(--iq3d-green);
+}
+
+.iq-chart-hud[data-state="MODELLED"]::before {
+  background: var(--iq3d-violet);
+  box-shadow: 0 0 12px var(--iq3d-violet);
+}
+
+.iq-chart-hud[data-state="EXTERNAL"]::before {
+  background: #f4c65b;
+  box-shadow: 0 0 12px #f4c65b;
+}
+
+#traceChart,#operativaTraceChart{
+  background:
+    linear-gradient(rgba(66, 184, 255, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66, 184, 255, .045) 1px, transparent 1px),
+    radial-gradient(circle at 50% 28%, rgba(40, 135, 202, .12), transparent 50%),
+    #060b12;
+  background-size: 36px 36px, 36px 36px, auto, auto;
+}
+
+
+
+
+
+/* TRACE MAP workspace. Original ITM QUANT presentation inspired by the
+   strike-plot plus heatmap workflow, without copying a proprietary product UI. */
+.spot-trace-workspace .trace-spatial-grid {
+  display: grid !important;
+  grid-template-columns: minmax(290px, .60fr) minmax(0, 1.70fr) minmax(230px, .46fr) !important;
+  gap: 8px !important;
+  padding: 8px 10px 4px !important;
+  height: calc(92vh - 336px) !important;
+  min-height: 560px !important;
+  align-items: stretch;
+}
+
+.spot-trace-workspace.trace-flow-dock-hidden .trace-spatial-grid {
+  height: calc(92vh - 118px) !important;
+  min-height: 720px !important;
+}
+
+.trace-strike-panel {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2a2e39;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #131722;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+
+.trace-strike-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 13px 10px;
+  border-bottom: 1px solid #2a2e39;
+}
+
+.trace-strike-head span,
+.trace-strike-head small {
+  display: block;
+  color: #787b86;
+  font: 600 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .10em;
+}
+
+.trace-strike-head b {
+  display: block;
+  margin-top: 5px;
+  color: #d1d4dc;
+  font: 700 12px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.trace-strike-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  padding: 7px;
+  border-bottom: 1px solid #2a2e39;
+  background: #0f1118;
+}
+
+.trace-strike-tabs button {
+  min-height: 29px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #787b86;
+  font: 700 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  cursor: pointer;
+}
+
+.trace-strike-tabs button:hover,
+.trace-strike-tabs button.active {
+  color: #d1d4dc;
+  background: #2a2e39;
+}
+
+.trace-strike-tabs button.active {
+  box-shadow: inset 0 -2px #2962ff;
+}
+
+.trace-strike-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#traceStrikeCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.trace-strike-tip {
+  position: absolute;
+  z-index: 12;
+  display: none;
+  width: 174px;
+  padding: 8px;
+  border: 1px solid #434651;
+  border-radius: 5px;
+  background: rgba(19, 23, 34, .96);
+  color: #d1d4dc;
+  font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .38);
+  pointer-events: none;
+}
+
+.trace-strike-tip.show {
+  display: grid;
+}
+
+.trace-strike-tip b {
+  color: #f0b90b;
+}
+
+.trace-strike-tip span {
+  color: #d1d4dc;
+}
+
+.trace-strike-tip small {
+  color: #787b86;
+}
+
+.trace-strike-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 12px 6px;
+  color: #9598a1;
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.trace-strike-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.trace-strike-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.trace-strike-legend .positive { background: #2962ff; }
+.trace-strike-legend .negative { background: #ef5350; }
+.trace-strike-legend .spot { background: #d1d4dc; }
+
+.trace-strike-note {
+  min-height: 44px;
+  padding: 0 12px 12px;
+  color: #787b86;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.spot-trace-workspace .trace-chart-stage {
+  width: auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.spot-trace-workspace .trace-spatial-hud {
+  position: relative !important;
+  z-index: 1 !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: auto !important;
+  height: auto !important;
+  display: flex !important;
+  grid-template-columns: none !important;
+  pointer-events: auto;
+}
+
+.spot-trace-workspace .trace-hud-kicker,
+.spot-trace-workspace .trace-hud-block,
+.spot-trace-workspace .trace-hud-levels {
+  border-right: 0 !important;
+}
+
+@media (max-width: 1180px) {
+  .spot-trace-workspace .trace-spatial-grid {
+    grid-template-columns: minmax(240px, .48fr) minmax(0, 1fr) !important;
+  }
+  .spot-trace-workspace .trace-spatial-hud {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .spot-trace-workspace .trace-spatial-grid {
+    grid-template-columns: 1fr;
+  }
+  .trace-strike-canvas-wrap {
+    min-height: 340px;
+  }
+}
+
+#flowProChart,
+#netDriftChart,
+#exposureChart,
+#gexMatrixChart,
+#volChart,
+#netPositioningChart,
+#volumeChart,
+#macroChart,
+#printsChart,
+#chainChart,
+#scannerChart {
+  background:
+    radial-gradient(circle at 70% 5%, rgba(76, 166, 255, .10), transparent 45%),
+    linear-gradient(145deg, rgba(12, 27, 43, .72), rgba(5, 10, 18, .86));
+}
+
+/* Surface Lab gets a subtle holographic stage without changing the renderer. */
+#section-surface .chart-panel,
+#surfaceChart,
+#surfaceSliceChart,
+#surfaceAltChart {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(68, 194, 255, .13), transparent 42%),
+    linear-gradient(145deg, rgba(12, 31, 50, .86), rgba(3, 9, 17, .92));
+}
+
+#section-surface .chart-panel::after {
+  content: "QUANT SURFACE · GPU / WEBGL / WEBGPU";
+  position: absolute;
+  right: 16px;
+  top: 12px;
+  color: rgba(144, 224, 255, .62);
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .14em;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #1679bd, #6a5be7);
+  border: 1px solid rgba(139, 230, 255, .35);
+  box-shadow: 0 10px 26px rgba(34, 130, 255, .25), inset 0 1px 0 rgba(255, 255, 255, .20);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.status-pill {
+  background: rgba(14, 38, 62, .68);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 18px rgba(75, 201, 255, .06);
+}
+
+@media (max-width: 900px) {
+  .asset-dock {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

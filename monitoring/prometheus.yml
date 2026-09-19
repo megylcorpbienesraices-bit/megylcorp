@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: itm_quant
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['itm-quant:8765']

@@ -1,0 +1,10 @@
+ITM QUANT - HOTFIX TASTYTRADE SETUP
+
+1. Copia start_local.py, setup_local_gui.py, PROBAR_TASTYTRADE.bat y la carpeta scripts dentro de ITM_QUANT
+2. Acepta reemplazar los dos .py existentes. No toques .venv ni persistent_data.
+3. Configura tastytrade con CONFIGURAR_WEB.bat usando credenciales OAuth2 de PRODUCCION.
+4. Reinicia ITM QUANT.
+5. Ejecuta PROBAR_TASTYTRADE.bat.
+
+El test no imprime secretos/tokens. Prueba OAuth, quote token, DXLink y eventos Quote/Trade/Greeks/Summary.
+Este hotfix también hace que start_local.py combine credenciales globales + .env local en vez de dejar que un .env parcial oculte las credenciales guardadas globalmente.

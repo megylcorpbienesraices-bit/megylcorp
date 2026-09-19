@@ -1,0 +1,47 @@
+{
+  "root": true,
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "rules": {
+    "no-undef": "error",
+    "no-redeclare": [
+      "error",
+      {
+        "builtinGlobals": false
+      }
+    ],
+    "no-const-assign": "error",
+    "no-dupe-keys": "error",
+    "no-dupe-args": "error",
+    "no-unreachable": "error",
+    "no-self-assign": "error",
+    "no-unused-vars": [
+      "warn",
+      {
+        "args": "none",
+        "varsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "globals": {
+    "ITMQ": "writable",
+    "ITMQTrace": "writable",
+    "ITMQFlow": "writable",
+    "ITMQPanels": "writable",
+    "ResizeObserver": "readonly",
+    "IntersectionObserver": "readonly",
+    "api": "readonly",
+    "traceFollow": "writable",
+    "renderTracePulse": "readonly",
+    "Plotly": "readonly",
+    "GPUShaderStage": "readonly",
+    "GPUBufferUsage": "readonly",
+    "GPUTextureUsage": "readonly"
+  }
+}

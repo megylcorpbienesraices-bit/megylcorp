@@ -1,0 +1,17 @@
+services:
+  itm-quant:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    environment:
+      ITM_METRICS_ENABLED: "1"
+      ITM_BIND_HOST: "0.0.0.0"
+      ITM_PORT: "8000"
+      ITM_SESSION_HTTPS_ONLY: "1"
+    volumes:
+      - itm_quant_memory:/data
+    restart: unless-stopped
+volumes:
+  itm_quant_memory:

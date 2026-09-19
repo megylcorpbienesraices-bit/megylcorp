@@ -1,0 +1,20 @@
+services:
+  itm-quant:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - ${ITM_ENV_FILE:-/etc/itm-quant/itm-quant.env}
+    environment:
+      ITM_ALWAYS_ON: "1"
+      ITM_BIND_HOST: "0.0.0.0"
+      ITM_QUANT_DATA_DIR: /data
+      ITM_READY_PACKAGE_SECONDS: "20"
+      ITM_HISTORY_PRECOMPUTE_SESSIONS: "370"
+    volumes:
+      - itm_quant_data:/data
+    command: ["python","run_always_on.py"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  itm_quant_data:

@@ -1,0 +1,13 @@
+ITM QUANT · INSTALACION WINDOWS
+
+1. Requisito obligatorio: Python 3.12 x64.
+   Verifica con: py -0p
+2. Ejecuta: INSTALAR_WEB.bat
+   El instalador IGNORA Python 3.14/3.13 y crea .venv solo con 3.12.
+3. El instalador usa requirements.windows.lock.txt, hashes SHA-256 y solo wheels binarios.
+   Nunca intenta compilar pandas/numpy/scipy ni necesita Visual Studio.
+4. Ejecuta CONFIGURAR_WEB.bat.
+5. Ejecuta INICIAR_WEB.bat.
+
+Si ya habia un .venv de Python distinto de 3.12, el instalador elimina SOLO ese .venv y lo recrea.
+El VPS Linux sigue usando requirements.production.lock.txt y deploy/VALIDAR_Y_DESPLEGAR_VPS.sh.

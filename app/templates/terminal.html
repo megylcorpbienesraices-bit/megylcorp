@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITM QUANT · Terminal</title>
+<link rel="icon" type="image/png" href="/static/branding/itm_quant_iq_logo.png">
+<link rel="stylesheet" href="/static/itmq_terminal.css?v={{ version }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="mark">IQ</span><div>ITM QUANT<br><small>v{{ version }}</small></div></div>
+
+  <button class="symbol-pill" id="symbolPill" title="Cambiar instrumento">
+    <b id="symName">DIA</b>
+    <span class="px" id="symPrice">—</span>
+    <span class="chg" id="symChange">—</span>
+  </button>
+
+  <nav class="sections" id="nav">
+    <button data-view="resumen" class="active">RESUMEN</button>
+    <button data-view="trace">TRACE</button>
+    <button data-view="flujo">FLUJO DE ÓRDENES</button>
+    <button data-view="exposicion">EXPOSICIÓN</button>
+    <button data-view="oi">INTERÉS ABIERTO</button>
+    <button data-view="vol">VOLATILIDAD</button>
+    <button data-view="stats">ESTADÍSTICAS</button>
+    <button data-view="darkpool">DARK POOL</button>
+    <button data-view="macro">MACRO</button>
+    <button data-view="escenarios">ESCENARIOS</button>
+    <button data-view="backtest">BACKTEST</button>
+    <button data-view="fuentes">FUENTES</button>
+    <button data-view="arquitectura">ARQUITECTURA</button>
+  </nav>
+
+  <div class="topbar-right">
+    <button class="icon-btn" id="sophiaBtn" title="Sophia · asistente cuantitativa (voz y texto)">◎</button>
+    <button class="icon-btn" id="replayBtn" title="Reproducir una sesión archivada">⏱</button>
+    <div class="status-dot" id="engineState" data-state="WAIT"><i></i><span id="engineStateText">INICIANDO</span></div>
+    <button class="icon-btn" id="themeBtn" title="Tema claro / oscuro">◐</button>
+    <button class="icon-btn" id="refreshBtn" title="Recalcular ahora">⟳</button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════ REPRODUCCIÓN DE SESIÓN ═══════ -->
+<div class="replaybar" id="replayBar" hidden>
+  <span class="tag" id="rpTag">REPLAY</span>
+  <div class="group"><span class="label">SESIÓN</span>
+    <select class="ctl" id="rpDate"><option value="">— elegir fecha —</option></select>
+  </div>
+  <div class="group"><span class="label">PASO</span>
+    <select class="ctl" id="rpStep">
+      <option value="0.25">15 s</option><option value="1" selected>1 min</option>
+      <option value="5">5 min</option><option value="15">15 min</option>
+    </select>
+  </div>
+  <div class="group"><span class="label">VELOCIDAD</span>
+    <select class="ctl" id="rpSpeed">
+      <option value="4000">0,25×</option><option value="2000">0,5×</option>
+      <option value="1000" selected>1×</option><option value="400">2,5×</option>
+      <option value="150">6×</option><option value="60">16×</option>
+    </select>
+  </div>
+  <button class="icon-btn" id="rpPrev" title="Marca anterior">⏮</button>
+  <button class="icon-btn" id="rpPlay" title="Reproducir / pausar">▶</button>
+  <button class="icon-btn" id="rpNext" title="Marca siguiente">⏭</button>
+  <input type="range" id="rpScrub" class="scrub" min="0" max="0" value="0" step="1" title="Instante de la sesión">
+  <b class="mono" id="rpClock">—</b>
+  <span class="dim mono" id="rpProgress">—</span>
+  <div class="spacer"></div>
+  <button class="ctl" id="rpLive" title="Volver al mercado en vivo">VOLVER A VIVO</button>
+</div>
+
+<main>
+
+<!-- ══════════════════════════════════════════════════ RESUMEN ═════════ -->
+<section class="view active" data-view="resumen">
+  <div class="stack">
+
+    <div class="grid c4">
+      <div class="kpi accent"><span>DIRECCIÓN</span><b id="kDirection">—</b><small id="kEdge">—</small></div>
+      <div class="kpi"><span>ZONA OPERATIVA</span><b id="kZone">—</b><small id="kZoneDetail">—</small></div>
+      <div class="kpi"><span>FASE DE MERCADO</span><b id="kPhase">—</b><small id="kStability">—</small></div>
+      <div class="kpi"><span>EVIDENCIA</span><b id="kEvidence">—</b><small id="kConfluence">—</small></div>
+    </div>
+
+    <div class="grid c4">
+      <div class="kpi"><span>GEX NETO</span><b id="kGex">—</b><small>exposición gamma agregada</small></div>
+      <div class="kpi"><span>DEX NETO</span><b id="kDex">—</b><small>exposición delta agregada</small></div>
+      <div class="kpi"><span>ZERO GAMMA</span><b id="kFlip">—</b><small id="kFlipDist">—</small></div>
+      <div class="kpi"><span>MAX PAIN</span><b id="kMaxPain">—</b><small id="kMaxPainDetail">—</small></div>
+    </div>
+
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>FLUJO DE OPCIONES · SESIÓN</h2><span class="pill" id="pillFlow">—</span></header>
+        <div class="chart sm" id="chartNetFlow"></div>
+      </article>
+      <article class="card">
+        <header><h2>NET DRIFT · CALL / PUT ACUMULADO · QUANT DATA</h2><span class="pill" id="pillDrift">—</span></header>
+        <div class="chart sm" id="chartNetDrift"></div>
+      </article>
+    </div>
+
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>NIVELES ESTRUCTURALES</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblLevels">
+          <thead><tr><th>NIVEL</th><th>PRECIO</th><th>DISTANCIA</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+      <article class="card">
+        <header><h2>PRINTS RELEVANTES · OBSERVADOS</h2><span class="pill" id="pillPrints">—</span></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblPrints">
+          <thead><tr><th>HORA</th><th>CONTRATO</th><th>PRIMA</th><th>CONTRATOS</th><th>AGRESOR</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ TRACE ═══════ -->
+<section class="view fixed" data-view="trace">
+  <div class="toolbar">
+    <div class="group"><span class="label">PERSPECTIVA</span>
+      <select class="ctl" id="tracePerspective">
+        <option value="MM">MM · Creador de mercado</option>
+        <option value="TRADER">TRADER · Tomador</option>
+      </select>
+    </div>
+    <div class="seg" id="traceExpiry">
+      <button data-exp="ALL" class="active">Todas exp.</button>
+      <button data-exp="0DTE">0DTE</button>
+      <button data-exp="WEEK">Semana</button>
+    </div>
+    <div class="group"><span class="label">TEMPORALIDAD</span>
+      <select class="ctl" id="traceTf"><option>1m</option><option>3m</option><option>5m</option><option>15m</option></select>
+    </div>
+    <div class="group"><span class="label">VENTANA</span>
+      <select class="ctl" id="traceWindow">
+        <option value="60">1H</option><option value="120">2H</option>
+        <option value="390" selected>Sesión</option><option value="0">Todo</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="group"><span class="label">HEATMAP</span>
+      <select class="ctl" id="traceHeatField">
+        <option value="joint">Γ + Δ</option><option value="gamma">Gamma</option><option value="delta">Delta</option>
+        <option value="charm">Charm</option><option value="net_oi">OI neto</option><option value="net_volume">Volumen neto</option>
+        <option value="off">Apagado</option>
+      </select>
+      <input type="range" id="traceHeatOpacity" min="0" max="100" value="55" title="Intensidad del heatmap">
+    </div>
+    <div class="group"><span class="label">PERFILES</span>
+      <div class="seg" id="traceBreakdown">
+        <button data-mode="net" class="active">Neto</button>
+        <button data-mode="parts">Call + Put</button>
+      </div>
+    </div>
+    <div class="seg" id="tracePriceMode">
+      <button data-mode="candles" class="active">Velas</button>
+      <button data-mode="line">Línea</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="ctl" id="traceFollow" data-on="1">● SEGUIR</button>
+  </div>
+
+  <div class="trace-shell">
+    <div class="trace-grid">
+      <div class="trace-col">
+        <header>
+          <select class="ctl" id="traceLeftMetric">
+            <option value="DEX" selected>DEX</option><option value="GEX">GEX</option>
+            <option value="VEX">VEX</option><option value="CHEX">CHEX</option>
+            <option value="NET_OI">NET OI</option><option value="OI">OI</option>
+            <option value="NET_VOLUME">NET VOL</option><option value="VOLUME">VOLUMEN</option>
+            <option value="FLOW">FLUJO 5M</option><option value="GRAVITY">GRAVEDAD</option>
+            <option value="LIQUIDITY">LIQUIDEZ</option>
+            <option value="GEX_LIVE">Δ GEX VIVO</option><option value="DEX_LIVE">Δ DEX VIVO</option>
+          </select>
+          <span class="label">POR STRIKE</span>
+        </header>
+        <div class="trace-canvas" id="traceLeft"></div>
+      </div>
+
+      <div class="trace-col">
+        <header>
+          <span class="label" id="traceTitle">HEATMAP ESTRUCTURAL · PRECIO · NIVELES</span>
+          <div class="spacer"></div>
+          <span class="pill" id="traceSnapPill">—</span>
+        </header>
+        <div class="trace-canvas" id="traceMain"></div>
+      </div>
+
+      <div class="trace-col">
+        <header>
+          <select class="ctl" id="traceRightMetric">
+            <option value="GEX" selected>GEX</option><option value="DEX">DEX</option>
+            <option value="VEX">VEX</option><option value="CHEX">CHEX</option>
+            <option value="NET_OI">NET OI</option><option value="OI">OI</option>
+            <option value="NET_VOLUME">NET VOL</option><option value="VOLUME">VOLUMEN</option>
+            <option value="FLOW">FLUJO 5M</option><option value="GRAVITY">GRAVEDAD</option>
+            <option value="LIQUIDITY">LIQUIDEZ</option>
+            <option value="GEX_LIVE">Δ GEX VIVO</option><option value="DEX_LIVE">Δ DEX VIVO</option>
+          </select>
+          <span class="label">POR STRIKE</span>
+        </header>
+        <div class="trace-canvas" id="traceRight"></div>
+      </div>
+    </div>
+
+    <div class="trace-hud">
+      <div class="kpi"><span>SPOT</span><b id="traceSpot">—</b><small id="traceSnapshotAge">—</small></div>
+      <div class="kpi"><span>GEX NETO</span><b id="traceGammaNet">—</b><small>Γ live</small></div>
+      <div class="kpi"><span>DEX NETO</span><b id="traceDeltaNet">—</b><small>Δ live</small></div>
+      <div class="kpi"><span>Γ CENTER</span><b id="traceGammaCenter">—</b><small>centroide</small></div>
+      <div class="kpi"><span>Δ CENTER</span><b id="traceDeltaCenter">—</b><small>centroide</small></div>
+      <div class="kpi"><span>ZERO GAMMA</span><b id="traceFlip">—</b><small>cruce de GEX</small></div>
+      <div class="kpi"><span>CALL WALL</span><b id="traceCallWall">—</b><small>resistencia</small></div>
+      <div class="kpi"><span>PUT WALL</span><b id="tracePutWall">—</b><small>soporte</small></div>
+      <div class="kpi"><span>VOL TRIGGER</span><b id="traceVolTrigger">—</b><small>gatillo de volatilidad</small></div>
+      <div class="kpi"><span>FLUJO 5M</span><b id="traceFlow5m">—</b><small>prima direccional</small></div>
+      <div class="kpi"><span>DIRECCIÓN</span><b id="traceDirection">—</b><small id="traceEdge">—</small></div>
+      <div class="kpi"><span>FASE</span><b id="tracePhase">—</b><small>estado de mercado</small></div>
+    </div>
+  </div>
+
+  <aside class="strike-card" id="strikeCard" hidden>
+    <header><b id="skStrike">—</b><span id="skDist">—</span>
+      <button class="icon-btn" id="skClose" title="Soltar strike">×</button></header>
+    <div class="rows" id="skRows"></div>
+    <p class="note">Clic en otro strike para cambiar · clic en el mismo para soltarlo</p>
+  </aside>
+</section>
+
+<!-- ═══════════════════════════════════════════ FLUJO DE ÓRDENES ═══════ -->
+<section class="view fixed" data-view="flujo">
+  <div class="toolbar">
+    <div class="group"><span class="label">PRINTS ≥</span>
+      <select class="ctl" id="ofThreshold">
+        <option value="0">Automático</option><option value="100000">$100K</option>
+        <option value="250000">$250K</option><option value="500000">$500K</option>
+        <option value="1000000">$1M</option><option value="5000000">$5M</option>
+      </select>
+    </div>
+    <div class="seg" id="ofMode">
+      <button data-mode="area" class="active">Área</button>
+      <button data-mode="line">Línea</button>
+    </div>
+    <!-- NET DRIFT vive DENTRO de esta sección. No es una sección nueva: es otra
+         lectura del mismo flujo, con el mismo reloj y el mismo activo. -->
+    <div class="seg" id="ofPanel">
+      <button data-panel="tape" class="active">Cinta</button>
+      <button data-panel="drift">Net Drift</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <span class="label">SESGO</span><b class="mono" id="ofBias">—</b>
+    </div>
+  </div>
+
+  <div class="grid c4" style="flex:0 0 auto" id="ofTapeKpis">
+    <div class="kpi"><span>PRIMA TOTAL</span><b id="ofTotalPremium">—</b><small id="ofPrintCount">—</small></div>
+    <div class="kpi pos"><span>PRIMA COMPRADORA</span><b id="ofBuyPremium">—</b><small>agresor en ask</small></div>
+    <div class="kpi neg"><span>PRIMA VENDEDORA</span><b id="ofSellPremium">—</b><small>agresor en bid</small></div>
+    <div class="kpi"><span>PRINT MAYOR</span><b id="ofBiggest">—</b><small id="ofBiggestDetail">—</small></div>
+  </div>
+
+  <div class="grid c5" style="flex:0 0 auto" id="ofDriftKpis" hidden>
+    <div class="kpi pos"><span>CALL ACUMULADO</span><b id="ndCall">SIN DATOS</b><small>net call premium · sesión</small></div>
+    <div class="kpi neg"><span>PUT ACUMULADO</span><b id="ndPut">SIN DATOS</b><small>net put premium · sesión</small></div>
+    <div class="kpi accent"><span>NETO ACUMULADO</span><b id="ndNet">SIN DATOS</b><small>call + put, con su signo</small></div>
+    <div class="kpi"><span>VOLUMEN NETO C/P</span><b id="ndVolume">SIN DATOS</b><small>contratos netos acumulados</small></div>
+    <div class="kpi"><span>ESTADO</span><b id="ndState">SIN DATOS</b><small id="ndStateDetail">Quant Data · net-drift</small></div>
+  </div>
+
+  <div class="flow-stack" id="ofTapeStack">
+    <div class="flow-lane" id="ofPrice"></div>
+    <div class="flow-lane" id="ofAggressor"></div>
+    <div class="flow-lane" id="ofNet"></div>
+    <div class="flow-lane" id="ofVolume"></div>
+    <div class="flow-lane" id="ofTotal"></div>
+  </div>
+
+  <!-- NET DRIFT OFICIAL · POST /v1/options/tool/net-drift.
+       No se reconstruye con GEX, DEX, Net Flow ni QFLOW. -->
+  <div class="drift-stack" id="ofDriftPanel" hidden>
+    <div class="flow-lane" id="ofDrift"></div>
+    <div class="flow-lane" id="ofDriftVolume"></div>
+    <div class="drift-trades">
+      <header><h2>TRADES DEL INTERVALO SELECCIONADO</h2><span class="mono" id="ofDriftPickLabel">—</span></header>
+      <div class="table-wrap"><table class="data" id="tblDriftTrades">
+        <thead><tr><th>HORA</th><th>TIPO</th><th>STRIKE</th><th>VENCE</th><th>PRIMA</th><th>AGRESOR</th><th>EJECUCIÓN</th></tr></thead>
+        <tbody><tr><td colspan="7">Selecciona un punto de la curva para ver los trades del intervalo.</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════════════════════════════ EXPOSICIÓN ═══════ -->
+<section class="view" data-view="exposicion">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>CONCENTRACIÓN</span><b id="exConc">—</b><small id="exConcDetail">top 3 strikes sobre el total</small></div>
+      <div class="kpi accent"><span>STRIKE DOMINANTE</span><b id="exDom">—</b><small id="exDomDetail">mayor exposición absoluta</small></div>
+      <div class="kpi"><span>REPARTO ARRIBA / ABAJO</span><b id="exBalance">—</b><small id="exBalanceDetail">dónde pesa la cobertura</small></div>
+      <div class="kpi"><span>STRIKES CON PERFIL</span><b id="exCount">—</b><small id="exCountDetail">ventana visible</small></div>
+    </div>
+    <div class="toolbar">
+      <div class="group"><span class="label">GRIEGA</span>
+        <select class="ctl" id="expMetric">
+          <option value="GEX">GEX · Gamma</option><option value="DEX">DEX · Delta</option>
+          <option value="VEX">VEX · Vanna</option><option value="CHEX">CHEX · Charm</option>
+        </select>
+      </div>
+      <div class="seg" id="expAxis">
+        <button data-axis="strike" class="active">Por strike</button>
+        <button data-axis="expiration">Por vencimiento</button>
+      </div>
+    </div>
+    <article class="card">
+      <header><h2 id="expTitle">EXPOSICIÓN POR STRIKE</h2><span class="pill" id="expPill">—</span></header>
+      <div class="chart lg" id="chartExposure"></div>
+    </article>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>CONCENTRACIÓN POR STRIKE</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblExposure">
+          <thead><tr><th>STRIKE</th><th>GEX</th><th>DEX</th><th>VEX</th><th>CHEX</th><th>OI</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+      <article class="card">
+        <header><h2>EXPOSICIÓN POR VENCIMIENTO</h2></header>
+        <div class="chart sm" id="chartExposureExp"></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ INTERÉS ABIERTO ════════ -->
+<section class="view" data-view="oi">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>MAX PAIN</span><b id="oiMaxPain">—</b><small id="oiMaxPainDist">—</small></div>
+      <div class="kpi"><span>OI TOTAL</span><b id="oiTotal">—</b><small>contratos abiertos</small></div>
+      <div class="kpi pos"><span>OI CALL</span><b id="oiCall">—</b><small id="oiCallPct">—</small></div>
+      <div class="kpi neg"><span>OI PUT</span><b id="oiPut">—</b><small id="oiPutPct">—</small></div>
+    </div>
+    <article class="card">
+      <header><h2>INTERÉS ABIERTO POR STRIKE · CALL / PUT</h2></header>
+      <div class="chart lg" id="chartOiStrike"></div>
+    </article>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>MAX PAIN / TIEMPO</h2></header>
+        <div class="chart sm" id="chartMaxPainTime"></div>
+      </article>
+      <article class="card">
+        <header><h2>INTERÉS ABIERTO POR VENCIMIENTO</h2></header>
+        <div class="chart sm" id="chartOiExp"></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>CAMBIO DE INTERÉS ABIERTO</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblOiChange">
+        <thead><tr><th>STRIKE</th><th>CALL OI</th><th>PUT OI</th><th>NET OI</th><th>VOLUMEN</th><th>VOL/OI</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+<!-- ═════════════════════════════════════════════════ VOLATILIDAD ══════ -->
+<section class="view" data-view="vol">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>IV ATM</span><b id="volAtm">—</b><small>volatilidad implícita al dinero</small></div>
+      <div class="kpi"><span>IV RANK</span><b id="volRank">—</b><small id="volRankDetail">—</small></div>
+      <div class="kpi"><span>SKEW</span><b id="volSkew">—</b><small>put − call 25Δ</small></div>
+      <div class="kpi"><span>DERIVA DE VOLATILIDAD</span><b id="volDrift">—</b><small>cambio en sesión</small></div>
+    </div>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>SONRISA / SKEW DE VOLATILIDAD</h2></header>
+        <div class="chart" id="chartSkew"></div>
+      </article>
+      <article class="card">
+        <header><h2>ESTRUCTURA TEMPORAL</h2></header>
+        <div class="chart" id="chartTerm"></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>DERIVA DE VOLATILIDAD · SESIÓN</h2></header>
+      <div class="chart sm" id="chartVolDrift"></div>
+    </article>
+    <article class="card">
+      <header><h2>IV RANK · PROCEDENCIA Y VENTANA</h2><span class="pill" id="volRankPill">—</span></header>
+      <div class="body">
+        <div class="grid c4">
+          <div class="kpi"><span>IV PERCENTIL</span><b id="volPct">—</b><small id="volPctDetail">observaciones por debajo</small></div>
+          <div class="kpi"><span>RANGO OBSERVADO</span><b id="volRange">—</b><small id="volRangeDetail">mín – máx de la ventana</small></div>
+          <div class="kpi"><span>MEDIANA</span><b id="volMedian">—</b><small>IV central de la ventana</small></div>
+          <div class="kpi"><span>MOTOR vs PROVEEDOR</span><b id="volDiverge">—</b><small id="volDivergeDetail">separación entre lecturas</small></div>
+        </div>
+        <p class="note" id="volRankNote">—</p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ ESTADÍSTICAS ═══════ -->
+<section class="view" data-view="stats">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>CONTRATOS NEGOCIADOS</span><b id="stContracts">—</b><small id="stContractsDetail">sesión observada</small></div>
+      <div class="kpi"><span>PRIMA NEGOCIADA</span><b id="stPremium">—</b><small>notional de opciones</small></div>
+      <div class="kpi"><span>RATIO PUT/CALL</span><b id="stPcr">—</b><small id="stPcrDetail">—</small></div>
+      <div class="kpi"><span>TAMAÑO MEDIO</span><b id="stAvgSize">—</b><small>contratos por print</small></div>
+    </div>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>ESTADÍSTICA POR LADO DE OPERACIÓN</h2></header>
+        <div class="chart sm" id="chartTradeSide"></div>
+      </article>
+      <article class="card">
+        <header><h2>CUOTA DE MERCADO POR VENCIMIENTO</h2></header>
+        <div class="chart sm" id="chartMarketShare"></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>ESTADÍSTICA DE CONTRATOS</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblContracts">
+        <thead><tr><th>CONTRATO</th><th>PRIMA</th><th>CONTRATOS</th><th>OPERACIONES</th><th>SESGO</th><th>FUENTE</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ DARK POOL ══════ -->
+<section class="view" data-view="darkpool">
+  <div class="stack">
+    <!-- Ocho tarjetas en una rejilla de cuatro: dos filas completas. La fuente
+         primaria es Quant Data (dark-flow / dark-pool-levels / equity-prints); la
+         clasificación por venue se conserva como auditoría, no como única vía. -->
+    <div class="grid c4">
+      <div class="kpi"><span>OFF-EXCHANGE CONFIRMADOS</span><b id="dpCount">—</b><small>impresiones fuera de bolsa</small></div>
+      <div class="kpi"><span>NOTIONAL OFF-EXCHANGE</span><b id="dpNotional">—</b><small>valor confirmado</small></div>
+      <div class="kpi accent"><span>% FUERA DE BOLSA</span><b id="dpShare">—</b><small id="dpShareDetail">proporción del volumen ejecutado en oscuro</small></div>
+      <div class="kpi"><span>VOLUMEN OSCURO</span><b id="dpDarkVolume">—</b><small id="dpDarkVolumeDetail">Quant Data · dark-flow</small></div>
+      <div class="kpi"><span>NIVEL DOMINANTE</span><b id="dpLevel">—</b><small id="dpLevelDetail">—</small></div>
+      <div class="kpi"><span>VWAP SESIÓN</span><b id="dpVwap">—</b><small id="dpVwapDetail">—</small></div>
+      <div class="kpi"><span>PRINT MAYOR OFF-EX</span><b id="dpBiggest">—</b><small id="dpBiggestDetail">—</small></div>
+      <div class="kpi"><span>AUDITORÍA PROVEEDOR / VENUE</span><b id="dpAudit">—</b><small id="dpAuditDetail">dos medidas independientes de la misma sesión</small></div>
+    </div>
+    <article class="card">
+      <header><h2>PRECIO / TIEMPO · OFF-EXCHANGE CONFIRMADO</h2></header>
+      <div class="chart lg" id="chartDarkPool"></div>
+    </article>
+    <article class="card">
+      <header><h2>ZONAS OFF-EXCHANGE</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblDarkPool">
+        <thead><tr><th>PRECIO</th><th>RANGO</th><th>NOTIONAL</th><th>ACCIONES</th><th>PRINTS</th><th>TIPO</th><th>CONCENTRACIÓN</th><th>DISTANCIA</th><th>ORIGEN</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+    <article class="card">
+      <header><h2>PRINTS OFF-EXCHANGE CONFIRMADOS</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblDarkPoolPrints">
+        <thead><tr><th>HORA</th><th>PRECIO</th><th>ACCIONES</th><th>NOTIONAL</th><th>VENUE</th><th>vs VWAP</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════ MACRO ═══════ -->
+<section class="view" data-view="macro">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>ESTRÉS MACRO</span><b id="mcStress">—</b><small id="mcStressLabel">—</small></div>
+      <div class="kpi"><span>CONTEXTO DEL ACTIVO</span><b id="mcAsset">—</b><small id="mcRegime">—</small></div>
+      <div class="kpi"><span>CURVA 10Y−2Y</span><b id="mcCurve">—</b><small id="mcCurveDetail">inversión / pendiente</small></div>
+      <div class="kpi"><span>CRÉDITO HY OAS</span><b id="mcCredit">—</b><small id="mcCreditDetail">prima de riesgo</small></div>
+    </div>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>TIPOS DEL TESORO · 2Y / 10Y / 30Y</h2><span class="pill" id="mcRatesPill">—</span></header>
+        <div class="chart" id="chartRates"></div>
+      </article>
+      <article class="card">
+        <header><h2>CURVA Y CRÉDITO</h2></header>
+        <div class="chart" id="chartCurve"></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>IMPACTO EN LA SESIÓN DE NUEVA YORK</h2><span class="pill" id="mcSessionPill">—</span></header>
+      <div class="body">
+        <div class="grid c5">
+          <div class="kpi"><span>PRÓXIMO EVENTO DE ALTO IMPACTO</span><b id="mcEvent">—</b><small id="mcEventWhen">—</small></div>
+          <div class="kpi"><span>RANGO ESTIMADO DE LA SESIÓN</span><b id="mcRange">—</b><small id="mcRangeDetail">—</small></div>
+          <div class="kpi"><span>SESGO PARA LA SESIÓN</span><b id="mcBias">—</b><small id="mcBiasDetail">—</small></div>
+          <div class="kpi"><span>RÉGIMEN DE COBERTURA</span><b id="mcRegime2">—</b><small id="mcRegimeDetail">—</small></div>
+          <div class="kpi"><span>QUÉ SE PRIORIZA</span><b id="mcPriority">—</b><small id="mcPriorityDetail">—</small></div>
+        </div>
+        <div class="table-wrap"><table class="data" id="tblSessionVotes">
+          <thead><tr><th>FACTOR</th><th>TIPO</th><th>VALOR</th><th>LECTURA</th><th>APORTE</th></tr></thead><tbody></tbody>
+        </table></div>
+        <p class="note" id="mcSessionNote">—</p>
+      </div>
+    </article>
+    <article class="card">
+      <header><h2>CALENDARIO OFICIAL · FED Y MACRO</h2><span class="pill" id="mcEventsPill">—</span></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblMacroEvents">
+        <thead><tr><th>EVENTO</th><th>CUÁNDO</th><th>IMPORTANCIA</th><th>PREVIO</th><th>ESPERADO</th><th>REAL</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+    <article class="card">
+      <header><h2>COMPONENTES DEL CONTEXTO MACRO</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblMacroComponents">
+        <thead><tr><th>COMPONENTE</th><th>VALOR</th><th>PESO</th><th>APORTE</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════ ESCENARIOS ═══════ -->
+<section class="view" data-view="escenarios">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi"><span>TRAYECTORIAS</span><b id="mcPaths">—</b><small id="mcHorizon">—</small></div>
+      <div class="kpi"><span>MEDIANA</span><b id="mcMedian">—</b><small id="mcMedianDelta">—</small></div>
+      <div class="kpi pos"><span>BANDA 84%</span><b id="mcP84">—</b><small id="mcP84Delta">—</small></div>
+      <div class="kpi neg"><span>BANDA 16%</span><b id="mcP16">—</b><small id="mcP16Delta">—</small></div>
+    </div>
+    <article class="card">
+      <header><h2>MONTE CARLO · DISTRIBUCIÓN DE PRECIO SIMULADA</h2><span class="pill" id="mcPill">—</span></header>
+      <div class="chart lg" id="chartMonteCarlo"></div>
+    </article>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>CUANTILES</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblQuantiles">
+          <thead><tr><th>CUANTIL</th><th>PRECIO</th><th>Δ vs SPOT</th><th>Δ %</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+      <article class="card">
+        <header><h2>ESCENARIOS DE VOLATILIDAD</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblIvScenarios">
+          <thead><tr><th>ESCENARIO</th><th>IV</th><th>BAJO</th><th>MEDIANA</th><th>ALTO</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>EXPOSURE FORECAST · EXPOSICIÓN POR ESCENARIO DE PRECIO</h2><span class="pill" id="efPill">—</span></header>
+      <div class="chart" id="chartExposureForecast"></div>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblExposureForecast">
+        <thead><tr><th>ESCENARIO</th><th>PRECIO</th><th>Δ %</th><th>GEX DEBAJO</th><th>GEX ENCIMA</th><th>GEX NETO</th><th>RÉGIMEN</th></tr></thead><tbody></tbody>
+      </table></div>
+      <p class="note" id="efNote">—</p></div>
+    </article>
+    <article class="card">
+      <header><h2 id="imTitle">INTERVAL MAP GEX · EXPOSICIÓN POR STRIKE Y TIEMPO</h2>
+        <div class="tools">
+          <select class="ctl" id="imGreek">
+            <option value="GAMMA">Gamma · GEX</option>
+            <option value="DELTA">Delta · DEX</option>
+            <option value="CHARM">Charm · CHEX</option>
+          </select>
+          <span class="pill" id="imPill">—</span>
+        </div>
+      </header>
+      <div class="chart lg" id="chartIntervalMap"></div>
+      <div class="body"><p class="note" id="imNote">—</p></div>
+    </article>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════ BACKTEST ═══════ -->
+<section class="view" data-view="backtest">
+  <div class="stack">
+    <div class="grid c4">
+      <div class="kpi accent"><span>ETAPA DEL MODELO</span><b id="btStage">—</b><small id="btAuthority">—</small></div>
+      <div class="kpi"><span>MEJORA SOBRE TASA BASE</span><b id="btImprove">—</b><small id="btBrier">—</small></div>
+      <div class="kpi"><span>PUERTAS SUPERADAS</span><b id="btGates">—</b><small id="btCalibrator">—</small></div>
+      <div class="kpi"><span>SESIONES</span><b id="btSessions">—</b><small id="btSplit">—</small></div>
+    </div>
+
+    <article class="card">
+      <header><h2>CALENDARIO DE REPRODUCCIÓN</h2>
+        <div class="tools">
+          <select class="ctl" id="btRange">
+            <option value="30">30 días</option><option value="45" selected>45 días</option>
+            <option value="90">90 días</option><option value="180">180 días</option>
+          </select>
+          <span class="pill" id="btCalPill">—</span>
+        </div>
+      </header>
+      <div class="body">
+        <div class="cal" id="btCalendar"></div>
+        <p class="note" id="btCalNote">—</p>
+      </div>
+    </article>
+
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>VALIDACIÓN DEL MODELO · FUERA DE MUESTRA</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblGates">
+          <thead><tr><th>PUERTA</th><th>DETALLE</th><th>ESTADO</th></tr></thead><tbody></tbody>
+        </table></div>
+        <p class="note" id="btNote">—</p></div>
+      </article>
+      <article class="card">
+        <header><h2>FIABILIDAD · PROBABILIDAD PREDICHA vs OBSERVADA</h2></header>
+        <div class="chart" id="chartReliability"></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════ FUENTES ═══════ -->
+<section class="view" data-view="fuentes">
+  <div class="stack">
+    <article class="card">
+      <header><h2>PROVEEDORES · PARIDAD DE OPCIONES</h2><span class="pill" id="parityPill">—</span></header>
+      <div class="body" id="providerList">
+        <div class="empty">Consultando estado de proveedores…</div>
+      </div>
+    </article>
+    <div class="grid c2">
+      <article class="card">
+        <header><h2>COBERTURA POR CANAL</h2></header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblChannels">
+          <thead><tr><th>CANAL</th><th>PROVEEDOR</th><th>ROL</th><th>COBERTURA</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+      <article class="card">
+        <header><h2>HERRAMIENTAS QUANT DATA</h2>
+          <div class="tools"><span class="pill" id="quotaPill">—</span><span class="pill" id="qdPill">—</span></div>
+        </header>
+        <div class="body"><div class="table-wrap"><table class="data" id="tblQdTools">
+          <thead><tr><th>HERRAMIENTA</th><th>PÁGINA</th><th>ESTADO</th><th>ORIGEN</th><th>EDAD</th><th>RUTA / DIAGNÓSTICO</th></tr></thead><tbody></tbody>
+        </table></div></div>
+      </article>
+    </div>
+    <article class="card">
+      <header><h2>DIAGNÓSTICO DE PANELES · POR QUÉ HAY O NO HAY DATOS</h2></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblDiag">
+        <thead><tr><th>PANEL</th><th>ESTADO</th><th>FILAS</th><th>ORIGEN</th><th>MOTIVO</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+
+<section class="view" data-view="arquitectura">
+  <div class="stack">
+    <div class="grid c3">
+      <div class="kpi accent"><span>CALIDAD DE MODELO</span><b id="arqModel">—</b><small id="arqModelWhy">—</small></div>
+      <div class="kpi"><span>CALIDAD DE DATOS</span><b id="arqData">—</b><small id="arqDataWhy">—</small></div>
+      <div class="kpi"><span>CALIDAD DE DECISIÓN</span><b id="arqDecision">—</b><small id="arqDecisionWhy">—</small></div>
+    </div>
+
+    <article class="card">
+      <header><h2>CONTRATO DEL INSTRUMENTO · UNA SOLA MATEMÁTICA</h2>
+        <small id="arqDoctrine">—</small></header>
+      <div class="body"><div class="grid c4">
+        <div class="kpi"><span>MODELO DE VALORACIÓN</span><b id="arqModelName">—</b><small id="arqModelWhyLong">—</small></div>
+        <div class="kpi"><span>MULTIPLICADOR</span><b id="arqMult">—</b><small id="arqMultSrc">—</small></div>
+        <div class="kpi"><span>EJERCICIO · LIQUIDACIÓN</span><b id="arqStyle">—</b><small id="arqSettle">—</small></div>
+        <div class="kpi"><span>CLASE DE ACTIVO</span><b id="arqClass">—</b><small id="arqSupported">—</small></div>
+      </div></div>
+    </article>
+
+    <article class="card">
+      <header><h2>AUTORIDAD POR MÉTRICA · QUIÉN MANDA Y QUIÉN CORROBORA</h2>
+        <small>Contrato, no estado LIVE: «POLÍTICA SI FALTA» dice qué hará el motor si algún día desaparece la autoridad; no indica un fallo actual.</small></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblAuthority">
+        <thead><tr><th>MÉTRICA</th><th>AUTORIDAD</th><th>VALIDA</th><th>POLÍTICA SI FALTA</th><th>TIPO</th><th>FUSIÓN</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+
+    <article class="card">
+      <header><h2>CONTROLES QUE NO PASAN</h2>
+        <small>Un control verde no se muestra. Una pantalla llena de mensajes correctos entrena a no leerlos.</small></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblAudit">
+        <thead><tr><th>ÁREA</th><th>INVARIANTE</th><th>SEVERIDAD</th><th>DETALLE</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+
+    <article class="card">
+      <header><h2>UNIDADES CANÓNICAS DE EXPOSICIÓN</h2>
+        <small>«GEX» son tres magnitudes distintas. Comparar sin declarar representación produce divergencias que no lo son.</small></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblUnits">
+        <thead><tr><th>UNIDAD</th><th>GRIEGA</th><th>REPRESENTACIÓN</th><th>DIMENSIÓN</th><th>LECTURA</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+  </div>
+</section>
+
+
+</main>
+
+<!-- ═════════════════════════════════════════════════════ SOPHIA ═══════ -->
+<aside class="sophia" id="sophiaPanel" hidden>
+  <header>
+    <b>SOPHIA</b>
+    <span class="pill" id="sophiaPill">—</span>
+    <button class="icon-btn" id="sophiaClose" title="Cerrar">×</button>
+  </header>
+  <div class="log" id="sophiaLog"></div>
+  <div class="composer">
+    <textarea id="sophiaInput" rows="2" placeholder="Pregúntale sobre el mercado o el programa…"></textarea>
+    <div class="actions">
+      <button class="icon-btn" id="sophiaMic" title="Hablar · responde hablando">🎙</button>
+      <button class="ctl" id="sophiaSend">ENVIAR</button>
+    </div>
+  </div>
+  <p class="note" id="sophiaNote">Local · sin créditos, sin tokens, sin mensualidad. Si le hablas, te responde hablando.</p>
+</aside>
+
+
+<div class="modal" id="symbolModal" hidden>
+  <div class="sheet">
+    <header><b class="mono">BUSCAR INSTRUMENTO</b><button class="icon-btn" id="symbolClose">✕</button></header>
+    <div style="padding:12px"><input type="text" id="symbolInput" placeholder="DIA, SPY, YM, XLF…" autocomplete="off"></div>
+    <div class="results" id="symbolResults"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/itmq_core.js?v={{ version }}"></script>
+<script src="/static/itmq_trace.js?v={{ version }}"></script>
+<script src="/static/itmq_orderflow.js?v={{ version }}"></script>
+<script src="/static/itmq_panels.js?v={{ version }}"></script>
+<script src="/static/itmq_app.js?v={{ version }}"></script>
+</body>
+</html>
