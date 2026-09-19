@@ -1549,6 +1549,7 @@
     el('traceRightMetric')?.addEventListener('change', e => Trace.setMetric('right', e.target.value));
     el('traceHeatField')?.addEventListener('change', e => Trace.setHeatField(e.target.value));
     el('traceHeatOpacity')?.addEventListener('input', e => Trace.setHeatOpacity(Number(e.target.value) / 100));
+    el('traceShowQflow')?.addEventListener('change', e => Trace.toggle('showQflow', e.target.checked));
     el('traceTf')?.addEventListener('change', e => { state.timeframe = e.target.value; pullTrace(); pullBundle(); });
     el('traceWindow')?.addEventListener('change', e => { state.tailMinutes = Number(e.target.value); pullTrace(); });
 

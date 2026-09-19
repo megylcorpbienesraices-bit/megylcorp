@@ -51,14 +51,30 @@
                 help: 'Movimiento del DEX desde el snapshot, por revalorización contra el precio en vivo' },
   };
 
+  /* Campos del fondo dinámico.
+   *
+   * v1.43.0 · Los cuatro primeros vienen del INTERVAL MAP de Quant Data
+   * (`interval_maps`): eje X tiempo, eje Y strike, intensidad = magnitud de
+   * exposición. No es un heat map estático de fondo: cada columna es un intervalo
+   * real de la sesión, así que se ve cómo la exposición aparece, crece, se reduce
+   * y MIGRA entre strikes durante el día.
+   *
+   * Los campos `engine:` siguen saliendo de `heatmap_history` del motor, que es lo
+   * único que sabe de OI neto y volumen neto por intervalo: son preguntas que el
+   * Interval Map no responde, no un duplicado de las griegas.
+   */
   const HEATFIELDS = {
-    joint: { key: 'joint_coherence', label: 'Γ + Δ' },
-    gamma: { key: 'gamma_intensity', label: 'GAMMA' },
-    delta: { key: 'delta_intensity', label: 'DELTA' },
-    charm: { key: 'charm_intensity', label: 'CHARM' },
-    net_oi: { key: 'net_oi_intensity', label: 'OI NETO' },
-    net_volume: { key: 'net_volume_intensity', label: 'VOLUMEN NETO' },
+    gamma: { greek: 'GAMMA', label: 'GAMMA' },
+    delta: { greek: 'DELTA', label: 'DELTA' },
+    vanna: { greek: 'VANNA', label: 'VANNA' },
+    charm: { greek: 'CHARM', label: 'CHARM' },
+    joint: { key: 'joint_coherence', label: 'Γ + Δ', engine: true },
+    net_oi: { key: 'net_oi_intensity', label: 'OI NETO', engine: true },
+    net_volume: { key: 'net_volume_intensity', label: 'VOLUMEN NETO', engine: true },
   };
+
+  // Griegas del Interval Map, en el orden en que se alternan en la interfaz.
+  const INTERVAL_GREEKS = ['GAMMA', 'DELTA', 'VANNA', 'CHARM'];
 
   // Los estilos de nivel viven en el núcleo para que TRACE y el panel de flujo
   // dibujen el mismo precio con el mismo color y el mismo nombre.
@@ -80,7 +96,7 @@
     right: { metric: 'GEX', glide: new Q.Glide(140), max: new Q.GlideValue(260, 1),
              call: new Q.Glide(140), put: new Q.Glide(140) },
     breakdown: false,        // NETO (false) · CALL+PUT (true)
-    heatField: 'joint',
+    heatField: 'gamma',
     heatOpacity: 0.55,
     perspective: 'MM',
     expiry: 'ALL',
@@ -97,6 +113,7 @@
     priceMode: 'candles',
     showLevels: true,
     showPrints: true,
+    showQflow: true,
   };
 
   const GUT = { left: 48, right: 48 };     // carriles de etiquetas de precio
@@ -172,16 +189,46 @@
    * exacto de la matriz. Al pintarlo escalado con suavizado se obtienen las
    * manchas continuas, y el coste por frame es un único drawImage.
    */
-  function buildHeatBitmap() {
-    const h = (S.data || {}).heatmap_history;
+  /** De dónde sale la matriz del fondo: Interval Map del proveedor o motor. */
+  function heatSource() {
+    const d = S.data || {};
     const field = HEATFIELDS[S.heatField];
-    if (!h || h.ready !== true || !field) { S.heat = null; return; }
-    const m = h[field.key];
-    const strikes = h.strikes || [];
-    const times = h.times || [];
-    if (!Array.isArray(m) || !m.length || !strikes.length || !times.length) { S.heat = null; return; }
+    if (!field) return null;
 
-    const key = [S.heatField, h.incremental_key, times.length, strikes.length].join('|');
+    if (field.greek) {
+      const maps = d.interval_maps || {};
+      const im = maps[field.greek];
+      if (im && im.ready === true && Array.isArray(im.intensity) && im.intensity.length
+          && (im.strikes || []).length && (im.times || []).length) {
+        return {
+          matrix: im.intensity, strikes: im.strikes, times: im.times,
+          // `source` y `source_mode` viajan para el HUD; no se pinta el endpoint.
+          origin: im.source || 'QUANTDATA', mode: im.source_mode || 'DIRECT_PROVIDER',
+          stamp: (im.times || []).slice(-1)[0] || '',
+        };
+      }
+      return null;
+    }
+
+    const h = d.heatmap_history;
+    if (!h || h.ready !== true) return null;
+    const m = h[field.key];
+    if (!Array.isArray(m) || !m.length) return null;
+    return {
+      matrix: m, strikes: h.strikes || [], times: h.times || [],
+      origin: 'ITM_QUANT', mode: 'DERIVED', stamp: h.incremental_key || '',
+    };
+  }
+
+  function buildHeatBitmap() {
+    const src = heatSource();
+    if (!src) { S.heat = null; S.heatKey = ''; return; }
+    const m = src.matrix;
+    const strikes = src.strikes;
+    const times = src.times;
+    if (!strikes.length || !times.length) { S.heat = null; return; }
+
+    const key = [S.heatField, src.origin, src.stamp, times.length, strikes.length].join('|');
     if (key === S.heatKey && S.heat) return;
     S.heatKey = key;
 
@@ -213,7 +260,8 @@
       }
     }
     ictx.putImageData(img, 0, 0);
-    S.heat = { canvas: cv, times, strikes, t0: Q.parseTime(times[0]), t1: Q.parseTime(times[times.length - 1]) };
+    S.heat = { canvas: cv, times, strikes, origin: src.origin, mode: src.mode,
+               t0: Q.parseTime(times[0]), t1: Q.parseTime(times[times.length - 1]) };
   }
 
   function hexRGB(hex) {
@@ -489,6 +537,15 @@
     // 5 · niveles estructurales con etiquetas encadenadas
     if (S.showLevels) drawLevels(ctx, box, sy, d.levels || []);
 
+    // 5b · QFLOW: nivel estructural y concentraciones, sobre el mismo eje temporal
+    if (S.showQflow) {
+      drawQflowLevel(ctx, box, sy, d.qflow);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
+      drawQflowMarkers(ctx, box, sx, sy, d.qflow);
+      ctx.restore();
+    }
+
     // 6 · precio actual en ambos bordes (como en la referencia)
     const spot = S.spot.get();
     if (Q.isNum(spot)) {
@@ -608,6 +665,70 @@
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fillStyle = Q.alpha(col, 0.55); ctx.fill();
       ctx.strokeStyle = Q.alpha(col, 0.95); ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** Nivel QFLOW sobre el gráfico principal.
+   *
+   * Es dónde estaba el SUBYACENTE mientras se pagaba el grueso de la prima. No es
+   * el strike dominante, ni el Net Drift, ni el Gamma Center, ni el Zero Gamma, y
+   * por eso se dibuja con su propio estilo en vez de mezclarse con los niveles
+   * estructurales: leerlo como si fuera un muro sería un error de interpretación.
+   *
+   * Sólo se dibuja cuando la concentración es ESTRUCTURALMENTE relevante. Un nivel
+   * calculado sobre prima repartida por todo el rango no señala nada, y dibujarlo
+   * igual lo convertiría en ruido con aspecto de señal.
+   */
+  const QFLOW_MIN_CONCENTRATION = 0.55;
+
+  function drawQflowLevel(ctx, box, sy, qflow) {
+    const lvl = qflow && qflow.level;
+    if (!lvl) return;
+    const price = Q.num(lvl.price, NaN);
+    const conc = Q.num(lvl.concentration, 0);
+    if (!Q.isNum(price) || conc < QFLOW_MIN_CONCENTRATION) return;
+    const y = sy(price);
+    if (y < box.y - 2 || y > box.y + box.h + 2) return;
+    const col = Q.token('--gold', '#d9a441');
+    Q.levelLine(ctx, box, y, Q.alpha(col, 0.75), { dash: [2, 4] });
+    Q.chip(ctx, box.x + box.w - 8, Q.clamp(y, box.y + 9, box.y + box.h - 9),
+      `QFLOW ${price.toFixed(price >= 1000 ? 0 : 2)}`,
+      { align: 'right', bg: Q.alpha(col, 0.92), color: '#06101c' });
+  }
+
+  /** Concentraciones QFLOW marcadas sobre el precio: ▲ $X.XM / ▼ $X.XM.
+   *
+   * La MISMA marca aparece en el panel de flujo. Si el flujo dice que hubo 4.2 M$
+   * en calls a las 10:14 y el gráfico de precio no enseña dónde estaba el precio en
+   * ese instante, la lectura no se puede cerrar.
+   */
+  function drawQflowMarkers(ctx, box, sx, sy, qflow) {
+    const marks = (qflow && qflow.markers) || [];
+    if (!marks.length) return;
+    ctx.save();
+    ctx.font = '600 10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    for (const m of marks) {
+      const t = Q.parseTime(m.t);
+      const px = Q.num(m.price, NaN);
+      if (!Q.isNum(t) || !Q.isNum(px)) continue;
+      const x = sx(t);
+      if (x < box.x - 20 || x > box.x + box.w + 20) continue;
+      const y = sy(px);
+      const up = m.side === 'CALL';
+      const col = up ? Q.token('--pos', '#22c55e')
+                     : m.side === 'PUT' ? Q.token('--neg', '#ef4444') : Q.token('--gold', '#d9a441');
+      const dy = up ? -14 : 14;
+      ctx.fillStyle = Q.alpha(col, 0.95);
+      ctx.textBaseline = up ? 'bottom' : 'top';
+      ctx.fillText(m.label || (up ? '▲' : '▼'), x, y + dy);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + dy * 0.45);
+      ctx.strokeStyle = Q.alpha(col, 0.7);
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -834,6 +955,16 @@
     set('traceVolTrigger', fmtLevel(lv.vol_trigger));
     const age = Q.num(prof.snapshot_age_seconds, NaN);
     set('traceSnapshotAge', Q.isNum(age) ? age.toFixed(0) + 's' : '—');
+    // Origen del fondo, en lenguaje de análisis: nunca el nombre del endpoint.
+    const hf = HEATFIELDS[S.heatField];
+    set('traceHeatFieldLabel', hf ? hf.label : '—');
+    set('traceHeatSource', S.heat
+      ? (S.heat.mode === 'DIRECT_PROVIDER' ? 'estructura de opciones'
+         : S.heat.mode === 'FALLBACK' ? 'estructura propia (respaldo)' : 'modelo propio')
+      : 'SIN DATOS');
+    const ql = (d.qflow || {}).level;
+    set('traceQflowLevel', ql && Q.isNum(Q.num(ql.price, NaN))
+      ? Q.num(ql.price).toFixed(Q.num(ql.price) >= 1000 ? 0 : 2) : '—');
   }
 
   function fmtLevel(v) {
@@ -896,8 +1027,18 @@
   }
   function toggle(flag, on) { S[flag] = !!on; invalidateAll(); }
 
+  /** Alterna la griega del Interval Map: GAMMA · DELTA · VANNA · CHARM. */
+  function setIntervalGreek(greek) {
+    const g = String(greek || '').toUpperCase();
+    if (INTERVAL_GREEKS.indexOf(g) < 0) return;
+    setHeatField(g.toLowerCase());
+  }
+
+  function intervalGreeks() { return INTERVAL_GREEKS.slice(); }
+
   global.ITMQTrace = {
     mount, applyData, setMetric, setBreakdown, hasBreakdown, setHeatField, setHeatOpacity, setPriceMode, setFollow, toggle,
+    setIntervalGreek, intervalGreeks,
     strikeRow, onStrike(cb) { S.onStrike = cb; },
     clearStrike() { S.pinnedStrike = NaN; invalidateAll(); },
     state: S, METRICS, HEATFIELDS,

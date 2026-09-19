@@ -145,13 +145,21 @@
       </select>
     </div>
     <div class="sep"></div>
-    <div class="group"><span class="label">HEATMAP</span>
-      <select class="ctl" id="traceHeatField">
-        <option value="joint">Γ + Δ</option><option value="gamma">Gamma</option><option value="delta">Delta</option>
-        <option value="charm">Charm</option><option value="net_oi">OI neto</option><option value="net_volume">Volumen neto</option>
+    <div class="group"><span class="label">MAPA DINÁMICO</span>
+      <!-- v1.43.0 · Las cuatro griegas salen del Interval Map: eje X tiempo, eje Y
+           strike, intensidad = magnitud de exposición. Ver cómo migra la exposición
+           durante la sesión es justo lo que un heat map estático no puede contar. -->
+      <select class="ctl" id="traceHeatField" title="Griega del mapa de intervalos">
+        <option value="gamma" selected>Gamma</option><option value="delta">Delta</option>
+        <option value="vanna">Vanna</option><option value="charm">Charm</option>
+        <option value="joint">Γ + Δ</option>
+        <option value="net_oi">OI neto</option><option value="net_volume">Volumen neto</option>
         <option value="off">Apagado</option>
       </select>
-      <input type="range" id="traceHeatOpacity" min="0" max="100" value="55" title="Intensidad del heatmap">
+      <input type="range" id="traceHeatOpacity" min="0" max="100" value="55" title="Intensidad del mapa">
+    </div>
+    <div class="group"><span class="label">QFLOW</span>
+      <label class="chk"><input type="checkbox" id="traceShowQflow" checked> Nivel y concentraciones</label>
     </div>
     <div class="group"><span class="label">PERFILES</span>
       <div class="seg" id="traceBreakdown">
@@ -224,6 +232,8 @@
       <div class="kpi"><span>FLUJO 5M</span><b id="traceFlow5m">—</b><small>prima direccional</small></div>
       <div class="kpi"><span>DIRECCIÓN</span><b id="traceDirection">—</b><small id="traceEdge">—</small></div>
       <div class="kpi"><span>FASE</span><b id="tracePhase">—</b><small>estado de mercado</small></div>
+      <div class="kpi"><span>QFLOW</span><b id="traceQflowLevel">—</b><small>precio donde se pagó la prima</small></div>
+      <div class="kpi"><span>MAPA</span><b id="traceHeatFieldLabel">—</b><small id="traceHeatSource">—</small></div>
     </div>
   </div>
 

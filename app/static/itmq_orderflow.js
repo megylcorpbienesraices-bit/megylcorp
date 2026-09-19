@@ -299,7 +299,10 @@
         if (up) { ctx.moveTo(x, y - 12); ctx.lineTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); }
         else { ctx.moveTo(x, y + 12); ctx.lineTo(x - 4, y + 5); ctx.lineTo(x + 4, y + 5); }
         ctx.closePath(); ctx.fill();
-        ctx.fillText(Q.money(Q.num(ev.premium, 0), 1), x, up ? y - 14 : y + 24);
+        // v1.43.0 · La marca lleva la flecha Y la magnitud: «▲ $4.2M». Un triángulo
+        // suelto dice que pasó algo; la etiqueta dice cuánto, que es lo que permite
+        // comparar dos concentraciones de un vistazo sin abrir el panel.
+        ctx.fillText(markerLabel(ev), x, up ? y - 14 : y + 24);
       }
       ctx.restore();
     }
@@ -574,6 +577,15 @@
         const x = sx(t);
         if (x < box.x || x > box.x + box.w) continue;
         ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + 6); ctx.stroke();
+        const att = attributionFor(ev.t);
+        if (att) {
+          ctx.save();
+          ctx.font = '9px ui-monospace, monospace';
+          ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.9);
+          ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+          ctx.fillText(attributionText(att), x, box.y + 8);
+          ctx.restore();
+        }
       }
       ctx.restore();
     }
@@ -582,6 +594,48 @@
     Q.axisX(ctx, box, sx, win.t0, win.t1, { grid: false });
     if (S.panels.total && S.panels.total.pointer.inside) crosshairX(ctx, box, S.panels.total.pointer.x);
     return S._totMax.step(env.dt);
+  }
+
+
+  /** «▲ $4.2M» / «▼ $1.8M» · la misma etiqueta que dibuja TRACE sobre el precio. */
+  function markerLabel(ev) {
+    if (!ev) return '';
+    if (ev.label) return String(ev.label);
+    const up = String(ev.side) === 'CALL';
+    const arrow = up ? '▲' : String(ev.side) === 'PUT' ? '▼' : '◆';
+    return arrow + ' ' + Q.money(Q.num(ev.premium, 0), 1);
+  }
+
+  /** Qué operaciones produjeron una concentración, en una línea legible.
+   *
+   * La atribución viene de `order-flow` del mismo proveedor que publicó la serie.
+   * Si no hay cinta, se dice: una concentración sin atribuir es mejor que una
+   * atribuida a operaciones que nadie vio.
+   */
+  function attributionFor(t) {
+    const att = (S.qflow && S.qflow.attribution) || null;
+    if (!att || !att.ready || !Array.isArray(att.events)) return null;
+    const target = Q.parseTime(t);
+    if (!Q.isNum(target)) return null;
+    for (const e of att.events) {
+      if (Q.parseTime(e.t) === target && e.matched) return e;
+    }
+    return null;
+  }
+
+  function attributionText(e) {
+    if (!e) return '';
+    const parts = [];
+    if (e.calls) parts.push(e.calls + ' call');
+    if (e.puts) parts.push(e.puts + ' put');
+    if (e.buys) parts.push(e.buys + ' compra');
+    if (e.sells) parts.push(e.sells + ' venta');
+    const tags = Object.keys(e.executions || {});
+    if (tags.length) parts.push(tags.join('·'));
+    if (e.dominant_strike && Q.isNum(Q.num(e.dominant_strike.strike, NaN))) {
+      parts.push('strike ' + Q.num(e.dominant_strike.strike).toFixed(0));
+    }
+    return parts.join(' · ');
   }
 
   /* ------------------------------------------------------------- común */

@@ -1497,7 +1497,48 @@ async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, windo
         terminal_metrics.inc("trace_fail_soft_recovery")
         payload=await asyncio.to_thread(STATE.nextgen_trace_price_only,timeframe,tail_minutes,window,f"TRACE_DEGRADED: {type(exc).__name__}")
         payload["upstream_error"]=f"{type(exc).__name__}: {str(exc)[:240]}"
+    # v1.43.0 · El fondo dinámico de TRACE es el Interval Map de Quant Data, no un
+    # heat map estático. Se adjunta FUERA de la caché del trace porque su cadencia
+    # es la del proveedor, no la del motor: meterlo dentro congelaría el mapa hasta
+    # la siguiente revisión analítica.
+    payload = _attach_interval_maps(payload)
     return JSONResponse(_jsonable(payload))
+
+
+def _attach_interval_maps(payload: dict) -> dict:
+    """Las cuatro matrices del Interval Map, listas para alternar en el cliente.
+
+    Se envían las cuatro griegas de una vez —no una por petición— porque cambiar
+    de GAMMA a DELTA es una decisión de lectura, no de datos: obligar a un viaje de
+    red por cada clic haría que el mapa parpadeara justo cuando se está comparando.
+    El coste de cuota es cero: son matrices ya descargadas por los carriles.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    try:
+        from .core import quant_data_hub as HUB
+        intel = QUANTDATA_INTELLIGENCE.snapshot()
+        symbol = str(payload.get("symbol") or STATE.symbol).upper()
+        price = [{"t": str(c.get("t")), "v": c.get("c")}
+                 for c in (payload.get("candles") or [])[-900:]
+                 if isinstance(c, dict) and c.get("t") is not None and c.get("c") is not None]
+        hh = payload.get("heatmap_history") or {}
+        maps = {}
+        for greek in HUB.INTERVAL_GREEKS:
+            maps[greek] = HUB.interval_map(symbol, intel, greek,
+                                           engine_heatmap=hh, price=price)
+        payload["interval_maps"] = maps
+        payload["interval_map"] = maps.get("GAMMA")
+        payload["interval_map_greeks"] = list(HUB.INTERVAL_GREEKS)
+        # QFLOW sobre el mismo eje temporal que el precio: el nivel estructural y
+        # las concentraciones tienen que dibujarse contra las MISMAS velas o la
+        # lectura no se puede cerrar.
+        from .terminal_api import _qflow
+        payload["qflow"] = _qflow(STATE.public_state(), intel)
+    except Exception as exc:
+        _obs_note("main:attach_interval_maps", exc, severity="DEGRADED")
+        payload.setdefault("interval_maps", {})
+    return payload
 
 
 @app.get("/api/nextgen/market-truth")
