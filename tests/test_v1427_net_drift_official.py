@@ -346,7 +346,7 @@ def test_the_renderer_draws_the_four_required_elements():
     assert "line('put'" in body, "línea PUT acumulada"
     assert "psy(v.price)" in body, "precio sobre el mismo eje temporal"
     vol = js[js.index("function drawDriftVolume"):]
-    assert "v.cv" in vol and "v.pv" in vol, "subgráfico de volumen neto CALL/PUT"
+    assert "p.cv" in vol and "p.pv" in vol, "subgráfico de volumen neto CALL/PUT"
 
 
 def test_the_two_panels_share_one_time_axis():

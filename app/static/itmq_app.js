@@ -564,9 +564,14 @@
     set('oiPutPct', Q.isNum(Q.num(oi.put_pct, NaN)) ? `${Q.num(oi.put_pct).toFixed(1)}% del total` : '—');
 
     const rows = oi.by_strike || [];
+    // v1.47.0 · Cuando hay agregados pero no desglose, el panel DICE por qué en
+    // vez de contradecir a la cabecera. «OI TOTAL 37.1K» encima de «SIN INTERÉS
+    // ABIERTO» son dos verdades que juntas se leen como un fallo.
+    const oiEmpty = oi.breakdown_reason || 'SIN INTERÉS ABIERTO';
     // Call arriba y put abajo del cero: el desequilibrio se lee de un vistazo.
-    chart('chartOiStrike', () => P.hbars(el('chartOiStrike'), { fmt: v => Q.signedCompact(v, 1), empty: 'SIN INTERÉS ABIERTO' }))
-      .set(rows.map(r => ({ label: Q.num(r.strike).toFixed(2), value: Q.num(r.net_oi, 0), key: r.strike })));
+    const oiStrike = chart('chartOiStrike', () => P.hbars(el('chartOiStrike'), { fmt: v => Q.signedCompact(v, 1), empty: oiEmpty }));
+    if (oiStrike.setEmpty) oiStrike.setEmpty(oiEmpty);
+    oiStrike.set(rows.map(r => ({ label: Q.num(r.strike).toFixed(2), value: Q.num(r.net_oi, 0), key: r.strike })));
 
     chart('chartMaxPainTime', () => P.lines(el('chartMaxPainTime'), { fmt: v => v.toFixed(2), zeroLine: false, empty: 'MAX PAIN / TIEMPO NO DISPONIBLE' }))
       .set([{ name: 'MAX PAIN', color: Q.token('--gold', '#d9a441'), points: (oi.max_pain_over_time || []).map(r => ({ t: r.t, v: r.value })) }]);
@@ -581,7 +586,7 @@
       cell(Q.signedCompact(r.net_oi, 0), Q.num(r.net_oi) >= 0 ? 'pos' : 'neg'),
       Q.compact(r.volume, 0),
       Q.isNum(Q.num(r.vol_oi, NaN)) ? Q.num(r.vol_oi).toFixed(2) : '—',
-    ], 'Sin cadena de opciones cargada');
+    ], oiEmpty);
   }
 
   function renderVolatilidad(d) {
@@ -618,7 +623,13 @@
     set('volRankNote', v.iv_rank_note
       || 'El IV Rank se publica en cuanto el motor acumula historia propia suficiente; hasta entonces lo aporta el proveedor.');
     set('volSkew', Q.isNum(Q.num(v.skew_25d, NaN)) ? `${Q.num(v.skew_25d) >= 0 ? '+' : ''}${Q.num(v.skew_25d).toFixed(2)} pp` : '—');
-    set('volDrift', Q.isNum(Q.num(v.iv_change_pp, NaN)) ? `${Q.num(v.iv_change_pp) >= 0 ? '+' : ''}${Q.num(v.iv_change_pp).toFixed(3)} pp` : '—');
+    // La deriva sólo se escribe si se MIDIÓ. Un cero sin medición decía
+    // «+0.000 pp» junto a un panel que decía «NO DISPONIBLE».
+    const drift = Q.num(v.iv_change_pp, NaN);
+    set('volDrift', (v.iv_change_measured !== false && Q.isNum(drift))
+      ? `${drift >= 0 ? '+' : ''}${drift.toFixed(3)} pp` : '—');
+    set('volDriftDetail', (v.iv_change_measured === false)
+      ? 'sin dos observaciones con las que medir el cambio' : 'cambio en sesión');
 
     chart('chartSkew', () => P.curve(el('chartSkew'), {
       fmtY: y => y.toFixed(2), fmtX: x => x < 1 ? x.toFixed(2) + 'd' : x.toFixed(0) + 'd', empty: 'SIN SKEW PUBLICADO',
@@ -645,7 +656,12 @@
       : s.volume_source === 'CADENA_OFICIAL' ? 'volumen oficial de la cadena · sin cinta'
       : s.volume_source === 'AGREGADO_DEL_MOTOR' ? 'agregado del motor · sin desglose por strike'
       : (s.volume_reason || 'sesión observada'));
+    // `Q.money(null)` ya devuelve «—»; aquí se añade POR QUÉ, que es lo que
+    // distingue «no hubo prima» de «la prima no se puede medir sin cinta».
     set('stPremium', Q.money(s.premium, 1));
+    set('stPremiumDetail', s.premium_available === false
+      ? (s.premium_reason || 'sin impresiones sobre las que medir prima')
+      : 'prima total observada');
     set('stPcr', Q.isNum(Q.num(s.put_call_volume_ratio, NaN)) ? Q.num(s.put_call_volume_ratio).toFixed(2) : '—');
     set('stPcrDetail', `C ${Q.compact(s.call_volume, 0)} · P ${Q.compact(s.put_volume, 0)}`);
     set('stAvgSize', Q.isNum(Q.num(s.avg_size, NaN)) ? Q.num(s.avg_size).toFixed(1) : '—');
@@ -716,6 +732,19 @@
     set('dpDarkVolumeDetail', Q.isNum(dv)
       ? `${(dp.flow || []).length} intervalos observados`
       : motivoVacio(dp.reason || dp.state, 'sin volumen oscuro en este ciclo'));
+
+    // Cobertura por vía, en lenguaje de análisis: el nombre de la herramienta
+    // del proveedor y la causa exacta viven en el Auditor, no aquí.
+    const VIA = { dark_flow: 'flujo oscuro', dark_pool_levels: 'niveles', equity_prints: 'impresiones' };
+    const diag = dp.diagnosis || {};
+    const live = (diag.lanes_live || []).map(k => VIA[k] || k);
+    const broken = (diag.lanes_broken || []).map(k => VIA[k] || k);
+    set('dpCoverage', live.length ? `${live.length}/3` : '—');
+    set('dpCoverageDetail', live.length
+      ? (broken.length ? `con dato: ${live.join(' · ')} · sin dato: ${broken.join(' · ')}`
+                       : `con dato: ${live.join(' · ')}`)
+      : (diag.screen === 'MERCADO CERRADO' ? 'mercado cerrado: no hay sesión que medir'
+                                           : 'ninguna vía con dato en este ciclo'));
 
     const audit = dp.audit || {};
     const dpp = Q.num(audit.delta_pp, NaN);
@@ -1093,15 +1122,25 @@
     ], b.reason || 'Sin validación acumulada todavía');
 
     // Fiabilidad: en un modelo bien calibrado los puntos caen sobre la diagonal.
+    //
+    // v1.47.0 · La diagonal de referencia se dibujaba SIEMPRE, también sin una
+    // sola observación. Un panel con una recta trazada de esquina a esquina se
+    // lee como un resultado, y lo que había era una recolección en curso: cero
+    // sesiones medidas. La referencia sólo tiene sentido junto a algo que
+    // comparar con ella.
     const bins = b.reliability || [];
-    chart('chartReliability', () => P.lines(el('chartReliability'), {
-      fmt: v => v.toFixed(2), zeroLine: false, empty: 'SIN CURVA DE FIABILIDAD',
-    })).set([
+    const relEmpty = bins.length ? 'SIN CURVA DE FIABILIDAD'
+      : `RECOLECTANDO · ${Q.num(b.sessions, 0).toFixed(0)} sesiones medidas · aún no hay curva que calibrar`;
+    const rel = chart('chartReliability', () => P.lines(el('chartReliability'), {
+      fmt: v => v.toFixed(2), zeroLine: false, empty: relEmpty,
+    }));
+    if (rel.setEmpty) rel.setEmpty(relEmpty);
+    rel.set(bins.length ? [
       { name: 'OBSERVADO', color: Q.token('--accent', '#38bdf8'),
         points: bins.map(r => ({ t: Q.num(r.predicted ?? r.p ?? r.bin) * 1000, v: Q.num(r.observed ?? r.rate) })) },
       { name: 'PERFECTO', color: Q.token('--text-mute', '#5b6880'), width: 1,
         points: [{ t: 0, v: 0 }, { t: 1000, v: 1 }] },
-    ]);
+    ] : []);
   }
 
   /* ------------------------------------------------ calendario de backtesting */

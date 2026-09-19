@@ -501,16 +501,61 @@ def _open_interest(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str
                   for r in _qd_rows(intel, "oi_over_time")
                   if r.get("t") is not None and _f(r.get("value")) is not None]
 
-    call_oi = _f(pos.get("call_oi"), 0.0) or 0.0
-    put_oi = _f(pos.get("put_oi"), 0.0) or 0.0
-    total = call_oi + put_oi
+    # v1.47.0 · Los AGREGADOS y el DESGLOSE son datos distintos, de fuentes
+    # distintas, y hasta ahora se publicaban como si uno implicara al otro.
+    #
+    # La cabecera leía `state.positioning` —el agregado de cadena del motor— y
+    # `by_strike` leía el perfil del trace o `open-interest-by-strike` del
+    # proveedor. Que existiera el primero no decía NADA sobre el segundo, así que
+    # la pantalla podía mostrar «OI TOTAL 37.1K» encima de «SIN INTERÉS ABIERTO»
+    # y «Sin cadena de opciones cargada». Las dos cosas eran ciertas por separado
+    # y juntas se leían como un fallo.
+    #
+    # Además `_f(pos.get("call_oi"), 0.0) or 0.0` convertía un agregado AUSENTE en
+    # un cero, y entonces `total` valía 0 y los porcentajes desaparecían sin que
+    # nadie pudiera decir si es que no había OI o si es que no había dato.
+    call_oi = _f(pos.get("call_oi"))
+    put_oi = _f(pos.get("put_oi"))
+    total = (call_oi or 0.0) + (put_oi or 0.0) if (call_oi is not None or put_oi is not None) else None
+
+    # Procedencia de CADA hecho por separado. Es lo que permite responder «¿de
+    # dónde salió este número?» sin suponer que el de al lado viene del mismo
+    # sitio.
+    _agg_src = "ITM_QUANT_CHAIN_POSITIONING" if (call_oi is not None or put_oi is not None) else None
+    audit = {
+        "total_oi": _agg_src, "call_oi": _agg_src, "put_oi": _agg_src,
+        "by_strike": oi_source,
+        "by_expiration": ("ITM_QUANT_EXPIRY_INTELLIGENCE"
+                          if _d(state, "expiry_intelligence", "per_expiration", default=[])
+                          else ("QUANTDATA_OI_BY_EXPIRATION" if by_exp else None)),
+        "oi_change": "QUANTDATA_OPEN_INTEREST_CHANGE" if change else None,
+        "max_pain": "ITM_QUANT_CHAIN" if _f(levels.get("max_pain")) is not None else None,
+        "oi_history": "QUANTDATA_OI_OVER_TIME" if oi_history else None,
+    }
+    # Por qué falta el desglose teniendo agregados. Un mensaje contradictorio es
+    # peor que un hueco: manda a buscar un fallo donde no lo hay.
+    if by_strike:
+        breakdown_reason = ""
+    elif total:
+        breakdown_reason = ("el agregado de la cadena está disponible, pero el desglose "
+                            "por strike no: el proveedor no sirvió open-interest-by-strike "
+                            "y el perfil del motor todavía no tiene filas")
+    else:
+        breakdown_reason = "no hay interés abierto publicado en este ciclo"
+
     return {
         "ready": bool(by_strike),
         "max_pain": _f(levels.get("max_pain")),
         "spot": _f(state.get("spot")),
         "total_oi": total, "call_oi": call_oi, "put_oi": put_oi,
-        "call_pct": round(100.0 * call_oi / total, 1) if total else None,
-        "put_pct": round(100.0 * put_oi / total, 1) if total else None,
+        "call_pct": (round(100.0 * (call_oi or 0.0) / total, 1)
+                     if total and call_oi is not None else None),
+        "put_pct": (round(100.0 * (put_oi or 0.0) / total, 1)
+                    if total and put_oi is not None else None),
+        "aggregates_available": total is not None,
+        "breakdown_available": bool(by_strike),
+        "breakdown_reason": breakdown_reason,
+        "audit": audit,
         "put_call_ratio": _f(pos.get("put_call_oi_ratio")),
         "top_call_strike": _f(pos.get("top_call_oi_strike")),
         "top_put_strike": _f(pos.get("top_put_oi_strike")),
@@ -609,8 +654,12 @@ def _volatilidad(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]
         "iv_rank_call": _f(iv_summary.get("call_rank")),
         "iv_rank_put": _f(iv_summary.get("put_rank")),
         "iv_change_pp": _f(vol.get("iv_change_pp")),
+        # Si no hubo dos observaciones, la deriva no se ha medido: la sección lo
+        # dice en vez de publicar un cero que el panel de al lado desmiente.
+        "iv_change_measured": bool(vol.get("iv_change_measured")),
         "skew_25d": _f(vol.get("skew_25d")),
         "regime": vol.get("regime"),
+        "regime_measured": bool(vol.get("regime_measured")),
         "term_structure_state": vol.get("term_structure_state"),
         "expected_move": _f(vol.get("expected_move")),
         "expected_low": _f(vol.get("expected_low")), "expected_high": _f(vol.get("expected_high")),
@@ -663,10 +712,18 @@ def _estadisticas(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str,
     prints = trace.get("option_prints") or []
     pos = state.get("positioning") or {}
 
+    # v1.47.0 · La PRIMA se mide sobre impresiones; los CONTRATOS pueden venir de
+    # la cadena oficial cuando no hay cinta. Eran dos disponibilidades distintas
+    # publicadas como si fueran una: sin prints, `sum(...)` daba 0.0 y la sección
+    # mostraba «Contratos negociados 14K» junto a «Prima negociada $0.0», que es
+    # una afirmación falsa —no hubo prima cero: no hubo prima observada—.
     contracts = sum(abs(_f(p.get("contracts"), 0.0) or 0.0) for p in prints)
-    premium = sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints)
-    buy = sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints if (_f(p.get("direction"), 0) or 0) > 0)
-    sell = sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints if (_f(p.get("direction"), 0) or 0) < 0)
+    premium = (sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints)
+               if prints else None)
+    buy = (sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints
+               if (_f(p.get("direction"), 0) or 0) > 0) if prints else None)
+    sell = (sum(abs(_f(p.get("premium"), 0.0) or 0.0) for p in prints
+                if (_f(p.get("direction"), 0) or 0) < 0) if prints else None)
 
     # Agregado por contrato a partir de los prints observados: es la estadística
     # de contratos que el analista necesita y no depende de que el proveedor la sirva.
@@ -756,10 +813,29 @@ def _estadisticas(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str,
             if isinstance(e, dict)
         ]
 
+    # Cada KPI con su disponibilidad declarada por separado. Un agregado que
+    # existe no implica que exista el detalle del que normalmente se deriva.
+    audit = {
+        "contracts": volume_source,
+        "premium": "PRINTS_OBSERVADOS" if prints else None,
+        "buy_premium": "PRINTS_OBSERVADOS" if prints else None,
+        "sell_premium": "PRINTS_OBSERVADOS" if prints else None,
+        "contract_rows": (contract_rows[0].get("source") if contract_rows else None),
+        "market_share": ("QUANTDATA_MARKET_SHARE" if _qd_rows(intel, "market_share")
+                         else ("ITM_QUANT_EXPIRY_INTELLIGENCE" if market_share else None)),
+    }
+    premium_reason = "" if prints else (
+        "el volumen viene de la cadena oficial; la prima sólo se puede medir sobre "
+        "impresiones y en este ciclo no llegó ninguna"
+        if volume_source else "no hay actividad publicada en este ciclo")
+
     return {
         "ready": bool(prints) or bool(pos),
         "contracts": contracts, "premium": premium,
         "buy_premium": buy, "sell_premium": sell,
+        "premium_available": premium is not None,
+        "premium_reason": premium_reason,
+        "audit": audit,
         # El tamaño medio por impresión sólo existe si hay impresiones: con volumen
         # oficial de cadena no hay "prints" que promediar y el campo viaja vacío.
         "avg_size": round(contracts / len(prints), 1) if prints else None,
@@ -773,12 +849,15 @@ def _estadisticas(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str,
         # El reparto por lado sale de los prints observados. Si no hubo cinta, se usa
         # la estadística por lado del proveedor en vez de publicar tres ceros, que se
         # leerían como "no se negoció nada".
+        # `premium` es ahora None cuando no hay cinta que medir, así que la
+        # comparación se hace sobre un valor que puede no existir.
         "trade_side": ([
             {"label": "Comprador (ask)", "value": buy},
             {"label": "Vendedor (bid)", "value": sell},
-            {"label": "Medio / indeterminado", "value": max(0.0, premium - buy - sell)},
-        ] if premium > 0 else _trade_side_from_provider(intel)),
-        "trade_side_source": ("PRINTS_OBSERVADOS" if premium > 0
+            {"label": "Medio / indeterminado",
+             "value": max(0.0, premium - (buy or 0.0) - (sell or 0.0))},
+        ] if (premium or 0.0) > 0 else _trade_side_from_provider(intel)),
+        "trade_side_source": ("PRINTS_OBSERVADOS" if (premium or 0.0) > 0
                               else ("QUANTDATA_TRADE_SIDE" if _qd_rows(intel, "trade_side_statistics") else None)),
     }
 

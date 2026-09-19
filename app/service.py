@@ -719,7 +719,12 @@ def _volatility_metrics(result: Dict[str, Any], price_bars: pd.DataFrame | None 
     skew=next((r["skew_25d"] for r in skew_rows if math.isfinite(r["skew_25d"])),float("nan"))
 
     timestamps = sorted(enr["timestamp"].dropna().unique())
-    iv_change = 0.0
+    # v1.47.0 · Sin dos observaciones NO hay cambio que medir, y eso no es un
+    # cambio de cero. Publicar `0.0` hacía que la terminal mostrara «DERIVA DE
+    # VOLATILIDAD +0.000 pp» mientras el panel de debajo decía «NO DISPONIBLE»:
+    # dos afirmaciones contradictorias sobre el mismo dato, y la de arriba era
+    # falsa. `nan` viaja como `None` y la interfaz escribe «—».
+    iv_change = float("nan")
     if len(timestamps) > 1:
         prev = enr[enr["timestamp"] == timestamps[-2]].copy()
         prev_iv = float(pd.to_numeric(prev["iv"], errors="coerce").mean())
@@ -739,7 +744,13 @@ def _volatility_metrics(result: Dict[str, Any], price_bars: pd.DataFrame | None 
             row["skew_migration_pp"]=(cur-old) if old is not None and math.isfinite(cur) else float("nan")
     else:
         for row in skew_rows: row["skew_migration_pp"]=float("nan")
-    regime = "EXPANSION" if iv_change > 0.15 else "COMPRESSION" if iv_change < -0.15 else "STABLE"
+    # El régimen se conserva en su vocabulario actual —lo consumen el motor de
+    # escenarios y el de régimen— pero se declara si está MEDIDO o es el valor
+    # por defecto de una sesión sin historia todavía. Cambiar la cadena habría
+    # movido puntuaciones aguas abajo sin que nadie lo pidiera.
+    iv_change_measured = math.isfinite(iv_change)
+    regime = ("EXPANSION" if iv_change > 0.15 else "COMPRESSION" if iv_change < -0.15
+              else "STABLE")
     # v1.15 TERM STRUCTURE.
     # Was: mean IV across every strike of the expiry. That mixes the level of
     # volatility with the shape of the smile and with how many wing strikes each
@@ -833,7 +844,9 @@ def _volatility_metrics(result: Dict[str, Any], price_bars: pd.DataFrame | None 
         "skew_25d": skew,
         "skew_by_expiry": skew_rows,
         "iv_change_pp": iv_change,
+        "iv_change_measured": iv_change_measured,
         "regime": regime,
+        "regime_measured": iv_change_measured,
         "term_structure": term.to_dict("records"),
         "term_structure_state": term_state,
         "forward_volatility_pct": forward_vol,
@@ -4011,11 +4024,21 @@ class PlatformState:
         Se resuelve desde el catálogo, que ya sabe derivar la ventana del precio.
         Un `window` declarado a mano para un instrumento con escala propia —los
         futuros— sigue mandando.
+
+        v1.47.0 · Y traía un `NameError`. Esta función se escribió copiando dos
+        líneas de `terminal_api`, donde el conversor numérico se llama `_f`; aquí
+        se llama `_finite`. El resultado era que CADA construcción del trace
+        lanzaba `NameError: name '_f' is not defined`, se tragaba en el `except`
+        de `/api/terminal/bundle` y la terminal servía un trace vacío: velas,
+        perfiles y niveles en blanco, con un DEGRADED en el registro y ninguna
+        pista en pantalla. Un `except Exception` que convierte un fallo de
+        programación en un panel vacío es el peor sitio donde puede esconderse
+        un error, porque parece falta de datos.
         """
         from .core.assets import chain_window_for
-        spot = _f(self.gamma_delta.get("spot")) if isinstance(self.gamma_delta, dict) else None
+        spot = _finite(self.gamma_delta.get("spot")) if isinstance(self.gamma_delta, dict) else None
         if spot is None:
-            spot = _f((self.snapshot or {}).get("spot") if isinstance(self.snapshot, dict) else None)
+            spot = _finite((self.snapshot or {}).get("spot") if isinstance(self.snapshot, dict) else None)
         try:
             resolved = float(chain_window_for(self.symbol, spot=spot).get("window") or 0.0)
         except Exception as exc:

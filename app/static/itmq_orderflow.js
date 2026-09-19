@@ -39,16 +39,27 @@
    * sobre su propio lienzo. Son suelos de VISIBILIDAD: un cero sigue midiendo
    * cero, y la magnitud real sigue en el eje y en el tooltip.
    */
-  const MIN_BAR_PX = 3;
-  const MIN_EXTENT_PX = 2.5;
+  /* v1.47.0 · El grosor de los carriles lo sirve el componente común.
+   *
+   * `laneBarWidth` era el mismo defecto que en los paneles: un suelo de 3 px
+   * aplicado al grosor y un 0.82 sobre un hueco que, con una sesión entera a un
+   * minuto en 330 px, valía 0.85 px. El resultado eran rayitas solapadas — que
+   * es exactamente como se veían AGRESOR, VOLUMEN, TOTAL y el flujo direccional.
+   *
+   * Ahora, cuando un minuto no da para una barra con presencia, se agrupa el
+   * INTERVALO —2 m, 3 m, 5 m…— y no la posición: el carril sigue alineado con
+   * las velas de TRACE porque cada contenedor ocupa su tramo real del eje.
+   */
+  const AB = global.ITMQBars;
 
-  function laneBarWidth(slotPx, maxPx) {
-    return Math.max(MIN_BAR_PX, Math.min(maxPx || 14, Math.abs(slotPx) * 0.82));
+  function laneExtent(px, value, axisPx) {
+    return AB ? AB.extent(px, value, axisPx)
+              : (!Number.isFinite(value) || value === 0 ? 0 : Math.max(3, Math.abs(px)));
   }
 
-  function laneExtent(px, value) {
-    if (!Number.isFinite(value) || value === 0) return 0;
-    return Math.max(MIN_EXTENT_PX, Math.abs(px));
+  /** Contenedores temporales del carril, con el ancho real del panel. */
+  function laneBins(box, win) {
+    return AB.timeBins(S.buckets, win.t0, win.t1 + S.bucketMs, S.bucketMs, box.w);
   }
 
   function estadoDato(state) {
@@ -396,19 +407,27 @@
 
     const buy = Q.token('--aggr-buy', '#2dd4bf');
     const sell = Q.token('--aggr-sell', '#a78bfa');
+    // La banda usa los MISMOS contenedores que las barras de abajo: si el carril
+    // agrupa de cinco en cinco minutos, la atribución comprador/vendedor tiene
+    // que describir ese mismo tramo o las dos lecturas se contradicen.
+    const bins = laneBins(box, win);
     let peak = 0;
-    for (const b of S.buckets) peak = Math.max(peak, b.buy + b.sell);
+    for (const r of bins.rows) {
+      const t = AB.reduceBin(r, b => Q.num(b.buy, 0) + Q.num(b.sell, 0));
+      peak = Math.max(peak, t.sum);
+    }
     if (peak <= 0) peak = 1;
 
     ctx.save();
     ctx.fillStyle = Q.alpha(Q.token('--panel-2', '#141b28'), 1);
     ctx.fillRect(box.x, box.y, box.w, box.h);
-    for (const b of S.buckets) {
-      if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
-      const x0 = sx(b.t), x1 = sx(b.t + S.bucketMs);
-      const tot = b.buy + b.sell;
+    for (const r of bins.rows) {
+      const bu = AB.reduceBin(r, b => Q.num(b.buy, 0)).sum;
+      const se = AB.reduceBin(r, b => Q.num(b.sell, 0)).sum;
+      const tot = bu + se;
       if (tot <= 0) continue;
-      const net = (b.buy - b.sell) / tot;          // −1 vendedor · +1 comprador
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const net = (bu - se) / tot;                 // −1 vendedor · +1 comprador
       const intensity = Q.clamp(Math.pow(tot / peak, 0.5), 0.08, 1);
       ctx.fillStyle = Q.alpha(net >= 0 ? buy : sell, intensity);
       ctx.fillRect(x0, box.y, Math.max(1, x1 - x0), box.h);
@@ -503,15 +522,26 @@
     const y0 = sy(0);
     ctx.save();
     ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
-    for (const b of S.buckets) {
-      if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
-      if (!b.net) continue;
-      const x0 = sx(b.t), x1 = sx(b.t + S.bucketMs);
-      const bw = laneBarWidth(x1 - x0);
-      const y = sy(symlog(b.net, lin));
-      const h = laneExtent(y - y0, b.net);
-      ctx.fillStyle = Q.alpha(b.net >= 0 ? posC : negC, 0.95);
-      ctx.fillRect(x0 + (x1 - x0 - bw) / 2, b.net >= 0 ? y0 - h : y0, bw, h);
+    const netBins = laneBins(box, win);
+    for (const r of netBins.rows) {
+      // Flujo neto: SUMA con signo dentro del intervalo. Es lo que significa
+      // «prima direccional de estos cinco minutos».
+      const agg = AB.reduceBin(r, b => Q.num(b.net, 0));
+      if (!agg.sum) continue;
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const bw = Math.min(netBins.thickness, Math.max(1, x1 - x0));
+      const y = sy(symlog(agg.sum, lin));
+      const h = laneExtent(y - y0, agg.sum, box.h);
+      const bx = x0 + (x1 - x0 - bw) / 2;
+      ctx.fillStyle = Q.alpha(agg.sum >= 0 ? posC : negC, 0.95);
+      ctx.fillRect(bx, agg.sum >= 0 ? y0 - h : y0, bw, h);
+      if (agg.peak_dominates) {
+        // Los signos del intervalo se compensan y la suma queda pequeña, pero
+        // dentro hubo un evento grande. Se marca su alcance para no esconderlo.
+        const py = sy(symlog(agg.peak, lin));
+        ctx.fillStyle = Q.alpha(agg.peak >= 0 ? posC : negC, 0.5);
+        ctx.fillRect(bx, py - 1, bw, 2);
+      }
     }
     ctx.restore();
 
@@ -603,21 +633,26 @@
     ctx.save();
     ctx.beginPath(); ctx.rect(box.x, box.y - 14, box.w, box.h + 14); ctx.clip();
     const tall = [];
-    for (const b of S.buckets) {
-      if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
-      if (b.total <= 0) continue;
-      const x0 = sx(b.t), x1 = sx(b.t + S.bucketMs);
-      const bw = laneBarWidth(x1 - x0);
+    const totalBins = laneBins(box, win);
+    for (const r of totalBins.rows) {
+      // Prima total: SUMA. El pico del intervalo decide si el contenedor se
+      // pinta como «grande», para que un print relevante no se diluya entre
+      // vecinos pequeños al agrupar.
+      const agg = AB.reduceBin(r, b => Q.num(b.total, 0));
+      if (agg.sum <= 0) continue;
+      const prints = r.members.reduce((n, b) => n + (b.prints ? b.prints.length : 0), 0);
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const bw = Math.min(totalBins.thickness, Math.max(1, x1 - x0));
       const bx = x0 + (x1 - x0 - bw) / 2;
-      const y = sy(b.total);
-      const big = b.prints.length > 0 || b.total >= floor;
-      const h = laneExtent(y0 - y, b.total);
+      const y = sy(agg.sum);
+      const big = prints > 0 || agg.peak >= floor;
+      const h = laneExtent(y0 - y, agg.sum, box.h);
       // El contraste del bucket «pequeño» sube de 0.35 a 0.55: a 0.35 sobre el
       // fondo del panel la barra se perdía, y entonces el carril parecía vacío
       // cuando en realidad estaba lleno de actividad normal.
       ctx.fillStyle = big ? gold : Q.alpha(dim, 0.55);
       ctx.fillRect(bx, y0 - h, bw, h);
-      if (big) tall.push({ x: bx + bw / 2, y, total: b.total });
+      if (big) tall.push({ x: bx + bw / 2, y, total: agg.sum });
     }
     // sólo los picos llevan cifra: etiquetar todo haría ilegible el carril
     tall.sort((a, b) => b.total - a.total);
@@ -790,18 +825,21 @@
       ctx.fillText(Q.compact(t, 1), box.x + box.w + 6, y);
     }
 
-    const bw = laneBarWidth(box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs));
+    const volBins = laneBins(box, win);
+    const bw = volBins.thickness;
     const pos = Q.token('--pos', '#22c55e'), neg = Q.token('--neg', '#ef4444'), flat = Q.token('--text-dim', '#8494ad');
-    for (const b of S.buckets) {
-      if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
-      const v = Math.abs(Q.num(b.vol, 0));
+    for (const r of volBins.rows) {
+      // Volumen: SUMA. El signo lo decide la cinta agregada del intervalo.
+      const v = Math.abs(AB.reduceBin(r, b => Math.abs(Q.num(b.vol, 0))).sum);
       if (!(v > 0)) continue;
-      const signed = Q.num(b.underlyingNet, 0);
-      const x = sx(b.t), y = sy(v);
-      const h = laneExtent((box.y + box.h) - y, v);
+      const signed = AB.reduceBin(r, b => Q.num(b.underlyingNet, 0)).sum;
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const x = x0 + (x1 - x0) / 2;
+      const y = sy(v);
+      const h = laneExtent((box.y + box.h) - y, v, box.h);
       ctx.fillStyle = Q.alpha(signed > 0 ? pos : signed < 0 ? neg : flat, 0.9);
       ctx.fillRect(Math.round(x - bw / 2), Math.round(box.y + box.h - h),
-                   Math.max(MIN_BAR_PX, Math.round(bw)), Math.max(1, Math.round(h)));
+                   Math.max(1, Math.round(bw)), Math.max(1, Math.round(h)));
     }
 
     ctx.globalAlpha = 0.72;
@@ -1009,19 +1047,25 @@
     ctx.beginPath(); ctx.moveTo(box.x, zy); ctx.lineTo(box.x + box.w, zy);
     ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.9); ctx.stroke();
 
-    const bw = laneBarWidth(box.w / Math.max(1, (win.t1 - win.t0) / S.bucketMs));
+    // Mismo tratamiento que los demás carriles: si un intervalo no da para una
+    // barra con presencia, se agrupa el intervalo y se SUMAN los volúmenes.
+    const driftBins = AB.timeBins(vis, win.t0, win.t1 + S.bucketMs, S.bucketMs, box.w);
+    const bw = driftBins.thickness;
     const posC = Q.token('--pos', '#22c55e'), negC = Q.token('--neg', '#ef4444');
     // El volumen de puts llega YA firmado por el proveedor. No se le cambia el
     // signo: se dibuja donde cae, que es la lectura que publica Quant Data.
-    for (const v of vis) {
-      const x = sx(v.t);
-      for (const [val, col] of [[v.cv, posC], [v.pv, negC]]) {
+    for (const r of driftBins.rows) {
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const x = x0 + (x1 - x0) / 2;
+      const cv = AB.reduceBin(r, p => Q.num(p.cv, 0)).sum;
+      const pv = AB.reduceBin(r, p => Q.num(p.pv, 0)).sum;
+      for (const [val, col] of [[cv, posC], [pv, negC]]) {
         if (!val) continue;
         const y0 = sy(0), y1 = sy(val);
-        const h = laneExtent(y1 - y0, val);
+        const h = laneExtent(y1 - y0, val, box.h);
         ctx.fillStyle = Q.alpha(col, 0.9);
         ctx.fillRect(Math.round(x - bw / 2), Math.round(val >= 0 ? y0 - h : y0),
-          Math.max(MIN_BAR_PX, Math.round(bw)), Math.max(1, Math.round(h)));
+          Math.max(1, Math.round(bw)), Math.max(1, Math.round(h)));
       }
     }
     drawDriftCursor(ctx, box, sx);

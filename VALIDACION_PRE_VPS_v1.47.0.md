@@ -1,14 +1,111 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.46.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.47.0
 
-Release: `ITM_QUANT_v1.46.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.47.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A10** es la de esta release.
+> Documento acumulativo. La sección **A11** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **1840 casos / 146 ficheros**
-- Particiones: 21 · `plan_sha256`: `5afc7b5d062c017ff4f99c96ed8be2455813d74b168cf863c810b74dddee2bee`
+- Inventario nominal: **2008 casos / 147 ficheros**
+- Particiones: 21 · `plan_sha256`: `f2ef2d39b5f0add232d5f572a2e085e82c9f698fd1647ca07dfe790ffee2ebaa`
 - Resultado: **PASS**
+
+---
+
+## A11 · v1.47.0 · Renderizado adaptativo y coherencia de datos
+
+### Qué se certifica
+
+`tests/test_v1470_adaptive_rendering.py` — 172 casos en ocho bloques.
+
+**1 · La aritmética del plan.** 130 combinaciones de densidad (4 → 1.500
+observaciones) × viewport (180 → 1.400 px), comprobando que ninguna produce una
+barra por debajo de lo legible ni una ocupación mayor que 1 —que es solape— y que
+siempre queda hueco entre barras. Y la prueba que habría atrapado el defecto
+original: **más datos nunca adelgazan las barras**. Con el suelo aplicado al
+grosor en vez de al paso, el grosor caía monótonamente con la densidad hasta el
+píxel.
+
+**2 · Un solo componente.** Que `layout`, `bin`, `extent`, `timeLayout`,
+`timeBins` y `grid` vivan en un sitio, que los paneles y los carriles lo usen, y
+que no quede aritmética de grosor propia en ninguno de los dos —`barThickness`,
+`laneBarWidth`, `MIN_BAR_PX = 3`—. Y que el componente se cargue antes que sus
+consumidores.
+
+**3 · Agrupación sin perder el dato.** Que cada contenedor lleve rango, extremo,
+suma, recuento y miembros; que **nunca** se calcule una media; que el perfil por
+strike conserve el extremo y el histograma temporal sume; que un grupo cuyo pico
+domina a la suma lo declare; y que la agrupación temporal mantenga cada barra en
+su instante real, porque los carriles comparten eje con las velas de TRACE.
+
+**4 · El mapa de calor.** Que dibuje celdas rellenas y no círculos, que no quede
+ninguna llamada a `ctx.arc` ni la escala lineal `|v| / max`, y que la intensidad
+sea por rango con agrupación en las dos dimensiones.
+
+**5 · Primer fotograma y resize.** Que `Glide` adopte la primera aparición de
+cada clave en vez de animar desde cero, que no quede ningún pico de eje con
+semilla absoluta, y que el motivo de un panel vacío pueda cambiar entre ciclos
+—el caché de paneles congelaba el texto del primer render—.
+
+**6 · Coherencia de datos.** Que el interés abierto audite agregado y desglose
+por separado y explique la ausencia en vez de contradecirse; que un agregado
+ausente no sea un cero; que la deriva de volatilidad sin medir viaje como `None`;
+que la prima sin cinta viaje como `None` con su motivo; que
+`_resolve_visual_window` ya no lance `NameError` —ejecutando exactamente esa
+ruta— y que no quede ninguna llamada a `_f` en `service.py`; y que la diagonal de
+fiabilidad no se dibuje sin observaciones.
+
+**7 · Multi-activo.** Que no haya un solo ticker escrito en el componente, en los
+paneles ni en los carriles, y que el plan dependa del viewport y del recuento y
+nunca de la magnitud del activo.
+
+**8 · Regresión visual real.** `tools/visual_regression.py` sirve el arnés,
+alimenta los **renderizadores de producción** y mide la geometría con el ancho
+medido del lienzo.
+
+### Verificación visual
+
+46 paneles: cinco activos de 10⁹ a 10⁴ × cinco distribuciones (normal, cola
+pesada, un dominante, muy disperso, valores diminutos), densidades de 12 a 780
+observaciones y cinco viewports de 220×140 a 1.400×320.
+
+```
+46 paneles + 46 tras redimensionar · grosor 5.47–13.68 px · ocupación máxima 0.760
+Ningún panel dibuja rayitas, masa sólida ni barras sin separación.
+```
+
+| | v1.46.0 | v1.47.0 |
+|---|---|---|
+| 45 strikes en 250 px | 2.5 px | **10.9 px** |
+| 120 buckets en 330 px | 2.5 px | **8.8 px** |
+| 390 buckets en 330 px | 2.5 px, solapadas | **8.1 px**, separadas |
+| 780 buckets en 330 px | masa sólida | **8.1 px**, separadas |
+
+Y el grosor no depende de la escala del activo: los cinco activos con 390
+buckets en el mismo panel dan **8.13 px** los cinco.
+
+Terminal real (`/` sobre uvicorn, sin credenciales, fin de semana): el trace deja
+de llegar vacío —era el `NameError`—, y ya no aparecen ni el `0.00` de GEX/DEX
+NETO, ni el `$0.0` de FLUJO 5M y PRIMA NEGOCIADA, ni el `+0.000 pp` de DERIVA DE
+VOLATILIDAD, ni la diagonal de fiabilidad sin sesiones medidas.
+
+Comprobado sección a sección con la terminal en marcha y cero errores de
+consola: EXPOSICIÓN dibuja 21 strikes con barras gruesas y separadas; INTERÉS
+ABIERTO muestra agregado **y** desglose coherentes (68.1K · 33.2K call · 34.9K
+put) con su tabla de cambio poblada; ESTADÍSTICAS dice «14K contratos · volumen
+oficial de la cadena · sin cinta» y deja la prima en «—» explicando por qué;
+TRACE dibuja el mapa de intervalos como zonas continuas con sus muros y la
+migración de gamma; ESCENARIOS traza Monte Carlo y el `exposure forecast` con
+barras anchas.
+
+### Lo que esta validación NO cubre
+
+- No hay un 200 real de `dark-pool-levels`: sin salida hacia `quantdata.us`, el
+  contrato del proveedor sigue sin poder leerse ni confirmarse.
+- La validación LIVE con API key queda pendiente, incluida `--dark-pool` sobre la
+  cesta multi-activo.
+- La regresión visual usa datasets sintéticos de las formas que rompen. La
+  comparación contra una sesión de mercado real queda pendiente en el VPS.
 
 ---
 

@@ -1,4 +1,4 @@
-# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.46.0
+# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.47.0
 
 Dos comprobaciones distintas, y hacen falta las dos:
 
@@ -30,6 +30,30 @@ python scripts/verify_live_quantdata.py --ticker SPY --ticker XLF --ticker <una 
 
 Repetir con **al menos tres activos de comportamiento distinto**. Que funcione en
 uno no certifica nada.
+
+---
+
+## Paso 0-ter · GEOMETRÍA DE LOS PANELES (v1.47.0)
+
+Antes de mirar números, comprobar que se pueden mirar:
+
+```
+python tools/visual_regression.py
+```
+
+- [ ] `Ningún panel dibuja rayitas, masa sólida ni barras sin separación.`
+- [ ] Grosor mínimo ≥ 5 px y ocupación máxima ≤ 1.0 en los 46 paneles.
+- [ ] Con la terminal en marcha y mercado abierto, repetir a ojo en
+      EXPOSICIÓN, FLUJO DE ÓRDENES, INTERÉS ABIERTO y ESCENARIOS sobre al menos
+      tres activos de escalas distintas: las barras deben verse **gruesas y
+      separadas**, y al aumentar la densidad el panel debe **agrupar** —la
+      etiqueta del eje pasa a decir `514…516`— en vez de adelgazar.
+- [ ] Pasar el cursor por una barra agrupada: el `hover` dice el rango, cuántas
+      agrupa y su extremo.
+- [ ] Cambiar de temporalidad y de ventana: el carril de flujo reagrupa el
+      intervalo y **sigue alineado con las velas** de TRACE.
+- [ ] Redimensionar la ventana: el primer fotograma tras el resize ya tiene la
+      escala correcta; no puede «arreglarse» a los pocos ciclos.
 
 ---
 

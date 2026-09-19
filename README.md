@@ -1,5 +1,41 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.47.0 · Densidad no se resuelve adelgazando
+
+Se estaba intentando resolver **densidad de datos con grosor fijo**. No existe un
+grosor correcto para «20 barras en 300 px» y «390 barras en 300 px» a la vez, y
+cada constante que se probó —2, 3, 5 px— rompía en cuanto cambiaba la cantidad de
+strikes, de buckets o el tamaño del activo.
+
+- **El suelo estaba aplicado donde no servía.** `fitBars` agrupaba hasta dejar
+  barras de 3 px de **paso** y `barThickness` cogía después el 82 % de ese paso:
+  2.46 px de barra, por debajo del mínimo que el código creía garantizar.
+- **`AdaptiveBarProfile`**, un solo componente para EXPOSICIÓN, FLUJO, OI,
+  ESTADÍSTICAS y el mapa de calor. Grosor, agrupación, hueco, autoescala y hover
+  salen del espacio de pantalla y de la densidad. `pocas barras → gruesas` ·
+  `muchas barras → AGRUPAR → gruesas`. Nunca `→ cada vez más finas`.
+- **La agrupación es visual; el dato sigue entero.** Cada contenedor conserva
+  rango, extremo, suma, recuento y miembros, y el `hover` los enseña. Nunca una
+  media: cancelaría un +8 con un −8 vecinos y borraría la concentración.
+- **Los carriles de FLUJO agrupan el INTERVALO** —2 m, 3 m, 5 m…— y no la
+  posición, para seguir alineados con las velas de TRACE.
+- **El mapa de calor pinta zonas, no puntos.** Eran círculos de 1.3 px con escala
+  lineal por el máximo; ahora son celdas rellenas, agrupadas en las dos
+  dimensiones y con intensidad por rango.
+- **El primer fotograma ya es correcto.** `Glide` animaba cada clave desde cero,
+  así que un panel que entra en pantalla —y dibuja un solo fotograma— se quedaba
+  con el eje bien y las barras a cero.
+- **`NameError: name '_f' is not defined`** en cada construcción del trace,
+  tragado por un `except` que devolvía un trace vacío. Indistinguible de un
+  mercado sin datos.
+- **Agregado ≠ desglose**, en tres secciones: `OI TOTAL 37.1K` sobre `SIN INTERÉS
+  ABIERTO`, `14K contratos` sobre `$0.0 de prima`, `+0.000 pp` sobre `NO
+  DISPONIBLE`.
+- **Regresión visual automática** (`tools/visual_regression.py`): 46
+  combinaciones de activo, distribución, densidad y viewport, midiendo la
+  geometría real de los renderizadores. Es la comprobación que las pruebas
+  numéricas no podían hacer.
+
 ## v1.46.0 · Tres carriles, cinco códigos, ningún cero inventado
 
 Los defectos de esta release son variaciones de una sola idea equivocada:

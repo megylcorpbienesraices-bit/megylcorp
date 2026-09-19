@@ -301,13 +301,24 @@ def test_dark_pool_says_why_it_is_empty(rows, expected):
 # ═══════════════════════════════════════════ 5 · LEGIBILIDAD MULTI-ACTIVO
 
 def test_bars_have_a_visibility_floor_that_does_not_invent_a_zero():
-    js = text("app/static/itmq_panels.js")
-    assert "MIN_BAR_PX = 3" in js
-    assert "MIN_EXTENT_PX" in js
-    body = js[js.index("function visibleExtent("):]
+    """v1.47.0 · El suelo se mudó al componente común, y dejó de ser 3 px.
+
+    Un suelo de 3 px aplicado al GROSOR mientras la agrupación se calculaba
+    sobre el PASO garantizaba justo lo que no se quería: `fitBars` dejaba barras
+    de 3 px de paso y `barThickness` cogía el 82 % de eso. La barra medía 2.46 px
+    —por debajo del mínimo que el código creía estar imponiendo—. Ahora el suelo
+    se aplica al paso, que es lo que tiene que caber.
+    """
+    js = text("app/static/itmq_adaptive_bars.js")
+    assert "MIN_BAR_PX = 5" in js, "por debajo de 5 px una barra se lee como una raya"
+    assert "MIN_EXTENT_PX" in js and "MAX_EXTENT_FRACTION" in js
+    body = js[js.index("function extent("):]
     body = body[:body.index("\n  /**")]
     # Un cero sigue midiendo cero: el suelo es de visibilidad, no de magnitud.
     assert "value === 0) return 0" in body
+    # Y el suelo no puede acercarse a una barra grande: está acotado como
+    # fracción del eje, así que «hay algo» nunca se lee como «hay mucho».
+    assert "MAX_EXTENT_FRACTION" in body
 
 
 def test_one_dominant_strike_no_longer_flattens_the_whole_profile():
@@ -322,20 +333,31 @@ def test_one_dominant_strike_no_longer_flattens_the_whole_profile():
 
 
 def test_bars_aggregate_instead_of_overlapping_when_they_do_not_fit():
-    """Forzar 3px con 390 buckets en 330px los solapa hasta hacer un bloque."""
-    js = text("app/static/itmq_panels.js")
-    assert "function fitBars(" in js
-    body = js[js.index("function fitBars("):]
-    body = body[:body.index("\n  /** Grosor")]
-    # Se conserva el EXTREMO del grupo: una media es un número que nadie observó.
-    assert "Math.abs(Q.num(d.value)) > Math.abs(Q.num(best.value))" in body
-    assert "grouped" in body
+    """Muchas barras → agrupar → engrosar. Nunca → adelgazar hasta desaparecer."""
+    js = text("app/static/itmq_adaptive_bars.js")
+    assert "function layout(" in js and "function bin(" in js
+    body = js[js.index("function bin("):]
+    body = body[:body.index("\n  /**")]
+    # Dos modos, ninguno es una media: una media cancela un +8 con un −8 vecinos
+    # y hace desaparecer la concentración justo donde hay que verla.
+    assert "mode === 'sum' ? sum : peak" in body
+    # El contenedor conserva de dónde a dónde va, cuántos agrupa y su extremo.
+    assert "from: chunk[0].label" in body and "count: chunk.length" in body
+    assert "members" in body and "peak" in body
 
 
 def test_the_flow_lanes_share_the_same_floors():
+    """v1.47.0 · Los carriles dejan de tener su propia aritmética de grosor.
+
+    `laneBarWidth` repetía el defecto de los paneles con otras constantes, así
+    que cada corrección había que hacerla dos veces y sólo se hacía en una.
+    Ahora la sirven los mismos contenedores, y la agrupación es del INTERVALO
+    —2 m, 3 m, 5 m…— para que el carril siga alineado con las velas de TRACE.
+    """
     js = text("app/static/itmq_orderflow.js")
-    assert "function laneBarWidth(" in js and "function laneExtent(" in js
     visible = re.sub(r"//[^\n]*", "", js)
+    assert "function laneBarWidth(" not in visible, "grosor propio del carril"
+    assert "AB.timeBins(" in visible and "AB.reduceBin(" in visible
     # Ya no quedan barras con suelo de un píxel en los carriles.
     assert "Math.max(1, (x1 - x0) * 0.7)" not in visible
     assert "Math.max(1, Math.min(9," not in visible

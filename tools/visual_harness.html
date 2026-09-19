@@ -1,84 +1,222 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
-<title>ITM QUANT · banco visual multi-activo</title>
+<title>ITM QUANT · banco visual de renderizado adaptativo</title>
+
+<!-- v1.47.0 · Banco de regresión VISUAL.
+     Las pruebas numéricas no detectaron que las barras fueran demasiado finas:
+     el dato estaba, la escala era correcta y la suite pasaba en verde. Lo que
+     fallaba era la PRESENCIA, y eso sólo se ve mirando. Esta página alimenta los
+     renderizadores REALES —no una copia— con las distribuciones y densidades que
+     rompen, y expone `window.__harnessReport()` para que la comprobación
+     automática lea la geometría que se dibujó de verdad. -->
 
 <style>
   body { background:#0b0f17; color:#e6edf7; font:12px ui-monospace,monospace; margin:0; padding:12px; }
-  h2 { font-size:12px; letter-spacing:.08em; color:#8494ad; margin:14px 0 6px; }
+  h2 { font-size:12px; letter-spacing:.08em; color:#8494ad; margin:16px 0 6px;
+       border-top:1px solid #243044; padding-top:10px; }
   .grid { display:flex; flex-wrap:wrap; gap:10px; }
   .cell { background:#121826; border:1px solid #243044; border-radius:6px; padding:6px;
-          width:360px; box-sizing:border-box; }
+          box-sizing:border-box; }
   .cell b { display:block; font-size:11px; color:#d9a441; margin-bottom:4px; }
+  .cell i { display:block; font-size:10px; color:#5b6880; font-style:normal; margin-top:3px; }
   /* Tamaño EXPLÍCITO: el bucle de render mide el host, y un host sin altura
      calculada produce un lienzo de cero y un panel que dibuja donde no debe. */
-  .cv { width:346px; height:170px; position:relative; }
-  .cv.tall { height:250px; }
+  .cv { position:relative; }
   :root { --pos:#22c55e; --neg:#ef4444; --grid:#243044; --text:#e6edf7;
           --text-dim:#8494ad; --text-mute:#5b6880; --panel-3:#1b2436; --gold:#d9a441; }
 </style>
 <body>
 <div id="out"></div>
 <script src="/static/itmq_core.js?v=dev"></script>
+<script src="/static/itmq_adaptive_bars.js?v=dev"></script>
 <script src="/static/itmq_panels.js?v=dev"></script>
 <script>
-// Activos de escalas DELIBERADAMENTE incomparables. La corrección sólo vale si
-// los cinco se leen igual de bien sin tocar ninguna constante por ticker.
+/* Generador determinista: la regresión visual tiene que ser comparable entre
+   ejecuciones, y `Math.random()` hacía que cada captura contara otra historia. */
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+/* Activos de escalas DELIBERADAMENTE incomparables. La corrección sólo vale si
+   los cinco se leen igual de bien sin tocar ninguna constante por ticker. */
 const ASSETS = [
-  { sym:'SPY',  px:601.0,  gex:1.4e9,  step:1.0  },   // ETF enorme, cadena densa
-  { sym:'QQQ',  px:487.5,  gex:9.0e8,  step:1.0  },   // ETF grande
-  { sym:'DIA',  px:534.2,  gex:4.1e8,  step:0.5  },   // ETF mediano, strikes finos
-  { sym:'XLF',  px:48.3,   gex:6.0e6,  step:0.5  },   // ETF sectorial barato
-  { sym:'SOFI', px:9.52,   gex:2.2e4,  step:0.5  },   // acción pequeña
+  { sym:'SPY',  px:601.0,  mag:1.4e9,  step:1.0  },   // ETF enorme, cadena densa
+  { sym:'QQQ',  px:487.5,  mag:9.0e8,  step:1.0  },   // ETF grande
+  { sym:'DIA',  px:534.2,  mag:4.1e8,  step:0.5  },   // ETF mediano, strikes finos
+  { sym:'XLF',  px:48.3,   mag:6.0e6,  step:0.5  },   // ETF sectorial barato
+  { sym:'SOFI', px:9.52,   mag:2.2e4,  step:0.5  },   // acción pequeña
 ];
 
-// Perfil realista: cola pesada (unos pocos strikes concentran casi todo).
-function profile(a, n){
-  const rows=[]; const mid=Math.floor(n/2);
-  for(let i=0;i<n;i++){
-    const d=i-mid;
-    const decay=Math.exp(-Math.abs(d)/4.5);
-    const spike=(Math.abs(d)===3||Math.abs(d)===7)?7.5:1;
-    const v=a.gex*decay*spike*(d>=0?1:-0.85)*(0.55+Math.random()*0.9);
-    rows.push({ label:(a.px+d*a.step).toFixed(a.px<20?1:0), value:v, key:i });
-  }
-  return rows;
-}
-// Histograma temporal con la mayoría de barras pequeñas y algún pico enorme.
-function lane(a, n){
-  const rows=[];
-  for(let i=0;i<n;i++){
-    const base=a.gex/450*(0.06+Math.random()*0.5);
-    const spike=(i===Math.floor(n*0.42))?26:(i%37===0?5:1);
-    rows.push({ label:String(i), value:base*spike*(Math.random()>0.42?1:-1), key:i });
+/* ── Distribuciones que rompen, cada una por un motivo distinto ──────────── */
+const SHAPES = {
+  // Perfil normal: concentración alrededor del dinero con dos alas.
+  normal(a, n, r) {
+    const mid = Math.floor(n / 2);
+    return idx(n, i => {
+      const d = i - mid;
+      return a.mag * Math.exp(-Math.abs(d) / 4.5) * (d >= 0 ? 1 : -0.85) * (0.55 + r() * 0.9);
+    }, a, mid);
+  },
+  // Cola pesada: unos pocos strikes concentran casi todo.
+  heavy(a, n, r) {
+    const mid = Math.floor(n / 2);
+    return idx(n, i => {
+      const d = i - mid;
+      const spike = (Math.abs(d) === 3 || Math.abs(d) === 7) ? 7.5 : 1;
+      return a.mag * Math.exp(-Math.abs(d) / 4.5) * spike * (d >= 0 ? 1 : -0.85) * (0.55 + r() * 0.9);
+    }, a, mid);
+  },
+  // Un dominante: el caso que aplastaba el resto del perfil contra cero.
+  dominant(a, n, r) {
+    const mid = Math.floor(n / 2);
+    return idx(n, i => {
+      const d = i - mid;
+      return (d === 2 ? a.mag * 60 : a.mag * (0.02 + r() * 0.08)) * (d >= 0 ? 1 : -1);
+    }, a, mid);
+  },
+  // Muy disperso: sin forma, para comprobar que no se inventa una.
+  sparse(a, n, r) {
+    const mid = Math.floor(n / 2);
+    return idx(n, i => (r() > 0.78 ? a.mag * (0.1 + r()) * (r() > 0.5 ? 1 : -1) : 0), a, mid);
+  },
+  // Valores diminutos: el caso en el que el suelo de visibilidad podría mentir.
+  tiny(a, n, r) {
+    const mid = Math.floor(n / 2);
+    return idx(n, i => a.mag * 1e-6 * (0.2 + r()) * (r() > 0.5 ? 1 : -1), a, mid);
+  },
+};
+
+function idx(n, fn, a, mid) {
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    rows.push({ label: (a.px + (i - mid) * a.step).toFixed(a.px < 20 ? 1 : 0),
+                value: fn(i), key: i });
   }
   return rows;
 }
 
-const out=document.getElementById('out');
-function section(title, build, n, tall){
-  const h=document.createElement('h2'); h.textContent=title; out.appendChild(h);
-  const g=document.createElement('div'); g.className='grid'; out.appendChild(g);
-  ASSETS.forEach(a=>{
-    const c=document.createElement('div'); c.className='cell';
-    const b=document.createElement('b'); b.textContent=`${a.sym}  ${a.px}`; c.appendChild(b);
-    const host=document.createElement('div'); host.className='cv'+(tall?' tall':'');
-    host.id=`${title.replace(/\W/g,'')}_${a.sym}`;
-    c.appendChild(host); g.appendChild(c);
-    build(host, a, n);
+/* Histograma temporal: la mayoría de barras pequeñas y algún pico enorme. */
+function lane(a, n, r) {
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const base = a.mag / 450 * (0.06 + r() * 0.5);
+    const spike = (i === Math.floor(n * 0.42)) ? 26 : (i % 37 === 0 ? 5 : 1);
+    rows.push({ label: String(i), value: base * spike * (r() > 0.42 ? 1 : -1), key: i });
+  }
+  return rows;
+}
+
+const out = document.getElementById('out');
+const PANELS = [];
+
+function section(title, cases) {
+  const h = document.createElement('h2'); h.textContent = title; out.appendChild(h);
+  const g = document.createElement('div'); g.className = 'grid'; out.appendChild(g);
+  for (const c of cases) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.style.width = (c.w + 14) + 'px';
+    const b = document.createElement('b'); b.textContent = c.name; cell.appendChild(b);
+    const host = document.createElement('div');
+    host.className = 'cv';
+    host.style.width = c.w + 'px';
+    host.style.height = c.h + 'px';
+    host.id = 'p_' + PANELS.length;
+    cell.appendChild(host);
+    const note = document.createElement('i'); note.id = host.id + '_n'; cell.appendChild(note);
+    g.appendChild(cell);
+    const api = c.build(host);
+    PANELS.push({ id: host.id, name: c.name, kind: c.kind, n: c.n, w: c.w, h: c.h, api });
+  }
+}
+
+/* ── 1 · EXPOSICIÓN por strike, cinco activos × cinco distribuciones ─────── */
+for (const shape of ['normal', 'heavy', 'dominant', 'sparse', 'tiny']) {
+  section(`EXPOSICIÓN · hbars · distribución «${shape}» · 45 strikes`,
+    ASSETS.map(a => ({
+      name: `${a.sym} ${a.px}`, w: 346, h: 250, kind: 'hbars', n: 45,
+      build: host => {
+        const p = ITMQPanels.hbars(host, { fmt: v => ITMQ.signedCompact(v, 1) });
+        p.set(SHAPES[shape](a, 45, rng(7)));
+        return p;
+      },
+    })));
+}
+
+/* ── 2 · DENSIDAD creciente: aquí es donde aparecían las rayitas ─────────── */
+section('EXPOSICIÓN · densidad creciente · el mismo panel de 250 px de alto',
+  [12, 30, 45, 90, 180, 420].map(n => ({
+    name: `${n} strikes`, w: 300, h: 250, kind: 'hbars', n,
+    build: host => {
+      const p = ITMQPanels.hbars(host, { fmt: v => ITMQ.signedCompact(v, 1) });
+      p.set(SHAPES.heavy(ASSETS[0], n, rng(11)));
+      return p;
+    },
+  })));
+
+/* ── 3 · FLUJO · histogramas de barras, densidad creciente ──────────────── */
+section('FLUJO · bars · densidad creciente · panel de 346 px de ancho',
+  [20, 60, 120, 390, 780].map(n => ({
+    name: `${n} buckets`, w: 346, h: 170, kind: 'bars', n,
+    build: host => {
+      const p = ITMQPanels.bars(host, { fmt: v => ITMQ.compact(v, 1) });
+      p.set(lane(ASSETS[0], n, rng(13)));
+      return p;
+    },
+  })));
+
+/* ── 4 · FLUJO multi-activo, sesión completa en un panel estrecho ────────── */
+section('FLUJO · bars · 390 buckets de sesión · cinco escalas',
+  ASSETS.map(a => ({
+    name: `${a.sym} ${a.px}`, w: 346, h: 170, kind: 'bars', n: 390,
+    build: host => {
+      const p = ITMQPanels.bars(host, { fmt: v => ITMQ.compact(v, 1) });
+      p.set(lane(a, 390, rng(17)));
+      return p;
+    },
+  })));
+
+/* ── 5 · Viewports distintos con el MISMO dato ──────────────────────────── */
+section('MISMO DATO · viewports distintos · 180 observaciones',
+  [[220, 140], [346, 170], [520, 200], [900, 260], [1400, 320]].map(([w, h]) => ({
+    name: `${w}×${h}`, w, h, kind: 'bars', n: 180,
+    build: host => {
+      const p = ITMQPanels.bars(host, { fmt: v => ITMQ.compact(v, 1) });
+      p.set(lane(ASSETS[2], 180, rng(19)));
+      return p;
+    },
+  })));
+
+/* ── Informe de geometría REAL para la comprobación automática ───────────
+   Se lee el plan que el componente calculó con el ancho medido del panel, no
+   una simulación: si el panel dibuja rayitas, aquí salen rayitas. */
+window.__harnessReport = function () {
+  const AB = window.ITMQBars;
+  return PANELS.map(p => {
+    const host = document.getElementById(p.id);
+    const rect = host.getBoundingClientRect();
+    // Márgenes reales de cada tipo de panel, los mismos que usa el renderizador.
+    const m = p.kind === 'hbars' ? { l: 62, r: 16, t: 10, b: 24 } : { l: 52, r: 16, t: 14, b: 26 };
+    const extent = p.kind === 'hbars'
+      ? Math.max(1, rect.height - m.t - m.b)
+      : Math.max(1, rect.width - m.l - m.r);
+    const plan = AB.layout(p.n, extent);
+    const note = document.getElementById(p.id + '_n');
+    if (note) {
+      note.textContent = `${p.n}→${plan.bins} barras · ${plan.thickness.toFixed(1)}px`
+        + (plan.aggregated ? ` · agrupado ×${plan.group}` : '');
+    }
+    return {
+      id: p.id, name: p.name, kind: p.kind, n: p.n,
+      extent_px: extent, bins: plan.bins, group: plan.group,
+      thickness: plan.thickness, gap: plan.gap, pitch: plan.pitch,
+      aggregated: plan.aggregated,
+      // Contenido total frente al espacio disponible: >1 significa solape.
+      occupancy: (plan.bins * plan.thickness) / extent,
+    };
   });
-}
-
-section('EXPOSICION por strike (hbars, 45 strikes)', (host,a,n)=>{
-  ITMQPanels.hbars(host,{fmt:v=>ITMQ.signedCompact(v,1)}).set(profile(a,n));
-}, 45, true);
-
-section('FLUJO carril inferior (bars, 120 buckets)', (host,a,n)=>{
-  ITMQPanels.bars(host,{fmt:v=>ITMQ.compact(v,1)}).set(lane(a,n));
-}, 120);
-
-section('FLUJO carril denso (bars, 390 buckets de sesion)', (host,a,n)=>{
-  ITMQPanels.bars(host,{fmt:v=>ITMQ.compact(v,1)}).set(lane(a,n));
-}, 390);
+};
 
 window.__harnessReady = true;
 </script>

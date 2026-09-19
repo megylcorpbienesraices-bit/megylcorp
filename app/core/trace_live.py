@@ -18,6 +18,22 @@ from .greeks_service import greeks_vector as _greeks_vector, model_inputs_vector
 from .expiry_clock import year_fraction_array, dte_days_from_expiry
 
 
+
+def _observed_sum(frame, column, tape_seen):
+    """Suma de una columna de CINTA, o `None` si no hubo cinta que sumar.
+
+    La diferencia importa en pantalla: un cero afirma «no se pagó prima» y un
+    hueco dice «no se observó ninguna impresión». Sin esta distinción, FLUJO 5M
+    publicaba `$0.0` en cada ciclo sin cinta.
+    """
+    if not tape_seen:
+        return None
+    try:
+        return float(frame[column].sum())
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _safe_float(v: Any, default: float | None = None) -> float | None:
     try:
         x = float(v)
@@ -164,6 +180,9 @@ def build_trace_pulse(result: Dict[str, Any] | None, symbol: str, live_spot: flo
     # the latest snapshot may already include part of those trades.
     observed = pd.DataFrame(columns=["strike", "opra_contracts_5m", "opra_premium_5m",
                                      "opra_net_contracts_5m", "opra_directional_premium_5m"])
+    # ¿Llegó alguna impresión con la que medir los últimos cinco minutos? Un
+    # agregado de cinta vacía es `None`, no cero.
+    _tape_seen = isinstance(option_events, pd.DataFrame) and not option_events.empty
     if isinstance(option_events, pd.DataFrame) and not option_events.empty:
         ev = option_events.copy()
         ev["timestamp"] = pd.to_datetime(ev.get("timestamp"), errors="coerce")
@@ -366,10 +385,16 @@ def build_trace_pulse(result: Dict[str, Any] | None, symbol: str, live_spot: flo
         "color_10m_m": float(agg["color_10m"].sum()) / 1e6,
         "gamma_center": center("gamma"),
         "delta_center": center("delta"),
-        "opra_contracts_5m": float(agg["opra_contracts_5m"].sum()),
-        "opra_premium_5m": float(agg["opra_premium_5m"].sum()),
-        "opra_net_contracts_5m": float(agg["opra_net_contracts_5m"].sum()),
-        "opra_directional_premium_5m": float(agg["opra_directional_premium_5m"].sum()),
+        # v1.47.0 · Sin cinta observada NO hay actividad de cinco minutos que
+        # sumar, y eso no es una actividad de cero. `sum()` sobre una columna
+        # rellenada con ceros publicaba `FLUJO 5M $0.0`, que en pantalla afirma
+        # «en los últimos cinco minutos no se pagó prima direccional». Lo cierto
+        # es que no se observó ninguna impresión con la que medirlo.
+        "opra_contracts_5m": _observed_sum(agg, "opra_contracts_5m", _tape_seen),
+        "opra_premium_5m": _observed_sum(agg, "opra_premium_5m", _tape_seen),
+        "opra_net_contracts_5m": _observed_sum(agg, "opra_net_contracts_5m", _tape_seen),
+        "opra_directional_premium_5m": _observed_sum(agg, "opra_directional_premium_5m", _tape_seen),
+        "opra_observed": bool(_tape_seen),
         "gamma_delta_interaction": _interaction_summary,
         "strike_gravity": _gravity_summary,
         "rows": rows,

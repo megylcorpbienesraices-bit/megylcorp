@@ -60,12 +60,15 @@
    * marca como recortada en lugar de truncarse en silencio.
    */
 
-  // Grosor mínimo de una barra. Por debajo de esto deja de leerse como barra.
-  const MIN_BAR_PX = 3;
-  // Extensión mínima de un valor NO nulo. Es un suelo de visibilidad, no un
-  // redondeo del dato: un valor pequeño se ve, y su magnitud real sigue en el eje
-  // y en el tooltip. Un valor exactamente cero sigue midiendo cero.
-  const MIN_EXTENT_PX = 2.5;
+  // v1.47.0 · El grosor, la agrupación y el suelo de visibilidad ya NO se
+  // resuelven aquí. Vivían en tres sitios —`bars`, `hbars` y los carriles de
+  // flujo— con tres constantes distintas, así que cada corrección había que
+  // hacerla tres veces y sólo se hacía en dos. Ahora los sirve un único
+  // componente, `ITMQBars`, y una corrección futura beneficia a todos los
+  // paneles de barras del programa a la vez.
+  const AB = global.ITMQBars;
+  if (!AB) { console.error('[PANELS] falta itmq_adaptive_bars.js'); return; }
+
   // A partir de esta razón máx/p90, la distribución está dominada por un atípico y
   // escalar por el máximo esconde todo lo demás.
   const OUTLIER_RATIO = 8.0;
@@ -92,53 +95,20 @@
     return { peak, clipped: false, raw: peak };
   }
 
-  /** Agrupa cuando NO caben barras legibles, en vez de solaparlas.
+  /* La agrupación, el grosor y el suelo de visibilidad los sirve `ITMQBars`.
    *
-   * Forzar un grosor mínimo sin mirar el hueco disponible es cambiar un defecto
-   * por otro: 390 buckets en 330 px dan 0.85 px de hueco, y dibujar barras de 3 px
-   * las solapa hasta convertir el carril en un bloque sólido donde ya no se
-   * distingue un bucket de otro. La información se pierde igual, sólo que ahora
-   * parece llena en vez de vacía.
+   * Lo que había aquí era el defecto de raíz: `fitBars` agrupaba hasta dejar
+   * barras de MIN_BAR_PX de PASO, y `barThickness` aplicaba después un 0.82
+   * sobre ese paso. El resultado medía menos que el mínimo que el código creía
+   * estar garantizando, y con 390 buckets en 330 px salían rayitas de 2.46 px.
    *
-   * Lo honesto cuando no caben es AGRUPAR: menos barras, cada una legible, cada una
-   * cubriendo un intervalo real. Se conserva el valor EXTREMO del grupo —no la
-   * media— porque un pico aplanado por el promedio es justo lo que hay que ver en
-   * un carril de flujo; y porque el extremo es un valor que existió de verdad,
-   * mientras que una media es un número que nadie observó.
+   * El suelo se aplica ahora al PASO —que es lo que tiene que caber— y la
+   * agrupación se dispara cuando el grosor OBJETIVO no cabe, no cuando ya no
+   * cabe el mínimo.
    */
-  function fitBars(data, widthPx) {
-    const n = data.length;
-    if (!n) return { rows: data, grouped: 0 };
-    const maxBars = Math.max(1, Math.floor(widthPx / MIN_BAR_PX));
-    if (n <= maxBars) return { rows: data, grouped: 0 };
-    const group = Math.ceil(n / maxBars);
-    const rows = [];
-    for (let i = 0; i < n; i += group) {
-      const chunk = data.slice(i, i + group);
-      let best = chunk[0];
-      for (const d of chunk) {
-        if (Math.abs(Q.num(d.value)) > Math.abs(Q.num(best.value))) best = d;
-      }
-      rows.push({
-        label: chunk.length > 1 ? `${chunk[0].label}…${chunk[chunk.length - 1].label}` : chunk[0].label,
-        value: Q.num(best.value),
-        color: best.color,
-        key: `g${i}`,
-        grouped: chunk.length,
-      });
-    }
-    return { rows, grouped: group };
-  }
-
-  /** Grosor de barra legible dentro de un hueco, con suelo. */
-  function barThickness(slot, maxBar) {
-    return Math.max(MIN_BAR_PX, Math.min(maxBar || 34, slot * 0.82));
-  }
-
-  /** Extensión con suelo de visibilidad: cero sigue siendo cero. */
-  function visibleExtent(px, value) {
-    if (!Number.isFinite(value) || value === 0) return 0;
-    return Math.max(MIN_EXTENT_PX, Math.abs(px));
+  function fitBars(data, extentPx, opts) {
+    const plan = AB.bin(data, extentPx, opts);
+    return { rows: plan.rows, grouped: plan.aggregated ? plan.group : 0, plan };
   }
 
   /** Marca de barra recortada: dice que el valor se sale de la escala. */
@@ -175,7 +145,10 @@
       const b = box(env, o.margin);
       // Se agrupa ANTES de escalar: si no, la escala se calcula sobre puntos que
       // no se van a dibujar y el eje no corresponde a lo que se ve.
-      const fit = fitBars(data, b.w);
+      // Histograma temporal: los contenedores SUMAN. «Lo que pasó en estos tres
+      // minutos» es la suma, no el máximo; el pico del grupo se conserva aparte
+      // para que una anomalía no quede escondida dentro de su intervalo.
+      const fit = fitBars(data, b.w, { aggregate: o.aggregate || 'sum', maxThickness: o.maxBar });
       const draw = fit.rows;
       let hasNeg = false;
       const values = draw.map(d => { const v = Q.num(d.value); if (v < 0) hasNeg = true; return v; });
@@ -188,8 +161,8 @@
       Q.gridY(ctx, b, sy, Q.niceTicks(sy.domain[0], sy.domain[1], 5), o.fmt, { labelSide: 'left' });
 
       const y0 = sy(0);
-      const slot = b.w / draw.length;
-      const bw = barThickness(slot, o.maxBar);
+      const slot = fit.plan.pitch;
+      const bw = fit.plan.thickness;
 
       ctx.save();
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
@@ -200,7 +173,7 @@
         const cx = b.x + slot * (i + 0.5);
         const y = sy(v);
         const col = d.color || colorFor(v, o);
-        const h = visibleExtent(y - y0, v);
+        const h = AB.extent(y - y0, v, b.h);
         const top = v >= 0 ? y0 - h : y0;
         // Relleno más opaco y un borde del mismo color: a grosor pequeño el borde
         // es lo que separa una barra de la de al lado.
@@ -214,6 +187,13 @@
         }
         if (scale.clipped && Math.abs(v) > mx) {
           clipMark(ctx, cx - bw / 2, v >= 0 ? b.y + 2 : b.y + b.h - 10, bw, 1.5, true, col);
+        }
+        if (d.peak_dominates) {
+          // El grupo suma poco porque sus signos se compensan, pero dentro hubo
+          // un evento grande. Se marca su alcance para no esconderlo.
+          const py = sy(Q.num(d.peak));
+          ctx.fillStyle = Q.alpha(colorFor(Q.num(d.peak), o), 0.55);
+          ctx.fillRect(cx - bw / 2, py - 1, bw, 2);
         }
       });
       ctx.restore();
@@ -240,7 +220,7 @@
           ctx.fillRect(b.x + slot * i, b.y, slot, b.h);
           ctx.restore();
           Q.chip(ctx, Q.clamp(b.x + slot * (i + .5), b.x + 60, b.x + b.w - 60), b.y + 10,
-            `${d.label} · ${o.fmt(Q.num(d.value))}${d.grouped > 1 ? ` · máx de ${d.grouped}` : ''}`,
+            AB.describe(d, o.fmt),
             { align: 'center', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
         }
       }
@@ -255,6 +235,10 @@
         glide.setAll(data.map((d, i) => [d.key !== undefined ? d.key : i, Q.num(d.value)]));
         panel.animate(true); panel.invalidate();
       },
+      // v1.47.0 · El motivo de un panel vacío puede cambiar entre ciclos —«aún no
+      // hay sesión» y «hay agregados pero no desglose» no son lo mismo— y el
+      // caché de paneles congelaba el texto del primer render.
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
     };
   }
 
@@ -278,7 +262,10 @@
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!data.length) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin || { l: 62, r: 16, t: 10, b: 24 });
-      const fit = fitBars(data, b.h);
+      // Perfil por strike: el contenedor muestra el valor EXTREMO del grupo, que
+      // es un valor que existió de verdad. Una media podría cancelar un +8 con
+      // un −8 vecinos y hacer desaparecer la concentración justo donde importa.
+      const fit = fitBars(data, b.h, { aggregate: o.aggregate || 'extreme', maxThickness: o.maxBar || 22 });
       const draw = fit.rows;
       let hasNeg = false;
       const values = draw.map(d => { const v = Q.num(d.value); if (v < 0) hasNeg = true; return v; });
@@ -287,8 +274,8 @@
       const mx = Math.max(maxG.get(), 1e-9);
       const sx = hasNeg ? Q.scale(-mx * 1.05, mx * 1.05, b.x, b.x + b.w) : Q.scale(0, mx * 1.05, b.x, b.x + b.w);
       const zero = sx(0);
-      const slot = b.h / draw.length;
-      const bh = barThickness(slot, o.maxBar || 22);
+      const slot = fit.plan.pitch;
+      const bh = fit.plan.thickness;
 
       ctx.save();
       ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.9);
@@ -303,7 +290,7 @@
         const v = fit.grouped ? Q.num(d.value) : glide.get(d.key !== undefined ? d.key : i);
         const x = Q.clamp(sx(v), b.x, b.x + b.w);
         const col = d.color || colorFor(v, o);
-        const w = visibleExtent(x - zero, v);
+        const w = AB.extent(x - zero, v, b.w);
         const left = v >= 0 ? zero : zero - w;
         ctx.fillStyle = Q.alpha(col, 0.95);
         ctx.fillRect(left, cy - bh / 2, w, bh);
@@ -340,7 +327,9 @@
         const i = Math.floor((panel.pointer.y - b.y) / slot);
         if (i >= 0 && i < draw.length) {
           const d = draw[i];
-          Q.chip(ctx, b.x + b.w - 4, b.y + slot * (i + .5), `${d.label} · ${o.fmt(Q.num(d.value))}`,
+          // Si en pantalla pone «514…516», el hover dice cuántos strikes agrupa y
+          // cuál es el extremo: la agrupación es visual, el dato sigue entero.
+          Q.chip(ctx, b.x + b.w - 4, b.y + slot * (i + .5), AB.describe(d, o.fmt),
             { align: 'right', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7') });
         }
       }
@@ -355,6 +344,10 @@
         glide.setAll(data.map((d, i) => [d.key !== undefined ? d.key : i, Q.num(d.value)]));
         panel.animate(true); panel.invalidate();
       },
+      // v1.47.0 · El motivo de un panel vacío puede cambiar entre ciclos —«aún no
+      // hay sesión» y «hay agregados pero no desglose» no son lo mismo— y el
+      // caché de paneles congelaba el texto del primer render.
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
     };
   }
 
@@ -450,7 +443,13 @@
       return false;
     }, { id: (host.id || 'lines') + ':lines', onPointer: () => panel.invalidate(), onPointerLeave: () => panel.invalidate() });
 
-    return { panel, set(s) { series = Array.isArray(s) ? s : []; panel.invalidate(); } };
+    return {
+      panel,
+      set(s) { series = Array.isArray(s) ? s : []; panel.invalidate(); },
+      // El motivo de un panel vacío puede cambiar entre ciclos; el caché de
+      // paneles congelaba el texto del primer render.
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
+    };
   }
 
   /* ------------------------------------------- barras sobre eje temporal */
@@ -488,16 +487,29 @@
       Q.axisX(ctx, b, sx, t0, t1 + o.bucketMs, { grid: false });
 
       const y0 = sy(0);
-      const bw = Math.max(1, (sx(t0 + o.bucketMs) - sx(t0)) * 0.7);
+      // v1.47.0 · `(sx(t0+bucket) - sx(t0)) * 0.7` es el mismo error que tenían
+      // los otros paneles: con una sesión entera a un minuto el paso vale menos
+      // de un píxel y las barras se solapan en una masa sólida. El componente
+      // común agrupa temporalmente hasta que cada barra tiene presencia, y suma
+      // dentro de cada intervalo.
+      const rows = [];
+      for (const p of points) {
+        const t = Q.parseTime(p.t);
+        if (!Q.isNum(t)) continue;
+        rows.push({ label: Q.hhmm(t), value: Q.num(p.v, 0), t });
+      }
+      rows.sort((a, c) => a.t - c.t);
+      const plan = AB.bin(rows, b.w, { aggregate: 'sum', maxThickness: o.maxBar });
+      const bw = plan.thickness;
       ctx.save();
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
-      for (const p of points) {
-        const t = Q.parseTime(p.t), v = Q.num(p.v, 0);
-        if (!Q.isNum(t) || !v) continue;
-        const x = sx(t + o.bucketMs / 2), y = sy(v);
+      plan.rows.forEach((d, i) => {
+        const v = Q.num(d.value, 0);
+        if (!v) return;
+        const x = b.x + plan.pitch * (i + 0.5), y = sy(v);
         ctx.fillStyle = Q.alpha(colorFor(v, o), 0.88);
-        ctx.fillRect(x - bw / 2, Math.min(y, y0), bw, Math.max(1, Math.abs(y - y0)));
-      }
+        ctx.fillRect(x - bw / 2, Math.min(y, y0), bw, AB.extent(y - y0, v, b.h));
+      });
       ctx.restore();
       return maxG.step(env.dt);
     }, { id: (host.id || 'tbars') + ':tbars' });
@@ -573,7 +585,13 @@
       return false;
     }, { id: (host.id || 'curve') + ':curve' });
 
-    return { panel, set(s) { series = Array.isArray(s) ? s : []; panel.invalidate(); } };
+    return {
+      panel,
+      set(s) { series = Array.isArray(s) ? s : []; panel.invalidate(); },
+      // El motivo de un panel vacío puede cambiar entre ciclos; el caché de
+      // paneles congelaba el texto del primer render.
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
+    };
   }
 
   /* --------------------------------------------- precio + operaciones */
@@ -674,26 +692,37 @@
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!rows.length || !cols.length || peak <= 0) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin || { l: 62, r: 52, t: 12, b: 26 });
-      const cw = b.w / cols.length, ch = b.h / rows.length;
-      // El punto nunca tapa al vecino ni desaparece: acotado a la celda.
-      const rMax = Math.max(1.2, Math.min(cw, ch) * 0.46);
 
+      /* v1.47.0 · Zonas, no puntos.
+       *
+       * Antes cada celda era un CÍRCULO de radio `min(cw,ch)*0.46`. Con 90
+       * strikes en 250 px eso da 1.3 px, y la intensidad era `|v| / max`: una
+       * normalización lineal que, con una cadena concentrada, deja casi todo por
+       * debajo del umbral de 0.02 y sin pintar. El mapa se veía como puntos
+       * diminutos y dispersos teniendo 7.290 observaciones.
+       *
+       * Ahora la celda se agrupa hasta tener tamaño real y se pinta RELLENA, así
+       * que una concentración se lee como una zona continua y no como una nube.
+       * La intensidad es por rango dentro de lo visible, que es lo que hace que
+       * el mapa se lea igual en un ETF enorme y en una acción pequeña.
+       */
+      const g = AB.grid(matrix, b.w, b.h);
+      const cw = g.cw, ch = g.ch;
       const pos = Q.token('--pos', '#22c55e');
       const neg = Q.token('--neg', '#ef4444');
       ctx.save();
-      for (let y = 0; y < rows.length; y++) {
-        const src = matrix[y] || [];
-        // rows[0] es el strike más bajo: el eje Y crece hacia arriba.
-        const cy = b.y + b.h - (y + 0.5) * ch;
-        for (let x = 0; x < cols.length; x++) {
+      for (let y = 0; y < g.rows; y++) {
+        const src = g.cells[y] || [];
+        // La fila 0 es el strike más bajo: el eje Y crece hacia arriba.
+        const cy = b.y + b.h - (y + 1) * ch;
+        for (let x = 0; x < g.cols; x++) {
           const v = Q.num(src[x]);
-          const a = Math.abs(v) / peak;
-          if (a < 0.02) continue;
-          ctx.globalAlpha = 0.25 + 0.75 * Math.pow(a, 0.55);
+          if (!v) continue;
+          const a = g.intensity(v);
+          if (a < 0.12) continue;
+          ctx.globalAlpha = 0.14 + 0.86 * Math.pow(a, 0.75);
           ctx.fillStyle = v >= 0 ? pos : neg;
-          ctx.beginPath();
-          ctx.arc(b.x + (x + 0.5) * cw, cy, Math.max(0.8, rMax * Math.pow(a, 0.42)), 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillRect(b.x + x * cw, cy, Math.max(1, cw), Math.max(1, ch));
         }
       }
       ctx.globalAlpha = 1;
@@ -724,26 +753,40 @@
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const skipY = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(b.h / 16))));
-      rows.forEach((r, i) => {
-        if (i % skipY) return;
-        ctx.fillText(o.fmtY(Q.num(r)), b.x - 6, b.y + b.h - (i + 0.5) * ch);
-      });
+      // Los ejes recorren las celdas DIBUJADAS y etiquetan con el valor original
+      // del primer elemento de cada bloque: si la celda agrupa tres strikes, la
+      // etiqueta es la del primero y el hover dice el rango completo.
+      const skipY = Math.max(1, Math.ceil(g.rows / Math.max(1, Math.floor(b.h / 16))));
+      for (let i = 0; i < g.rows; i++) {
+        if (i % skipY) continue;
+        const src = rows[i * g.rowGroup];
+        if (src === undefined) continue;
+        ctx.fillText(o.fmtY(Q.num(src)), b.x - 6, b.y + b.h - (i + 0.5) * ch);
+      }
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      const skipX = Math.max(1, Math.ceil(cols.length / Math.max(1, Math.floor(b.w / 64))));
-      cols.forEach((c, i) => {
-        if (i % skipX) return;
-        ctx.fillText(o.fmtX(c), b.x + (i + 0.5) * cw, b.y + b.h + 6);
-      });
+      const skipX = Math.max(1, Math.ceil(g.cols / Math.max(1, Math.floor(b.w / 64))));
+      for (let i = 0; i < g.cols; i++) {
+        if (i % skipX) continue;
+        const src = cols[i * g.colGroup];
+        if (src === undefined) continue;
+        ctx.fillText(o.fmtX(src), b.x + (i + 0.5) * cw, b.y + b.h + 6);
+      }
       ctx.restore();
 
       if (panel.pointer.inside) {
         const ix = Math.floor((panel.pointer.x - b.x) / cw);
-        const iy = rows.length - 1 - Math.floor((panel.pointer.y - b.y) / ch);
-        if (ix >= 0 && ix < cols.length && iy >= 0 && iy < rows.length) {
-          const v = Q.num((matrix[iy] || [])[ix]);
-          Q.chip(ctx, Q.clamp(panel.pointer.x + 8, b.x, b.x + b.w - 190), b.y + 12,
-            `${o.fmtY(Q.num(rows[iy]))} · ${o.fmtX(cols[ix])} · ${Q.signedCompact(v, 2)}`,
+        const iy = g.rows - 1 - Math.floor((panel.pointer.y - b.y) / ch);
+        if (ix >= 0 && ix < g.cols && iy >= 0 && iy < g.rows) {
+          // El valor que se enseña es el EXTREMO del bloque —el que se dibujó—
+          // y se dice de cuántas observaciones originales sale.
+          const v = Q.num((g.cells[iy] || [])[ix]);
+          const y0 = rows[iy * g.rowGroup], y1 = rows[Math.min(rows.length - 1, (iy + 1) * g.rowGroup - 1)];
+          const x0 = cols[ix * g.colGroup], x1 = cols[Math.min(cols.length - 1, (ix + 1) * g.colGroup - 1)];
+          const yTxt = g.rowGroup > 1 ? `${o.fmtY(Q.num(y0))}…${o.fmtY(Q.num(y1))}` : o.fmtY(Q.num(y0));
+          const xTxt = g.colGroup > 1 ? `${o.fmtX(x0)}…${o.fmtX(x1)}` : o.fmtX(x0);
+          const n = g.rowGroup * g.colGroup;
+          Q.chip(ctx, Q.clamp(panel.pointer.x + 8, b.x, b.x + b.w - 210), b.y + 12,
+            `${yTxt} · ${xTxt} · ${Q.signedCompact(v, 2)}${n > 1 ? ` · máx de ${n}` : ''}`,
             { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
         }
       }

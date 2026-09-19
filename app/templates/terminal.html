@@ -395,7 +395,7 @@
       <div class="kpi"><span>IV ATM</span><b id="volAtm">—</b><small>volatilidad implícita al dinero</small></div>
       <div class="kpi"><span>IV RANK</span><b id="volRank">—</b><small id="volRankDetail">—</small></div>
       <div class="kpi"><span>SKEW</span><b id="volSkew">—</b><small>put − call 25Δ</small></div>
-      <div class="kpi"><span>DERIVA DE VOLATILIDAD</span><b id="volDrift">—</b><small>cambio en sesión</small></div>
+      <div class="kpi"><span>DERIVA DE VOLATILIDAD</span><b id="volDrift">—</b><small id="volDriftDetail">cambio en sesión</small></div>
     </div>
     <div class="grid c2">
       <article class="card">
@@ -431,7 +431,7 @@
   <div class="stack">
     <div class="grid c4">
       <div class="kpi"><span>CONTRATOS NEGOCIADOS</span><b id="stContracts">—</b><small id="stContractsDetail">sesión observada</small></div>
-      <div class="kpi"><span>PRIMA NEGOCIADA</span><b id="stPremium">—</b><small>notional de opciones</small></div>
+      <div class="kpi"><span>PRIMA NEGOCIADA</span><b id="stPremium">—</b><small id="stPremiumDetail">notional de opciones</small></div>
       <div class="kpi"><span>RATIO PUT/CALL</span><b id="stPcr">—</b><small id="stPcrDetail">—</small></div>
       <div class="kpi"><span>TAMAÑO MEDIO</span><b id="stAvgSize">—</b><small>contratos por print</small></div>
     </div>
@@ -457,6 +457,15 @@
 <!-- ══════════════════════════════════════════════════ DARK POOL ══════ -->
 <section class="view" data-view="darkpool">
   <div class="stack">
+    <!-- v1.47.0 · Qué parte de la sección tiene dato, ANTES de las cifras. Con
+         `dark-flow` vivo y `dark-pool-levels` rechazado, la pantalla enseña lo
+         que SÍ hay y dice que falta lo otro, en vez de parecer entera o parecer
+         vacía. Va como línea de estado y no como tarjeta: es una declaración de
+         cobertura, no una métrica de mercado. -->
+    <div class="status-strip">
+      <span>COBERTURA · <b id="dpCoverage">—</b></span>
+      <span id="dpCoverageDetail">vías con dato en este ciclo</span>
+    </div>
     <!-- Ocho tarjetas en una rejilla de cuatro: dos filas completas. La fuente
          primaria es Quant Data (dark-flow / dark-pool-levels / equity-prints); la
          clasificación por venue se conserva como auditoría, no como única vía. -->
@@ -754,6 +763,7 @@
 <div id="toast"></div>
 
 <script src="/static/itmq_core.js?v={{ version }}"></script>
+<script src="/static/itmq_adaptive_bars.js?v={{ version }}"></script>
 <script src="/static/itmq_trace.js?v={{ version }}"></script>
 <script src="/static/itmq_orderflow.js?v={{ version }}"></script>
 <script src="/static/itmq_panels.js?v={{ version }}"></script>

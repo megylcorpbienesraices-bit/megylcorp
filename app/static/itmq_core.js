@@ -173,10 +173,32 @@
       this.cur = new Map();
       this.tgt = new Map();
     }
-    set(key, value) { this.tgt.set(key, num(value, 0)); }
+    /* v1.47.0 · La PRIMERA aparición de una clave se adopta de golpe.
+     *
+     * Antes toda clave empezaba en 0 y subía animándose, así que el primer
+     * fotograma de un panel dibujaba TODAS las barras a cero mientras el eje ya
+     * mostraba la escala correcta: un panel con eje de ±4.2 B y ni una sola
+     * barra. Se arreglaba solo a los pocos fotogramas… si el bucle de animación
+     * seguía vivo. Un panel que entra en pantalla por el observador de
+     * visibilidad dibuja UN fotograma, y ése era el que se quedaba.
+     *
+     * Adoptar el primer valor y animar sólo los CAMBIOS posteriores conserva la
+     * transición donde tiene sentido —un valor que se mueve— y elimina la que
+     * no lo tenía: la de un dato que acaba de llegar contra un cero que nunca
+     * existió.
+     */
+    set(key, value) {
+      const v = num(value, 0);
+      this.tgt.set(key, v);
+      if (!this.cur.has(key)) this.cur.set(key, v);
+    }
     setAll(entries) {
       this.tgt = new Map();
-      for (const [k, v] of entries) this.tgt.set(k, num(v, 0));
+      for (const [k, v] of entries) {
+        const n = num(v, 0);
+        this.tgt.set(k, n);
+        if (!this.cur.has(k)) this.cur.set(k, n);
+      }
       for (const k of Array.from(this.cur.keys())) if (!this.tgt.has(k)) this.tgt.set(k, 0);
     }
     get(key) { const v = this.cur.get(key); return isNum(v) ? v : 0; }
