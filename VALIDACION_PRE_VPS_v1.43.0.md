@@ -1,17 +1,83 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.42.7
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.43.0
 
-Release: `ITM_QUANT_v1.42.7_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.43.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
 > Este documento es acumulativo. Las secciones fechadas en releases anteriores se
 > conservan tal cual: reescribirlas borraría la trazabilidad de lo que se certificó
-> entonces. La sección **A6** es la de esta release.
+> entonces. La sección **A7** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **1694 casos / 142 ficheros**
-- Particiones: 21 · `plan_sha256`: `662e190cd9805bd29a342982cc52e0ac0bdde5b5624259c4b014b5727f68e43a`
-- Resultado: **PASS** (1551 passed · 0 skipped · 0 failed · 0 errors, gate particionado)
+- Inventario nominal: **1742 casos / 143 ficheros**
+- Particiones: 21 · `plan_sha256`: `a397df11e2483cabebe69c3bca6a917fe217fe3d7ae8b2e3b7809121807bd3bb`
+- Resultado: **PASS**
 
+---
+
+## A7 · v1.43.0 · Quant Data como autoridad de la estructura de opciones
+
+### Qué se certifica
+
+`tests/test_v1430_quant_data_authority.py` ejercita siete bloques, con **tres
+activos de escalas deliberadamente incomparables** —un índice muy líquido, un ETF
+sectorial y una acción pequeña— y **ninguno de ellos el usado para desarrollar**.
+Que algo funcione en un solo símbolo no certifica nada, y ése era exactamente el
+riesgo de esta integración.
+
+**1 · Autoridad de fuente.** Con el proveedor sano, el valor publicado es el suyo.
+No se comprueba que «haya datos»: se le entrega al motor un perfil en un strike que
+el proveedor **no** publica y se verifica que ese strike no aparece en la salida. Si
+apareciera, el cálculo propio estaría ganando.
+
+**2 · Fallback honesto.** Sin proveedor, el respaldo sostiene la vista, pero sale
+con `source_mode = FALLBACK` y `fallback_used = True`. Se ejercita además la guarda:
+intentar publicar `DERIVED` sobre una primaria sana **lanza** `SilentSubstitution`.
+
+**3 · Cadena de custodia.** `RAW PROVIDER → NORMALIZER → ENGINE → API INTERNA →
+FRONTEND`, tramo a tramo, comprobando que el valor y su significado se conservan.
+Se verifica también el signo del Interval Map: `call + put`, no `call − put`.
+
+**4 · Estados de dato.** Los siete casos de `classify()`, y que un fallo nunca
+llegue a pantalla como `$0.0`: Dark Pool sin datos publica `None` y `SIN DATOS`.
+
+**5 · QFLOW enriquecido.** Se inyecta una concentración y se comprueba que queda
+atribuida con `calls`, `buys`, etiqueta `SWEEP`, strike dominante, vencimiento y
+DTE, y que la marca lleva flecha y magnitud.
+
+**6 · Normalización por activo.** Se comprueba que el umbral de un activo grande
+supera en más de diez veces al de uno pequeño —es decir, que **no** es un límite
+fijo— y se rechaza por inspección cualquier ticker escrito como literal en los
+módulos nuevos.
+
+**7 · Separación `DIRECT_PROVIDER` / `DERIVED`.** Namespaces disjuntos, verificado
+métrica a métrica: ninguna `QD_*` es derivada y ninguna `ITMQ_*` se declara del
+proveedor.
+
+### Verificación de no-regresión
+
+Suite completa ejecutada tras cada bloque de cambios. Las pruebas que codificaban la
+prioridad anterior —«el motor gana siempre»— se actualizaron **explícitamente** a la
+nueva doctrina en lugar de relajarse: la política cambió porque se pidió que
+cambiara, y la prueba tiene que decir cuál es la política vigente.
+
+### Límites declarados de esta certificación
+
+Esta validación es **funcional y sobre datos controlados**. Lo que NO afirma:
+
+1. **Que los números del proveedor sean correctos.** Se certifica que ITM QUANT
+   publica lo que el proveedor emite sin deformarlo. Si el proveedor se equivoca,
+   ITM QUANT publicará su error fielmente.
+2. **Que el renderizado sea correcto con una sesión real.** Ver TRACE, QFLOW, Net
+   Drift y Dark Pool dibujando datos en vivo exige cuenta activa y mercado abierto.
+   El procedimiento paso a paso está en
+   `docs/operations/VALIDACION_LIVE_PRE_PRODUCCION_v1.43.0.md` y **queda pendiente
+   de ejecutar**.
+3. **Que los umbrales estén calibrados.** Se certifica que se **adaptan** a la
+   escala de cada activo; la calibración sólo la da la observación en vivo.
+
+---
+
+# Histórico · v1.42.7 y anteriores
 
 ## Hotfix runtime posterior a la primera certificación
 

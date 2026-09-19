@@ -127,7 +127,10 @@ def test_gex_is_never_averaged_between_providers():
     assert fused["ready"] is False
     assert fused["status"] == "FUSION_FORBIDDEN"
     assert "value" not in fused
-    assert "autoridad es ITM" in fused["reason"]
+    # v1.43.0 · La autoridad de GEX pasó a Quant Data. Lo que la prueba defiende no
+    # es quién manda, sino que la fusión siga prohibida: sean quienes sean las dos
+    # partes, promediar dos construcciones distintas no describe ningún mercado.
+    assert "autoridad es QUANTDATA" in fused["reason"]
 
 
 def test_low_quality_observation_is_excluded_with_a_reason():

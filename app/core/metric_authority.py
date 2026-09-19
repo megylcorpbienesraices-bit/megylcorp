@@ -86,18 +86,56 @@ _POLICIES: Dict[str, MetricPolicy] = {p.metric: p for p in (
                  note="La cadena la sirve quien tiene los contratos, no quien los resume."),
     MetricPolicy("option_trades", ALPACA, KIND_OBSERVED, (QUANTDATA,), FALLBACK_DEGRADED,
                  note="Cinta OPRA. Quant Data agrega, no reemplaza el print."),
-    MetricPolicy("open_interest", ALPACA, KIND_OBSERVED, (QUANTDATA,), FALLBACK_DEGRADED,
-                 note="OI es de cierre de sesión anterior; nunca tick-by-tick."),
+    MetricPolicy("open_interest", QUANTDATA, KIND_OBSERVED, (ALPACA, ITM), FALLBACK_DEGRADED,
+                 note="OI es de cierre de sesión anterior; nunca tick-by-tick, y nunca "
+                      "reconstruido con volumen. Open Interest by Strike del proveedor "
+                      "es la autoridad; la cadena propia corrobora y respalda."),
     MetricPolicy("implied_volatility", ITM, KIND_DERIVED, (ALPACA, QUANTDATA), FALLBACK_UNAVAILABLE,
                  note="Se resuelve con el precio observado y se contrasta con la IV del proveedor."),
     MetricPolicy("gamma", ITM, KIND_DERIVED, (ALPACA, QUANTDATA), FALLBACK_FAIL,
                  note="Una sola Gamma en todo el programa, la del dispatcher."),
     MetricPolicy("delta", ITM, KIND_DERIVED, (ALPACA, QUANTDATA), FALLBACK_FAIL),
-    MetricPolicy("gex", ITM, KIND_DERIVED, (QUANTDATA,), FALLBACK_UNAVAILABLE,
+    # v1.43.0 · GEX y DEX cambian de autoridad. Hasta v1.42.7 la autoridad era ITM
+    # y Quant Data sólo validaba, de modo que el cálculo propio podía tapar el del
+    # proveedor sin que nada lo dijera. Ahora la autoridad es QUANT DATA, el cálculo
+    # propio pasa a VALIDACIÓN, y la política de ausencia es DEGRADED: sin
+    # proveedor se publica la lectura propia MARCADA como degradada, nunca como si
+    # fuera la del proveedor. Sigue prohibido promediarlas: son construcciones
+    # distintas, y que difieran es la señal, no el problema.
+    MetricPolicy("gex", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED,
                  unit="GEX_PER_1PCT",
-                 note="Comparable con Quant Data sólo tras pasar la puerta de unidades."),
-    MetricPolicy("dex", ITM, KIND_DERIVED, (QUANTDATA,), FALLBACK_UNAVAILABLE,
-                 unit="DEX_NOTIONAL"),
+                 note="Exposure by Strike · GAMMA es la autoridad. El perfil propio "
+                      "corrobora y respalda declarado, nunca en silencio."),
+    MetricPolicy("dex", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED,
+                 unit="DEX_NOTIONAL",
+                 note="Exposure by Strike · DELTA es la autoridad."),
+    MetricPolicy("vex", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED,
+                 unit="VANNA_RAW", note="Exposure by Strike · VANNA."),
+    MetricPolicy("chex", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED,
+                 unit="CHARM_RAW", note="Exposure by Strike · CHARM."),
+    MetricPolicy("interval_map", QUANTDATA, KIND_OBSERVED, (ITM,), FALLBACK_DEGRADED,
+                 note="Mapa tiempo × strike. Es el fondo dinámico de TRACE."),
+    MetricPolicy("option_greeks", QUANTDATA, KIND_OBSERVED, (ITM,), FALLBACK_DEGRADED,
+                 note="Delta, Gamma, Theta, Vega, Rho y los de orden superior los "
+                      "publica el proveedor por contrato. ITM los usa como entrada; "
+                      "no los recalcula cuando ya vienen válidos."),
+    MetricPolicy("net_flow", QUANTDATA, KIND_OBSERVED, (), FALLBACK_UNAVAILABLE,
+                 note="Prima neta por intervalo. Serie base de QFLOW."),
+    MetricPolicy("order_flow", QUANTDATA, KIND_OBSERVED, (ITM,), FALLBACK_DEGRADED,
+                 note="La cinta de opciones del proveedor, con el contrato entero."),
+    MetricPolicy("dark_flow", QUANTDATA, KIND_OBSERVED, (ITM,), FALLBACK_DEGRADED,
+                 note="Fuente principal de Dark Pool. La clasificación por venue es "
+                      "auditoría, no la única vía."),
+    MetricPolicy("dark_pool_levels", QUANTDATA, KIND_OBSERVED, (ITM,), FALLBACK_DEGRADED),
+    MetricPolicy("iv_rank", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED, unit="PCT"),
+    MetricPolicy("volatility_skew", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED),
+    MetricPolicy("term_structure", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED),
+    MetricPolicy("max_pain", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_DEGRADED, unit="STRIKE"),
+    # ── inteligencia propia · nunca se presenta como dato del proveedor ────────
+    MetricPolicy("itmq_gamma_pressure", ITM, KIND_INFERRED, (), FALLBACK_UNAVAILABLE,
+                 note="Conclusión propia sobre datos del proveedor. DERIVED, no dato directo."),
+    MetricPolicy("itmq_flow_confluence", ITM, KIND_INFERRED, (), FALLBACK_UNAVAILABLE),
+    MetricPolicy("itmq_structural_score", ITM, KIND_INFERRED, (), FALLBACK_UNAVAILABLE),
     MetricPolicy("quantdata_gex", QUANTDATA, KIND_DERIVED, (ITM,), FALLBACK_UNAVAILABLE,
                  note="El GEX de Quant Data es SUYO. Se publica con su nombre o no se publica."),
     MetricPolicy("net_drift", QUANTDATA, KIND_OBSERVED, (), FALLBACK_UNAVAILABLE,

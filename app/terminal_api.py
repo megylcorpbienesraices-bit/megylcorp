@@ -2026,6 +2026,60 @@ def _arquitectura(state: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any
     }
 
 
+def _inteligencia(state: Dict[str, Any], trace: Dict[str, Any],
+                  intel: Dict[str, Any]) -> Dict[str, Any]:
+    """INTELIGENCIA PROPIA de ITM QUANT sobre los datos del proveedor.
+
+    El motor ya no reconstruye GEX, DEX, OI ni Net Drift: los lee del Data Hub —el
+    MISMO bloque que alimenta la interfaz— y produce encima lo que ningún
+    proveedor entrega: confluencia, divergencia, persistencia, migración de gamma,
+    strikes dominantes, BREAK/CONTAINMENT/TRANSITION, régimen y Structural Score.
+
+    Todo lo que sale de aquí es DERIVED y lleva prefijo `ITMQ_`. Nunca se presenta
+    como dato directo del proveedor.
+    """
+    from .core import quant_data_hub as HUB
+    from .core import itmq_intelligence as IQ
+
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    spot = _f(state.get("spot")) or _f(_d(trace, "profiles", "spot"))
+    candles = trace.get("candles") or []
+    price_series = [_f(c.get("c")) for c in candles[-120:] if isinstance(c, dict)]
+    price_series = [p for p in price_series if p is not None]
+
+    hub = HUB.hub_snapshot(symbol, intel,
+                           engine_heatmap=(trace.get("heatmap_history") or {}))
+    qflow = _qflow(state, intel)
+    drift = _net_drift(state, intel)
+    dark = hub.get("dark_pool") or {}
+
+    drift_series = [_f(r.get("net_premium")) for r in (drift.get("series") or [])]
+    drift_series = [v for v in drift_series if v is not None]
+    net_flow_rows = _qd_rows(intel, "net_flow")
+    net_flow_total = sum(_f(r.get("value"), 0.0) or 0.0 for r in net_flow_rows) if net_flow_rows else None
+
+    # Sesgo del dark pool: proporción oscura por encima o por debajo del precio.
+    dark_bias = None
+    if dark.get("ready") and spot:
+        above = sum(_f(l.get("notional"), 0.0) or 0.0
+                    for l in (dark.get("levels") or []) if (_f(l.get("price")) or 0) > spot)
+        below = sum(_f(l.get("notional"), 0.0) or 0.0
+                    for l in (dark.get("levels") or []) if (_f(l.get("price")) or 0) < spot)
+        if above or below:
+            dark_bias = below - above
+
+    out = IQ.analyze(symbol, hub, spot=spot,
+                     levels=trace.get("levels") or [],
+                     price_series=price_series,
+                     net_drift=_f(drift.get("net_premium")),
+                     net_flow=net_flow_total,
+                     qflow_net=_f(qflow.get("net_premium")),
+                     dark_pool_bias=dark_bias,
+                     drift_series=drift_series)
+    out["capabilities"] = hub.get("capabilities")
+    return out
+
+
 def _greeks(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
     """Greeks POR CONTRATO del proveedor.
 
@@ -2103,6 +2157,7 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         # No es una sección nueva: es la misma, completa.
         "flujo_ordenes": _flujo_ordenes(state, intel, trace),
         "greeks": _greeks(state, intel),
+        "inteligencia": _inteligencia(state, trace, intel),
         "capacidades": _capacidades(state, intel),
         "montecarlo": _montecarlo(state),
         "exposure_forecast": _exposure_forecast(trace, state),

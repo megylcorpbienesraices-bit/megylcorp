@@ -1,5 +1,39 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.43.0 · Quant Data como autoridad de la estructura de opciones
+
+- **El reparto, escrito.** `Alpaca → qué hace el precio` · `Quant Data → cómo está
+  posicionada la estructura de opciones y sus Greeks` · `ITM QUANT → qué significa
+  todo eso junto`. Hasta v1.42.7 varias secciones preferían el cálculo propio y
+  dejaban entrar al proveedor sólo cuando el motor no tenía nada —y lo hacían **en
+  silencio**, sin que el operador ni el Auditor pudieran saber cuál veían.
+- **Procedencia obligatoria.** Cada métrica registra proveedor, endpoint,
+  `source_mode`, valor crudo, normalizado y final, si se usó respaldo y de qué se
+  derivó. Cuatro modos: `DIRECT_PROVIDER`, `DERIVED`, `FALLBACK`, `UNAVAILABLE`. Si
+  la fuente primaria está sana, ningún cálculo interno puede sustituirla: la guarda
+  **falla**, no avisa.
+- **TRACE deja de tener un fondo estático.** El mapa es ahora el **Interval Map**
+  del proveedor —`eje X = tiempo`, `eje Y = strike`, `intensidad = exposición`—
+  alternable entre **GAMMA · DELTA · VANNA · CHARM**, con las velas encima y sobre
+  el mismo eje temporal. Así se ve cómo la exposición aparece, crece, se reduce y
+  **migra** durante la sesión.
+- **QFLOW ya no se queda en Net Flow.** Las concentraciones se atribuyen con
+  `order-flow` consolidado y sin consolidar: CALL/PUT, BUY/SELL, strike,
+  vencimiento, DTE, prima, agresor y BLOCK/SWEEP/SPLIT. Se marcan `▲ $X.XM` /
+  `▼ $X.XM` **a la vez** en el precio y en el panel de flujo.
+- **Sin umbrales en dólares.** La concentración se mide contra la distribución del
+  **propio activo**, con tres lentes simultáneas. Ningún ticker escrito en código.
+- **Dark Pool con fuente directa.** `dark-flow`, `dark-pool-levels` y
+  `equity-prints`; el `venue` de otra cinta queda como auditoría. Si hay fallo de
+  datos, dice **SIN DATOS**, nunca `$0.0`.
+- **El motor, redefinido.** Deja de reconstruir lo que el proveedor entrega y pasa a
+  interpretarlo: presión y migración de gamma, confluencia y divergencia,
+  persistencia, strikes dominantes, `BREAK`/`CONTAINMENT`/`TRANSITION`, régimen y
+  `Structural Score` 0–100. Todo `DERIVED`, con prefijo `ITMQ_`, nunca presentado
+  como dato del proveedor.
+- **La pantalla muestra análisis.** Endpoints, proveedores y diagnósticos viven en
+  el Auditor.
+
 ## v1.42.7 · Net Drift oficial, Dark Pool directo y Quant Data como proveedor
 
 - **La causa raíz era el lector, no el proveedor.** Quant Data devuelve un mapa
