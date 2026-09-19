@@ -1,5 +1,30 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.49.0 · El contrato de `dark-pool-levels`
+
+El cuerpo mínimo estaba **incompleto**, y por eso salía 400. El contrato exige
+`sessionDateRange.startDate` además de `filter.ticker` — un campo obligatorio que
+**ninguna otra herramienta del catálogo usa**, así que recortar desde el cuerpo
+de la vecina no podía llegar a él.
+
+- **`dark-flow` acepta `sessionDate`/`timeRange`; `dark-pool-levels` usa
+  exclusivamente `sessionDateRange`.** Dos nombres parecidos, dos contratos: el
+  cuerpo no fallaba por llevar un campo de más, sino por llevar el concepto
+  correcto con el nombre equivocado.
+- **La fecha es la última sesión válida.** Un sábado no es una sesión, y pedirlo
+  da 400 o un 200 vacío — las dos cosas se leen como «no hay dark pool».
+- **Los campos prohibidos son de la herramienta**, no del catálogo:
+  `aggregationPeriod` es legítimo en `dark-flow` y la reparación guiada por error
+  podía añadírselo justo al endpoint que lo rechaza.
+- **La respuesta es un mapa por nivel de precio**, no una lista. El parser sólo
+  leía listas, así que un 200 válido daba cero niveles y salía «SIN DATOS».
+  Ahora se leen `priceLevel`, `notionalValue`, `size`, `tradeCount` y
+  `latestStockPrice`.
+- **El 400 se conserva entero** —`type`, `detail`, `errors[].field`,
+  `errors[].message`— en una tabla propia del Auditor.
+- **El verificador LIVE exige un HTTP 200 real** para dar el endpoint por
+  cerrado.
+
 ## v1.48.0 · Un campo, un strike por barra, una marca que se ve
 
 - **El Interval Map era una tabla pintada.** Celdas duras sobre fondo negro, con

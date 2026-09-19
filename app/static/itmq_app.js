@@ -1604,6 +1604,28 @@
       esc(l.remedy || '—'),
     ], 'Sin ciclo de dark pool todavía', true);
 
+    // v1.49.0 · El 400 desglosado. El proveedor dice exactamente qué campo
+    // rechaza; enseñarlo convierte «HTTP 400» en una corrección de una línea.
+    const rej = [];
+    for (const l of darkLanes) {
+      const e = l.error || {};
+      for (const it of (e.errors || [])) {
+        rej.push({ lane: l.title || l.lane, status: e.status, type: e.type,
+                   field: it.field, message: it.message });
+      }
+      if (!(e.errors || []).length && e.detail) {
+        rej.push({ lane: l.title || l.lane, status: e.status, type: e.type,
+                   field: null, message: e.detail });
+      }
+    }
+    fillTable('tblDarkErrors', rej, r => [
+      esc(r.lane),
+      `<span class="neg">${esc(String(r.status || '—'))}</span>`,
+      esc(r.type || '—'),
+      r.field ? `<code class="mute">${esc(r.field)}</code>` : '<span class="dim">—</span>',
+      esc(r.message || '—'),
+    ], 'Ningún carril de dark pool ha sido rechazado', true);
+
     // v1.48.0 · Con qué campo se leyó cada magnitud del flujo oscuro. Un carril
     // que responde con seiscientos intervalos y volumen cero es indistinguible
     // de un mercado sin actividad hasta que se ve ESTO.

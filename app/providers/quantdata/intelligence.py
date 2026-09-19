@@ -23,6 +23,7 @@ from ...core import session_resolver
 from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
                     _validation_detail, repair_body, classify_provider_failure,
                     STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
+                    TOOL_FORBIDDEN_FIELDS,
                     STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS
@@ -243,7 +244,8 @@ class QuantDataIntelligence:
         }
 
     def _note_fault(self, tool: QuantDataTool, status: str, detail: str,
-                    *, fields: Any = (), body: Any = None) -> None:
+                    *, fields: Any = (), body: Any = None,
+                    detail_obj: Any = None) -> None:
         """Deja escrita la CAUSA del fallo sin borrar el último dato bueno.
 
         v1.46.0 · Cuando una herramienta fallaba, no se escribía nada: el bloque
@@ -266,6 +268,10 @@ class QuantDataIntelligence:
         })
         if body is not None:
             block["request_body"] = body
+        if detail_obj is not None:
+            # El 400 entero, desglosado: `type`, `detail` y cada campo con su
+            # mensaje. Es lo único que convierte «HTTP 400» en una corrección.
+            block["lane_error"] = detail_obj
         if not block.get("path"):
             block["path"] = tool.resolved_path or (tool.paths[0] if tool.paths else None)
         self._data[tool.key] = block
@@ -358,7 +364,10 @@ class QuantDataIntelligence:
                 fields = getattr(exc, "validation_fields", None) or []
                 tool.note_validation_failure(_validation_detail(exc))
                 tool.variants_tried += 1
-                repaired, note = repair_body(body, fields)
+                # La reparación no puede añadir un campo que ESTA herramienta
+                # rechaza, aunque sea legítimo en otra.
+                repaired, note = repair_body(
+                    body, fields, TOOL_FORBIDDEN_FIELDS.get(tool.key, ()))
                 if repaired is None:
                     # El proveedor rechaza algo que no sabemos corregir. Lo correcto
                     # es decir QUÉ campo, no seguir probando formas.
@@ -367,7 +376,8 @@ class QuantDataIntelligence:
                         f"{tool.validation_error or msg}")
                     self._note_fault(tool, STATUS_REQUEST_INVALID,
                                      tool.validation_error or msg,
-                                     fields=fields, body=body)
+                                     fields=fields, body=body,
+                                     detail_obj=getattr(exc, "error_detail", None))
                     self._fetched_at[tool.key] = time.time()
                     _obs_note(f"quantdata:{tool.key}:unrepairable", exc, severity="DEGRADED")
                     return "STOP", msg

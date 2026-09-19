@@ -866,12 +866,58 @@ def norm_prints(payload: Dict[str, Any]) -> Dict[str, Any]:
                                     "que la operación fuera en bolsa.")}
 
 
+def _level_entries(payload: Any) -> List[tuple]:
+    """Pares (precio, datos) de `dark-pool-levels`, venga como venga.
+
+    v1.49.0 · El proveedor documenta la respuesta como un MAPA por nivel de
+    precio —la clave ES el precio— y el extractor genérico de filas sólo sabía
+    leer listas. Con un mapa devolvía cero niveles, así que un 200 perfectamente
+    válido se publicaba como «SIN DATOS» y era indistinguible de una sesión sin
+    actividad fuera de bolsa.
+
+    Se admiten las dos formas: el mapa del contrato y una lista de objetos, por
+    si el envoltorio cambia. En el mapa, la clave manda como precio; en la lista,
+    manda el campo.
+    """
+    if not isinstance(payload, (dict, list)):
+        return []
+    # El bloque de niveles puede venir en la raíz o bajo un envoltorio.
+    block = payload
+    if isinstance(payload, dict):
+        for key in ("levels", "darkPoolLevels", "priceLevels", "zones", "data"):
+            inner = payload.get(key)
+            if isinstance(inner, (dict, list)) and inner:
+                block = inner
+                break
+
+    out: List[tuple] = []
+    if isinstance(block, dict):
+        for key, val in block.items():
+            if not isinstance(val, dict):
+                continue
+            # La CLAVE es el nivel de precio. Si no lo es, se busca dentro.
+            price = _f(key)
+            if price is None:
+                price = _f(_pick(val, "priceLevel", "price", "level"))
+            if price is not None:
+                out.append((price, val))
+    elif isinstance(block, list):
+        for r in block:
+            if not isinstance(r, dict):
+                continue
+            price = _f(_pick(r, "priceLevel", "price", "level"))
+            if price is not None:
+                out.append((price, r))
+    return out
+
+
 #: Campos que `norm_levels` ya expone con nombre propio. Lo que no esté aquí y
 #: venga en la respuesta se conserva en `extra`: un normalizador que descarta en
 #: silencio campos oficiales es indistinguible de un proveedor que no los manda.
 _LEVEL_MAPPED = {
-    "price", "level", "pricelevel", "notional", "value", "dollarvolume",
-    "shares", "size", "volume", "prints", "count", "trades", "tradecount",
+    "price", "level", "pricelevel", "notional", "notionalvalue", "value",
+    "dollarvolume", "shares", "size", "volume", "prints", "count", "trades",
+    "tradecount",
     "darkvolume", "litvolume", "percentofvolume", "pctofvolume",
 }
 
@@ -899,17 +945,17 @@ def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:
     que el proveedor no lo haya enviado.
     """
     out = []
-    for r in _rows(payload, "levels", "darkPoolLevels", "zones"):
-        if not isinstance(r, dict):
-            continue
-        p = _f(_pick(r, "price", "level", "priceLevel"))
-        if p is None:
+    for p, r in _level_entries(payload):
+        if not isinstance(r, dict) or p is None:
             continue
         row = {
             "price": p,
-            "notional": _f(_pick(r, "notional", "value", "dollarVolume"), 0.0) or 0.0,
-            "shares": _f(_pick(r, "shares", "size", "volume"), 0.0) or 0.0,
-            "prints": int(_f(_pick(r, "prints", "count", "trades", "tradeCount"), 0) or 0),
+            # Nombres del contrato publicado primero; los alias detrás, para
+            # respuestas antiguas. `notionalValue`, `size` y `tradeCount` son los
+            # que documenta el proveedor.
+            "notional": _f(_pick(r, "notionalValue", "notional", "value", "dollarVolume"), 0.0) or 0.0,
+            "shares": _f(_pick(r, "size", "shares", "volume"), 0.0) or 0.0,
+            "prints": int(_f(_pick(r, "tradeCount", "prints", "count", "trades"), 0) or 0),
             "dark_volume": _f(_pick(r, "darkVolume")),
             "lit_volume": _f(_pick(r, "litVolume")),
             "pct_of_volume": _f(_pick(r, "percentOfVolume", "pctOfVolume")),
@@ -926,6 +972,10 @@ def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(payload, dict):
         latest = _f(_pick(payload, "latestStockPrice", "stockPrice", "underlyingPrice",
                           "lastPrice", "spot"))
+        if latest is None:
+            inner = payload.get("data")
+            if isinstance(inner, dict):
+                latest = _f(_pick(inner, "latestStockPrice", "stockPrice"))
     block: Dict[str, Any] = {"ready": bool(out), "rows": out, "count": len(out)}
     if latest is not None:
         block["latest_stock_price"] = latest
@@ -1037,6 +1087,12 @@ class QuantDataTool:
         """
         base = dict(self.body(ticker))
         base, dropped = strip_inherited_fields(base)
+        # Y lo que esta herramienta concreta rechaza, aunque otra lo acepte.
+        forbidden = TOOL_FORBIDDEN_FIELDS.get(self.key, ())
+        extra = [k for k in base if k in forbidden]
+        if extra:
+            base = {k: v for k, v in base.items() if k not in forbidden}
+            dropped = sorted(set(list(dropped) + extra))
         if dropped:
             self.stripped_fields = sorted(set(list(self.stripped_fields) + dropped))
         for key in self.repair_removed:
@@ -1135,19 +1191,67 @@ INHERITED_FIELD_BLOCKLIST = (
     "pagination", "projection", "sort", "orderBy", "cursor", "offset",
 )
 
+#: Campos que un endpoint concreto rechaza aunque sean válidos en otros.
+#:
+#: v1.49.0 · La lista general no basta. `aggregationPeriod` es legítimo en
+#: `dark-flow` y está en la tabla de reparaciones, así que un 400 mal leído
+#: podía hacer que se lo añadiéramos a `dark-pool-levels`, que lo rechaza. La
+#: prohibición tiene que ser de la HERRAMIENTA, no del catálogo.
+TOOL_FORBIDDEN_FIELDS: Dict[str, tuple] = {
+    "dark_pool_levels": (
+        "sessionDate", "timeRange", "snapshotTime", "aggregationPeriod",
+        "filterExpression", "projection", "pagination",
+    ),
+}
 
-def _dark_pool_levels_body(ticker: str) -> Dict[str, Any]:
-    """Cuerpo MÍNIMO de `dark-pool-levels`: sólo el filtro de ticker.
 
-    v1.46.0 · Se parte del mínimo a propósito. Un cuerpo con campos de más es tan
-    inválido como uno con campos de menos, y `dark-pool-levels` no comparte
-    contrato con `dark-flow` (`aggregationPeriod`) ni con `equity-prints`
-    (`limit`): heredar sus parámetros es una de las dos formas de provocar el 400.
+def last_valid_session_date(now=None) -> str:
+    """Fecha de la última sesión con datos, en `YYYY-MM-DD`.
 
-    Si el proveedor pide algo más, lo dirá nombrando el campo, y la reparación
-    guiada por el error lo añadirá. No se adivina hacia arriba.
+    Un sábado no es una sesión. Mandar la fecha de hoy sin comprobarlo produce
+    o un 400 o un 200 vacío según cómo lo trate el proveedor, y las dos cosas se
+    leen en pantalla como «no hay dark pool» cuando lo que pasa es que se pidió
+    un día que no existe.
     """
-    return _tf(ticker)
+    try:
+        from app.core import session_resolver
+        return session_resolver.resolve(now, require_completed=True).last_completed.isoformat()
+    except Exception:
+        from datetime import date, timedelta
+        d = (now.date() if hasattr(now, "date") else date.today())
+        while d.weekday() >= 5:                      # sábado=5, domingo=6
+            d -= timedelta(days=1)
+        return d.isoformat()
+
+
+def _dark_pool_levels_body(ticker: str, now=None) -> Dict[str, Any]:
+    """Cuerpo de `dark-pool-levels`, según el contrato publicado.
+
+    v1.49.0 · El contrato oficial exige DOS cosas en el nivel superior:
+
+        sessionDateRange.startDate   obligatorio
+        filter.ticker                obligatorio
+        sessionDateRange.endDate     opcional
+
+    Y este endpoint NO acepta `sessionDate`, `timeRange`, `snapshotTime`,
+    `aggregationPeriod`, `filterExpression`, `projection` ni `pagination`.
+
+    Ahí estaba el 400. La versión anterior enviaba el cuerpo mínimo —sólo
+    `filter.ticker`— razonando que un cuerpo con campos de más es tan inválido
+    como uno con campos de menos. Es cierto, y aun así estaba incompleto: le
+    faltaba un campo obligatorio que ninguna otra herramienta usa.
+
+    La confusión de fondo es que `dark-flow` sí acepta `sessionDate`/`timeRange`
+    mientras que `dark-pool-levels` usa EXCLUSIVAMENTE `sessionDateRange`. Son
+    dos nombres parecidos para dos contratos distintos, y por eso partir del
+    cuerpo de la herramienta vecina no podía funcionar por mucho que se
+    recortara.
+
+    La fecha se resuelve a la última sesión válida: en fin de semana o con el
+    mercado cerrado, pedir el día de hoy es pedir un día que no existe.
+    """
+    day = last_valid_session_date(now)
+    return {"sessionDateRange": {"startDate": day, "endDate": day}, **_tf(ticker)}
 
 
 def strip_inherited_fields(body: Dict[str, Any]) -> tuple[Dict[str, Any], List[str]]:
@@ -1207,7 +1311,8 @@ def classify_validation_errors(fields: List[str]) -> Dict[str, List[str]]:
     return out
 
 
-def repair_body(body: Dict[str, Any], fields: List[str]) -> tuple[Dict[str, Any] | None, str]:
+def repair_body(body: Dict[str, Any], fields: List[str],
+                forbidden: tuple = ()) -> tuple[Dict[str, Any] | None, str]:
     """Siguiente cuerpo a probar, derivado del error. `None` si no hay corrección.
 
     Devolver `None` es una respuesta legítima y necesaria: significa que el
@@ -1223,6 +1328,10 @@ def repair_body(body: Dict[str, Any], fields: List[str]) -> tuple[Dict[str, Any]
             nxt.pop(name, None)
             notes.append(f"−{name}")
     for name in buckets["missing"]:
+        if forbidden and name in forbidden:
+            # El proveedor no puede pedir un campo que su propio contrato
+            # prohíbe: si el diagnóstico dice eso, es que se leyó mal.
+            continue
         if name in _FIELD_DEFAULTS and name not in nxt:
             nxt[name] = _FIELD_DEFAULTS[name]
             notes.append(f"+{name}={_FIELD_DEFAULTS[name]!r}")

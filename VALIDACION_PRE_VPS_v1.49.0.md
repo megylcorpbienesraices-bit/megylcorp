@@ -1,14 +1,77 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.48.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.49.0
 
-Release: `ITM_QUANT_v1.48.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.49.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A12** es la de esta release.
+> Documento acumulativo. La sección **A13** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2018 casos / 147 ficheros**
-- Particiones: 21 · `plan_sha256`: `cb163e95767687e58ad2d4e8ce60e0b3d2a18d68c01911d69e232514fa484617`
+- Inventario nominal: **2028 casos / 147 ficheros**
+- Particiones: 21 · `plan_sha256`: `ff47f5956ec04a2299245398620b558613d7d3d8f5c31f3989109ebd126c7e7e`
 - Resultado: **PASS**
+
+---
+
+## A13 · v1.49.0 · El contrato de `dark-pool-levels`
+
+### Qué se certifica
+
+Diez casos nuevos en `tests/test_v1470_adaptive_rendering.py`.
+
+**1 · El cuerpo publicado.** Que el request sea exactamente
+`{sessionDateRange: {startDate…}, filter: {ticker}}`, con `startDate` presente y
+en formato `YYYY-MM-DD`, y sin ningún otro campo en el nivel superior.
+
+**2 · Los siete campos prohibidos**, uno a uno: `sessionDate`, `timeRange`,
+`snapshotTime`, `aggregationPeriod`, `filterExpression`, `projection`,
+`pagination`.
+
+**3 · La reparación no puede romper el cuerpo.** Que `repair_body` no añada
+`aggregationPeriod` a `dark-pool-levels` —y que sin la prohibición por
+herramienta **sí** lo añadiría, que es la diferencia que importa—.
+
+**4 · La fecha nunca es un día sin sesión.** Sábado 19 y domingo 20 de
+septiembre de 2026 resuelven los dos al viernes 18.
+
+**5 · El 200 documentado.** Que el mapa por nivel de precio se lea con la clave
+como precio y con `notionalValue`, `size`, `tradeCount` y `latestStockPrice`; y
+que una lista siga funcionando por si cambia el envoltorio.
+
+**6 · La cadena completa.** `RAW → NORMALIZER → DATA HUB → DARK POOL LEVELS →
+FRONTEND`, con `DIRECT_PROVIDER` en el registro y los cuatro campos llegando al
+bundle con su valor.
+
+**7 · El 400 entero.** `type`, `detail` y cada `errors[].field` con su mensaje,
+en las dos convenciones, y su llegada a la tabla del Auditor.
+
+**8 · El verificador exige un 200 real** y imprime el campo rechazado, no el
+titular.
+
+**9 · Los tres carriles siguen independientes.**
+
+### Verificación
+
+Cuerpo generado para DIA un sábado:
+
+```json
+{"sessionDateRange": {"startDate": "2026-09-18", "endDate": "2026-09-18"},
+ "filter": {"ticker": "DIA"}}
+```
+
+Respuesta documentada, parseada: 2 niveles, `latestStockPrice` 516.20,
+`price` 515.50 · `notional` 1.24e8 · `shares` 240310 · `prints` 412.
+
+### Lo que esta validación NO cubre
+
+**No hay un 200 real.** Este entorno no tiene salida hacia `quantdata.us` ni
+credenciales. El endpoint sigue declarado **pendiente** hasta ejecutar:
+
+```
+python scripts/verify_live_quantdata.py --dark-pool --json dark_pool.json
+```
+
+Si con este cuerpo todavía devolviera 400, el siguiente paso no es otro payload:
+es leer `errors[].field` y `errors[].message` en el Auditor.
 
 ---
 

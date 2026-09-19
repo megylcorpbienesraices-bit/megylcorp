@@ -158,6 +158,9 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
         "detail": detail[:240],
         "remedy": REMEDY.get(state, ""),
         "rejected_fields": fields[:8],
+        # v1.49.0 · El 400 entero: `type`, `detail` y cada `errors[].field` con
+        # su mensaje. Sin esto, «HTTP 400» no se puede corregir.
+        "error": block.get("lane_error") or {},
         "rows": rows,
         "age_seconds": cls.get("age_seconds"),
         "endpoint": block.get("path"),

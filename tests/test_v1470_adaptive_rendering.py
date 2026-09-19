@@ -678,3 +678,202 @@ def test_absent_dark_volume_is_not_summed_as_zero():
     # Y llega al Auditor, que es donde se puede actuar sobre ello.
     html = _read("app/templates/terminal.html")
     assert 'id="tblDarkFields"' in html
+
+
+# ═══════════════════════════════════════════ 10 · v1.49.0 · EL CONTRATO REAL
+
+def test_dark_pool_levels_sends_the_documented_contract():
+    """`sessionDateRange.startDate` + `filter.ticker`. Nada más, nada menos.
+
+    El cuerpo mínimo de v1.46.0 —sólo `filter.ticker`— razonaba que un cuerpo
+    con campos de más es tan inválido como uno con campos de menos. Es cierto, y
+    aun así estaba incompleto: le faltaba un campo obligatorio que ninguna otra
+    herramienta usa. `dark-flow` acepta `sessionDate`/`timeRange`;
+    `dark-pool-levels` usa EXCLUSIVAMENTE `sessionDateRange`.
+    """
+    from app.providers.quantdata.tools import build_catalog
+
+    body = build_catalog()["dark_pool_levels"].request_body("DIA")
+    assert set(body) == {"sessionDateRange", "filter"}, body
+    assert body["filter"] == {"ticker": "DIA"}
+    rng = body["sessionDateRange"]
+    assert "startDate" in rng, "startDate es obligatorio"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rng["startDate"]), rng
+    if "endDate" in rng:
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rng["endDate"]), rng
+
+
+def test_the_levels_request_never_carries_a_forbidden_field():
+    """Siete campos que este endpoint rechaza, uno a uno."""
+    from app.providers.quantdata.tools import build_catalog, TOOL_FORBIDDEN_FIELDS
+
+    body = build_catalog()["dark_pool_levels"].request_body("SPY")
+    for forbidden in ("sessionDate", "timeRange", "snapshotTime", "aggregationPeriod",
+                      "filterExpression", "projection", "pagination"):
+        assert forbidden not in body, forbidden
+        assert forbidden in TOOL_FORBIDDEN_FIELDS["dark_pool_levels"], forbidden
+
+
+def test_the_repair_cannot_add_a_field_this_endpoint_forbids():
+    """`aggregationPeriod` es legítimo en `dark-flow` y veneno aquí.
+
+    Está en la tabla de reparaciones, así que un 400 mal leído podía hacer que
+    se lo añadiéramos. La prohibición tiene que ser de la HERRAMIENTA, no del
+    catálogo.
+    """
+    from app.providers.quantdata.tools import repair_body, TOOL_FORBIDDEN_FIELDS
+
+    base = {"sessionDateRange": {"startDate": "2026-09-18"}, "filter": {"ticker": "DIA"}}
+    nxt, _note = repair_body(base, ["aggregationPeriod: field required"],
+                             TOOL_FORBIDDEN_FIELDS["dark_pool_levels"])
+    assert nxt is None or "aggregationPeriod" not in nxt
+    # Sin la prohibición, la misma reparación SÍ lo añadiría: la diferencia es
+    # exactamente la lista por herramienta.
+    other, _n = repair_body(base, ["aggregationPeriod: field required"])
+    assert other is not None and other.get("aggregationPeriod") == "1d"
+
+
+def test_a_closed_market_never_asks_for_a_day_that_is_not_a_session():
+    """Un sábado no es una sesión: pedirlo devuelve 400 o un 200 vacío."""
+    from datetime import datetime
+    from app.providers.quantdata.tools import last_valid_session_date
+
+    # Sábado 19 de septiembre de 2026 → última sesión, el viernes 18.
+    assert last_valid_session_date(datetime(2026, 9, 19, 12, 0)) == "2026-09-18"
+    # Domingo 20 → el viernes 18 también.
+    assert last_valid_session_date(datetime(2026, 9, 20, 12, 0)) == "2026-09-18"
+
+
+def test_the_documented_200_is_parsed_with_its_official_field_names():
+    """La respuesta es un MAPA por nivel de precio, no una lista.
+
+    El extractor genérico sólo sabía leer listas, así que un 200 válido daba
+    cero niveles y se publicaba como «SIN DATOS»: indistinguible de una sesión
+    sin actividad fuera de bolsa.
+    """
+    from app.providers.quantdata.tools import norm_levels
+
+    out = norm_levels({
+        "latestStockPrice": 516.20,
+        "levels": {
+            "515.50": {"notionalValue": 1.24e8, "size": 240310, "tradeCount": 412},
+            "516.00": {"notionalValue": 8.10e7, "size": 157000, "tradeCount": 288},
+        },
+    })
+    assert out["ready"] is True and out["count"] == 2
+    assert out["latest_stock_price"] == 516.20
+    top = out["rows"][0]
+    assert top["price"] == 515.50            # la CLAVE es el nivel de precio
+    assert top["notional"] == 1.24e8         # notionalValue
+    assert top["shares"] == 240310           # size
+    assert top["prints"] == 412              # tradeCount
+
+    # Y una lista sigue funcionando, por si cambia el envoltorio.
+    lst = norm_levels({"latestStockPrice": 516.2, "levels": [
+        {"priceLevel": 515.5, "notionalValue": 1.2e8, "size": 240310, "tradeCount": 412}]})
+    assert lst["count"] == 1 and lst["rows"][0]["prints"] == 412
+
+
+def test_the_documented_200_travels_to_the_frontend_as_direct_provider():
+    """RAW → NORMALIZER → DATA HUB → DARK POOL LEVELS → FRONTEND."""
+    from datetime import datetime, timezone
+    from app.providers.quantdata.tools import norm_levels
+    from app.core import quant_data_hub as HUB
+    from app.core.data_lineage import LINEAGE, DIRECT_PROVIDER
+    from app.terminal_api import build_terminal_bundle
+
+    raw = {"latestStockPrice": 516.20, "levels": {
+        "515.50": {"notionalValue": 1.24e8, "size": 240310, "tradeCount": 412},
+        "516.00": {"notionalValue": 8.10e7, "size": 157000, "tradeCount": 288}}}
+    normalized = norm_levels(raw)
+    intel = {"dark_pool_levels": {**normalized, "symbol": "DIA",
+                                  "path": "/v1/equities/tool/dark-pool-levels",
+                                  "fetched_at": datetime.now(timezone.utc).isoformat()}}
+
+    hub = HUB.dark_pool("DIA", intel)
+    assert hub["ready"] is True
+    assert hub["lanes"]["dark_pool_levels"]["state"] == "DIRECT_PROVIDER_OK"
+
+    rec = next(r for r in LINEAGE.audit("DIA")["records"]
+               if r["metric"] == "QD_DARK_POOL_LEVELS")
+    assert rec["source_mode"] == DIRECT_PROVIDER and rec["state"] == "DATA_OK"
+
+    bundle = build_terminal_bundle(
+        state={"active_symbol": "DIA", "ready": True, "spot": 516.2},
+        trace={}, intelligence=intel)
+    dp = bundle["dark_pool"]
+    assert dp["levels"], "el nivel no llegó al frontend"
+    assert dp["levels"][0]["price"] == 515.50
+    assert dp["levels"][0]["notional"] == 1.24e8
+    assert dp["levels"][0]["shares"] == 240310
+    assert dp["levels"][0]["prints"] == 412
+    assert dp["latest_stock_price"] == 516.20
+
+
+def test_a_rejected_body_keeps_type_detail_and_every_field_error():
+    """«HTTP 400» no se puede corregir; `errors[].field` sí."""
+    from app.providers.quantdata.client import _structured_error
+
+    out = _structured_error({
+        "type": "validation_error",
+        "detail": "Request validation failed",
+        "errors": [{"field": "sessionDateRange.startDate", "message": "field required"}],
+    }, 400)
+    assert out["status"] == 400
+    assert out["type"] == "validation_error"
+    assert out["detail"] == "Request validation failed"
+    assert out["errors"] == [{"field": "sessionDateRange.startDate",
+                              "message": "field required"}]
+    assert out["raw"], "el cuerpo crudo se conserva para el registro"
+
+    # Convención Pydantic: la lista viaja dentro de `detail`.
+    pyd = _structured_error(
+        {"detail": [{"loc": ["body", "sessionDateRange"], "msg": "field required"}]}, 400)
+    assert pyd["errors"][0]["field"] == "body.sessionDateRange"
+
+
+def test_the_rejected_body_reaches_the_auditor():
+    from app.core import quant_data_hub as HUB
+
+    out = HUB.dark_pool("DIA", {"dark_pool_levels": {
+        "ready": False, "rows": [], "lane_status": "REQUEST_INVALID",
+        "lane_detail": "sessionDateRange.startDate: field required",
+        "lane_error": {"status": 400, "type": "validation_error",
+                       "detail": "Request validation failed",
+                       "errors": [{"field": "sessionDateRange.startDate",
+                                   "message": "field required"}]}}})
+    err = out["lanes"]["dark_pool_levels"]["error"]
+    assert err["status"] == 400 and err["errors"][0]["field"] == "sessionDateRange.startDate"
+    html = _read("app/templates/terminal.html")
+    assert 'id="tblDarkErrors"' in html
+    js = _read("app/static/itmq_app.js")
+    assert "tblDarkErrors" in js
+
+
+def test_the_live_verifier_demands_a_real_200_for_levels():
+    """Un SIN DATOS no cierra el endpoint: el contrato exige que responda."""
+    src = _read("scripts/verify_live_quantdata.py")
+    assert 'r.get("http_status") == 200' in src
+    assert "con HTTP 200 real" in src
+    assert "field_errors" in src, "el campo rechazado se imprime, no el titular"
+    assert "el endpoint NO está cerrado" in src
+
+
+def test_the_three_lanes_stay_independent():
+    """Nada de esto puede haber acoplado los carriles."""
+    from datetime import datetime, timezone
+    from app.core import quant_data_hub as HUB
+
+    now = datetime.now(timezone.utc).isoformat()
+    out = HUB.dark_pool("DIA", {
+        "dark_flow": {"ready": True, "count": 1, "fetched_at": now,
+                      "rows": [{"dark_volume": 1e6, "total_volume": 4e6,
+                                "dark_notional": 5.2e8}]},
+        "dark_pool_levels": {"ready": False, "rows": [],
+                             "lane_status": "REQUEST_INVALID",
+                             "lane_detail": "cuerpo rechazado"},
+    })
+    assert out["ready"] is True and out["notional"] == 5.2e8
+    assert out["diagnosis"]["degraded"] is True
+    assert out["lanes"]["dark_flow"]["state"] == "DIRECT_PROVIDER_OK"
+    assert out["lanes"]["dark_pool_levels"]["state"] == "REQUEST_INVALID"

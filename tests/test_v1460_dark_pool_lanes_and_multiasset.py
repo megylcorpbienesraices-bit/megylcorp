@@ -41,15 +41,28 @@ def _read(rel: str) -> str:
 # ─────────────────────────────────────────────── 1 · CUERPO SIN HERENCIAS
 
 def test_dark_pool_levels_sends_only_its_own_contract():
-    """El cuerpo mínimo, sin un solo campo heredado de otra herramienta."""
+    """v1.49.0 · El cuerpo mínimo estaba INCOMPLETO, y por eso salía 400.
+
+    Esta prueba afirmaba `{"filter": {"ticker": …}}` y nada más, razonando que
+    un cuerpo con campos de más es tan inválido como uno con campos de menos.
+    El razonamiento es correcto y la conclusión era falsa: el contrato
+    publicado exige además `sessionDateRange.startDate`, un campo que ninguna
+    otra herramienta usa, así que recortar desde el cuerpo de la vecina nunca
+    podía llegar a él.
+
+    `dark-flow` acepta `sessionDate`/`timeRange`; `dark-pool-levels` usa
+    EXCLUSIVAMENTE `sessionDateRange`. Dos nombres parecidos, dos contratos.
+    """
     from app.providers.quantdata.tools import build_catalog, INHERITED_FIELD_BLOCKLIST
 
     tool = build_catalog()["dark_pool_levels"]
     body = tool.request_body("SPY")
-    assert body == {"filter": {"ticker": "SPY"}}, body
+    assert set(body) == {"sessionDateRange", "filter"}, body
+    assert body["filter"] == {"ticker": "SPY"}
+    assert "startDate" in body["sessionDateRange"]
     for forbidden in INHERITED_FIELD_BLOCKLIST:
         assert forbidden not in body
-    # Los campos que el usuario señaló uno a uno.
+    # Los campos que este endpoint rechaza, uno a uno.
     for forbidden in ("sessionDate", "timeRange", "snapshotTime", "aggregationPeriod",
                       "filterExpression", "pagination", "projection"):
         assert forbidden not in body, f"{forbidden} no pertenece a dark-pool-levels"

@@ -103,10 +103,10 @@ def test_the_body_is_repaired_once_and_then_remembered():
         def __init__(self): self.seen = []
         async def post(self, path, body):
             self.seen.append(dict(body))
-            if "aggregationPeriod" not in body:
+            if "lookBackPeriod" not in body:
                 e = QuantDataError("Quant Data HTTP 400: Request validation failed")
                 e.status_code = 400
-                e.validation_fields = ["body.aggregationPeriod: field required"]
+                e.validation_fields = ["body.lookBackPeriod: field required"]
                 raise e
             return QuantDataResponse(payload={"levels": [
                 {"price": 601.2, "notional": 4.1e7, "shares": 180000, "prints": 12}]},
@@ -129,8 +129,13 @@ def test_the_body_is_repaired_once_and_then_remembered():
     # ése es el campo que se añade, y queda escrito de dónde salió.
     assert first == 2, ("debe bastar una corrección: la primera petición y la "
                         "corregida, sin variantes intermedias adivinadas")
-    assert added == {"aggregationPeriod": "1d"}, added
-    assert log and "aggregationPeriod" in log[0]
+    # v1.49.0 · `aggregationPeriod` es legítimo en `dark-flow` y lo RECHAZA
+    # `dark-pool-levels`, así que la reparación ya no puede añadírselo: la
+    # prohibición es de la herramienta, no del catálogo. Lo que se comprueba
+    # aquí sigue siendo lo mismo —una sola corrección, y recordada—, con el
+    # campo que este endpoint sí admite.
+    assert added == {"lookBackPeriod": 1}, added
+    assert log and "lookBackPeriod" in log[0]
     assert data.get("ready") is True and data.get("count") == 1
     assert second == 1, "el contrato descubierto no se recordó"
 

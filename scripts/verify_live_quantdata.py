@@ -148,6 +148,7 @@ def _failure_detail(exc: Any) -> Dict[str, Any]:
     """
     status = getattr(exc, "status_code", None)
     fields = list(getattr(exc, "validation_fields", None) or [])
+    detail_obj = getattr(exc, "error_detail", None) or {}
     verdict = ERROR
     if status == 400:
         verdict = REJECTED
@@ -159,6 +160,11 @@ def _failure_detail(exc: Any) -> Dict[str, Any]:
         "rejected_fields": fields,
         "detail": f"{type(exc).__name__}: {str(exc)[:400]}",
         "body": getattr(exc, "body", None),
+        # v1.49.0 · El 400 desglosado: `type`, `detail` y cada campo con su
+        # mensaje. Es lo que dice qué corregir sin probar otro payload.
+        "error_type": detail_obj.get("type"),
+        "error_detail": detail_obj.get("detail"),
+        "field_errors": detail_obj.get("errors") or [],
     }
 
 
@@ -194,6 +200,10 @@ async def probe_dark_pool(ticker: str, timeout: float) -> Dict[str, Any]:
             body = tool.request_body(ticker)
             row: Dict[str, Any] = {"label": label, "endpoint": path,
                                    "request_body": dict(body), "repairs": []}
+            if key == "dark_pool_levels":
+                # Se imprime para poder cotejarlo con el contrato publicado sin
+                # abrir el código.
+                row["contract_body"] = json.dumps(body, sort_keys=True)
             raw = None
             for _round in range(3):
                 try:
@@ -206,7 +216,9 @@ async def probe_dark_pool(ticker: str, timeout: float) -> Dict[str, Any]:
                     row.update(fail)
                     if fail["verdict"] != REJECTED:
                         break
-                    nxt, note = repair_body(body, fail["rejected_fields"])
+                    from app.providers.quantdata.tools import TOOL_FORBIDDEN_FIELDS
+                    nxt, note = repair_body(body, fail["rejected_fields"],
+                                            TOOL_FORBIDDEN_FIELDS.get(key, ()))
                     if nxt is None:
                         break
                     row["repairs"].append(note)
@@ -260,7 +272,10 @@ def render_dark_pool(results: Dict[str, Dict[str, Any]]) -> Tuple[str, bool]:
             if verdict == REJECTED or verdict == ERROR:
                 ok = False
             extra = ""
-            if r.get("rejected_fields"):
+            if r.get("field_errors"):
+                extra = " · ".join(f"{e.get('field')}: {e.get('message')}"
+                                   for e in r["field_errors"][:3])
+            elif r.get("rejected_fields"):
                 extra = "campos: " + " · ".join(str(f) for f in r["rejected_fields"][:4])
             elif r.get("repairs"):
                 extra = "reparado: " + " · ".join(r["repairs"][:2])
@@ -273,6 +288,24 @@ def render_dark_pool(results: Dict[str, Dict[str, Any]]) -> Tuple[str, bool]:
                          f"{str(r.get('normalized_rows') if r.get('normalized_rows') is not None else '—'):>7}  "
                          f"{extra}")
     lines.append("-" * 104)
+    # v1.49.0 · `dark-pool-levels` no se considera cerrado hasta que devuelve un
+    # 200 REAL. Un SIN DATOS no vale: el contrato exige `sessionDateRange`, y si
+    # el cuerpo está bien y el día es una sesión válida, tiene que responder.
+    lv = [(t, (o.get("lanes") or {}).get("dark_pool_levels", {})) for t, o in results.items()]
+    ok200 = [t for t, r in lv if r.get("http_status") == 200]
+    rejected = [t for t, r in lv if r.get("verdict") == REJECTED]
+    lines.append(f"DARK POOL LEVELS · {len(ok200)}/{len(lv)} con HTTP 200 real")
+    if rejected:
+        lines.append(f"  RECHAZADO en {', '.join(rejected)} — el endpoint NO está cerrado.")
+        lines.append("  El siguiente paso no es otro payload: es leer el campo y el mensaje")
+        lines.append("  de arriba, que es exactamente lo que el proveedor está rechazando.")
+    elif ok200:
+        first = next(r for _t, r in lv if r.get("http_status") == 200)
+        lines.append(f"  campos conservados: {' · '.join(first.get('preserved_fields') or []) or '—'}")
+        if first.get("dropped_fields"):
+            lines.append(f"  NO conservados: {' · '.join(first['dropped_fields'])}")
+        lines.append(f"  latestStockPrice: {first.get('latest_stock_price')}")
+
     # Un carril roto en UN activo y sano en otros seis es un problema de ese
     # activo. Roto en los siete es un problema del cuerpo que enviamos.
     for label, key in DARK_POOL_LANES:

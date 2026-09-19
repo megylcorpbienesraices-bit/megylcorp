@@ -18,6 +18,7 @@ class QuantDataError(RuntimeError):
 
     status_code: int | None = None
     validation_fields: list[str] | None = None
+    error_detail: dict | None = None
     body: Any = None
 
 
@@ -100,6 +101,36 @@ def _describe_error(response: httpx.Response) -> tuple[str, list[str]]:
     return (headline or str(body)[:300])[:400], fields
 
 
+def _structured_error(body: Any, status: int) -> dict:
+    """El cuerpo de un error, desglosado en lo que hace falta para actuar.
+
+    `type` y `detail` sitúan el fallo; `errors[]` dice qué campo concreto lo
+    provocó. Un 400 sin esa lista no se puede corregir, y con ella la corrección
+    es de una línea.
+    """
+    out = {"status": status, "type": "", "detail": "", "errors": [], "raw": body}
+    if not isinstance(body, dict):
+        out["detail"] = str(body)[:400]
+        return out
+    out["type"] = str(body.get("type") or body.get("title") or "")[:200]
+    d = body.get("detail")
+    out["detail"] = str(d)[:400] if isinstance(d, str) else ""
+    rows = body.get("errors")
+    if not isinstance(rows, list) and isinstance(d, list):
+        rows = d                     # convención Pydantic: la lista va en `detail`
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        field = r.get("field")
+        if field is None and isinstance(r.get("loc"), (list, tuple)):
+            field = ".".join(str(x) for x in r["loc"])
+        out["errors"].append({
+            "field": str(field or "")[:120],
+            "message": str(r.get("message") or r.get("msg") or "")[:240],
+        })
+    return out
+
+
 class QuantDataClient:
     def __init__(self, settings: QuantDataSettings) -> None:
         self.settings = settings
@@ -179,6 +210,11 @@ class QuantDataClient:
             error.status_code = response.status_code
             error.validation_fields = fields
             error.body = _safe_body(response)
+            # v1.49.0 · El cuerpo del 400 viaja además DESGLOSADO. El crudo vale
+            # para el registro; para actuar hacen falta `type`, `detail` y cada
+            # `errors[].field` con su `errors[].message` por separado, que es lo
+            # que el Auditor tiene que poder enseñar en una tabla.
+            error.error_detail = _structured_error(error.body, response.status_code)
             raise error
         try:
             payload = response.json()
