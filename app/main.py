@@ -1240,6 +1240,12 @@ async def api_asset_select(symbol: str):
         if result.get("progressive"):
             _schedule_asset_warmup(target, epoch)
         ECOSYSTEM_RUNTIME.select_asset(target)  # internal confluence only; never a visible blended instrument
+        # v1.44.0 · El cambio de activo invalida TODO lo que es por símbolo, no sólo
+        # las cachés del proveedor. Los muros, la procedencia y el Last Known Good
+        # son estado por símbolo: dejarlos vivos haría que el Call Wall de DIA
+        # apareciera un instante sobre el gráfico de AAPL, que es exactamente la
+        # clase de mezcla que nadie detecta mirando.
+        _invalidate_symbol_state(old_symbol, target)
         await QUANTDATA.select_asset(target)  # background options intelligence; never blocks asset switch
         await QUANTDATA_INTELLIGENCE.select_asset(target)  # páginas integradas del proveedor
         return JSONResponse(_jsonable({"ok":True,"result":result,"state":STATE.public_state()}))
@@ -1252,6 +1258,34 @@ async def api_asset_select(symbol: str):
         except Exception as _e:
             _obs_note('main:931', _e)
         return JSONResponse(_jsonable({"ok":False,"detail":str(e),"symbol":target,"kept_symbol":old_symbol,"log":"logs/server.log"}),status_code=409)
+
+
+def _invalidate_symbol_state(previous: str, target: str) -> dict:
+    """Invalida el estado por símbolo al cambiar de activo.
+
+    Se limpian los DOS símbolos: el anterior porque ya no va a mostrarse, y el
+    nuevo porque pudo quedar sembrado por una consulta previa con datos más viejos
+    que este cambio, y servirlos como si fueran de ahora sería peor que no tener
+    nada.
+
+    No falla el cambio de activo si algo aquí falla: la invalidación es higiene,
+    no una precondición. Un fallo se anota y se sigue.
+    """
+    from .core.data_lineage import LINEAGE
+    from .core.wall_engine import WALLS
+    from .core.data_hub_runtime import HUB_RUNTIME
+
+    report = {"previous": str(previous or "").upper(), "target": str(target or "").upper()}
+    for sym in {report["previous"], report["target"]} - {""}:
+        for name, fn in (("lineage", LINEAGE.clear_symbol),
+                         ("walls", WALLS.clear_symbol),
+                         ("last_known_good", lambda s: HUB_RUNTIME.clear_symbol(s))):
+            try:
+                fn(sym)
+            except Exception as exc:
+                _obs_note(f"main:invalidate_symbol:{name}", exc, severity="DEGRADED")
+                report.setdefault("errors", []).append(f"{name}:{type(exc).__name__}")
+    return report
 
 
 @app.get("/api/replay/sessions")
@@ -1501,11 +1535,11 @@ async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, windo
     # heat map estático. Se adjunta FUERA de la caché del trace porque su cadencia
     # es la del proveedor, no la del motor: meterlo dentro congelaría el mapa hasta
     # la siguiente revisión analítica.
-    payload = _attach_interval_maps(payload)
+    payload = _attach_hub_layers(payload)
     return JSONResponse(_jsonable(payload))
 
 
-def _attach_interval_maps(payload: dict) -> dict:
+def _attach_hub_layers(payload: dict) -> dict:
     """Las cuatro matrices del Interval Map, listas para alternar en el cliente.
 
     Se envían las cuatro griegas de una vez —no una por petición— porque cambiar
@@ -1530,15 +1564,113 @@ def _attach_interval_maps(payload: dict) -> dict:
         payload["interval_maps"] = maps
         payload["interval_map"] = maps.get("GAMMA")
         payload["interval_map_greeks"] = list(HUB.INTERVAL_GREEKS)
+
+        # ── CALL WALL / PUT WALL · autoridad ÚNICA ────────────────────────────
+        # El Wall Engine resuelve los dos muros UNA vez, sobre el snapshot del Hub,
+        # y el resultado sustituye a los niveles que venían del cálculo por sección.
+        # TRACE y FLUJO DE ÓRDENES leen los dos esta misma lista, así que ya no
+        # pueden discrepar: antes cada sección llamaba a `structural_walls()` con su
+        # propio frame y el mismo nombre podía señalar dos strikes distintos.
+        payload["walls"] = _resolve_walls(payload, intel, symbol)
+
+        # ── GAMMA MIGRATION · anclada al strike donde se confirmó ─────────────
+        payload["gamma_migration"] = _resolve_gamma_migration(payload, intel, symbol)
         # QFLOW sobre el mismo eje temporal que el precio: el nivel estructural y
         # las concentraciones tienen que dibujarse contra las MISMAS velas o la
         # lectura no se puede cerrar.
         from .terminal_api import _qflow
         payload["qflow"] = _qflow(STATE.public_state(), intel)
     except Exception as exc:
-        _obs_note("main:attach_interval_maps", exc, severity="DEGRADED")
+        _obs_note("main:attach_hub_layers", exc, severity="DEGRADED")
         payload.setdefault("interval_maps", {})
     return payload
+
+
+def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
+    """Call Wall y Put Wall, resueltos una sola vez para toda la terminal.
+
+    El cálculo propio anterior (`structural_walls`, que ya viajaba dentro de
+    `levels`) entra como RESPALDO declarado: sostiene la vista cuando el proveedor
+    no sirve exposición por strike de ese activo, y va etiquetado para que nunca se
+    confunda con el resultado principal.
+
+    Los niveles `call_wall`/`put_wall` que llegaban de la sección se SUSTITUYEN por
+    los del Wall Engine. Dejarlos convivir habría vuelto a permitir dos muros con
+    el mismo nombre en la misma pantalla.
+    """
+    from .core import quant_data_hub as HUB
+    from .core import wall_engine as WE
+
+    levels = payload.get("levels") or []
+    spot = None
+    candles = payload.get("candles") or []
+    if candles and isinstance(candles[-1], dict):
+        spot = candles[-1].get("c")
+    if spot is None:
+        spot = (payload.get("profiles") or {}).get("spot")
+
+    previous = {lv.get("kind"): lv.get("price") for lv in levels if isinstance(lv, dict)}
+    fallback = {"call_wall": previous.get("call_wall"),
+                "put_wall": previous.get("put_wall"),
+                "method": "structural-walls-engine"}
+
+    hub = HUB.hub_snapshot(symbol, intel,
+                           engine_heatmap=(payload.get("heatmap_history") or {}))
+    walls = WE.walls_from_hub(symbol, hub, spot=spot, fallback=fallback)
+
+    kept = [lv for lv in levels
+            if not (isinstance(lv, dict) and lv.get("kind") in ("call_wall", "put_wall"))]
+    for lv in walls.get("levels") or []:
+        kept.append({"kind": lv["kind"], "name": lv["name"], "price": lv["price"],
+                     "source_mode": lv["source_mode"], "score": lv.get("score"),
+                     "fallback_used": lv.get("fallback_used", False),
+                     "authority": "ITMQ_WALL_ENGINE"})
+    payload["levels"] = kept
+    return walls
+
+
+def _resolve_gamma_migration(payload: dict, intel: dict, symbol: str) -> dict:
+    """Migración de gamma anclada al STRIKE donde se confirmó.
+
+    El motor ya la calculaba; lo que faltaba era publicar el par de strikes —de
+    dónde salió la exposición y adónde fue— para poder dibujarlo sobre el eje de
+    precio en vez de resumirlo en una tarjeta. Un número de migración sin strike no
+    se puede leer contra el gráfico.
+
+    `QD_INTERVAL_MAP` es DIRECT_PROVIDER; esta lectura es DERIVED.
+    """
+    from .core import quant_data_hub as HUB
+    from .core import itmq_intelligence as IQ
+
+    im = payload.get("interval_map") or {}
+    if not im.get("ready"):
+        im = HUB.interval_map(symbol, intel, "GAMMA",
+                              engine_heatmap=(payload.get("heatmap_history") or {}))
+    mig = IQ.gamma_migration(symbol, im)
+    if not mig.get("ready"):
+        return mig
+
+    top = mig.get("top_strikes") or []
+    # De dónde salió (mayor caída) y adónde fue (mayor subida). Si todo el cambio va
+    # en el mismo sentido no hay migración que dibujar: hay acumulación o descarga,
+    # que es otra cosa y se declara como tal.
+    gained = max((t for t in top if (t.get("change") or 0) > 0),
+                 key=lambda t: t["change"], default=None)
+    lost = min((t for t in top if (t.get("change") or 0) < 0),
+               key=lambda t: t["change"], default=None)
+    mig["from_strike"] = (lost or {}).get("strike")
+    mig["to_strike"] = (gained or {}).get("strike")
+    mig["kind"] = ("MIGRATION" if (gained and lost)
+                   else "ACCUMULATION" if gained else "DISCHARGE" if lost else "NONE")
+    if mig["from_strike"] is not None and mig["to_strike"] is not None:
+        mig["label"] = f"Γ MIG {mig['from_strike']:g} → {mig['to_strike']:g}"
+    elif mig["to_strike"] is not None:
+        mig["label"] = f"Γ +{mig['to_strike']:g}"
+    elif mig["from_strike"] is not None:
+        mig["label"] = f"Γ −{mig['from_strike']:g}"
+    else:
+        mig["label"] = None
+    return mig
 
 
 @app.get("/api/nextgen/market-truth")

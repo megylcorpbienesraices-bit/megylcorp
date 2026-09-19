@@ -374,7 +374,10 @@ def test_retrying_the_same_path_replaces_its_previous_attempt():
 def test_coverage_publishes_the_attempts_and_the_candidates():
     src = text("app/providers/quantdata/intelligence.py")
     assert '"attempts": [' in src and '"candidates": list(tool.candidates())' in src
-    assert src.count("tool.note_attempt(") == 3       # fallo de ruta, excepción y éxito
+    # v1.44.0 · Cuatro caminos que hay que dejar registrados, no tres: el canal
+    # aislado del Data Hub añadió uno (timeout o cortocircuito del canal), que es
+    # una forma de fallo distinta de un 404 de ruta y de una excepción de red.
+    assert src.count("tool.note_attempt(") == 4  # ruta, canal, excepción y éxito
 
 
 def test_the_screen_turns_an_unavailable_tool_into_something_actionable():

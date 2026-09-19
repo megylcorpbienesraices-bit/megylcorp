@@ -1,0 +1,446 @@
+"""WALL ENGINE · autoridad única de Call Wall y Put Wall · ITM QUANT v1.44.0
+
+EL PROBLEMA QUE CIERRA
+----------------------
+Hasta v1.43.0 había TRES llamadas a `structural_walls()` —`nextgen_terminal`
+(niveles de TRACE), `key_levels_report` (RESUMEN) y `premarket_intelligence`— y
+cada una le pasaba un frame distinto:
+
+    nextgen_terminal      curagg del snapshot vivo
+    key_levels_report     el mismo curagg, pero con `enriched` a veces ausente
+    premarket             `agg` reconstruido con `signed_gex` renombrado
+
+Mismo nombre, tres entradas, tres resultados posibles. El Call Wall de TRACE
+podía no ser el Call Wall de RESUMEN, y nada en el programa lo detectaba. Un nivel
+estructural que cambia según la pestaña no es un nivel: es un rumor.
+
+LA ARQUITECTURA
+---------------
+    Quant Data ──► Data Hub ──► Wall Engine ──► Call Wall / Put Wall
+                                     ▲
+                        lógica estructural ITM QUANT
+
+Una entrada (el Data Hub), un cálculo (este módulo), una salida que todas las
+secciones consumen SIN recalcular.
+
+QUÉ ES UN MURO Y POR QUÉ SE MIDE ASÍ
+------------------------------------
+Un muro responde: **si el precio llegara a ese strike, cuánta cobertura tendría
+que ajustar el dealer allí**. Eso no es «dónde hay más gamma ahora», que es una
+pregunta distinta y sesgada hacia el dinero.
+
+Se combinan dos evidencias que el proveedor entrega por separado:
+
+  * **Exposición por strike** (`exposure-by-strike`, GAMMA) — la magnitud de la
+    cobertura. Sin ella no hay muro, sólo contratos.
+  * **Interés abierto por strike** (`open-interest-by-strike`) — cuántos contratos
+    sostienen esa exposición. Sin él, un strike con exposición calculada pero sin
+    libro detrás puntúa igual que uno con cien mil contratos abiertos.
+
+El score es la **media geométrica** de las dos normalizadas, no la suma: la suma
+deja pasar a los que sólo destacan en una cosa, y un muro que sólo existe en una
+de las dos evidencias no es un muro.
+
+Cuando el proveedor no publica OI para ese activo **no se penaliza al strike**: se
+puntúa sólo con exposición y se declara (`oi_available: false`). Multiplicar por
+un dato ausente es inventar un veredicto.
+
+REGLA DE LADO
+-------------
+El Call Wall se busca SÓLO por encima del precio y con exposición de CALLS; el Put
+Wall sólo por debajo y con exposición de PUTS. Un muro de calls por debajo del
+precio ya fue atravesado y no es resistencia: es historia.
+
+HISTÉRESIS
+----------
+Un muro que salta de strike en cada refresco es inútil para operar. El muro
+vigente sólo se sustituye cuando el candidato nuevo supera al actual por
+`HYSTERESIS_MARGIN`, o cuando el actual deja de ser válido (el precio lo
+atravesó, o desapareció de la cadena). Así la línea de TRACE se mueve cuando la
+estructura se mueve, no cuando el ruido cambia de sitio.
+
+PROCEDENCIA
+-----------
+Call Wall y Put Wall son **DERIVED · ITM QUANT**. Las entradas son
+`DIRECT_PROVIDER`; la conclusión es propia. Publicarlas como dato del proveedor
+sería atribuirle a Quant Data un nivel que no emite.
+"""
+from __future__ import annotations
+
+import math
+import threading
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from . import data_lineage as DL
+from .data_lineage import LINEAGE, DERIVED, DATA_OK, NO_PROVIDER_DATA, UNAVAILABLE
+
+# Cuánto tiene que mejorar un candidato para desbancar al muro vigente. Por debajo
+# de este margen la diferencia es ruido y cambiar la línea sólo despista.
+HYSTERESIS_MARGIN = 0.15
+
+# Peso del interés abierto frente a la exposición dentro del score. 0.5 = media
+# geométrica pura; por encima manda el libro, por debajo manda la cobertura.
+OI_WEIGHT = 0.5
+
+# Un muro a más de este porcentaje del precio no describe la sesión: describe la
+# cola de la cadena. Se sigue publicando en `candidates`, pero no como muro vigente.
+MAX_DISTANCE_PCT = 12.0
+
+CALL_WALL = "call_wall"
+PUT_WALL = "put_wall"
+
+
+def _f(v: Any, default: Optional[float] = None) -> Optional[float]:
+    try:
+        x = float(v)
+        return x if math.isfinite(x) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class WallState:
+    """Muro vigente por símbolo y lado, con su histéresis.
+
+    El estado vive aquí y no en cada sección: si TRACE y FLUJO guardaran su propio
+    muro, volverían a poder discrepar, que es exactamente lo que este módulo
+    existe para impedir.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._current: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+    def get(self, symbol: str, side: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            cur = self._current.get((str(symbol).upper(), side))
+            return dict(cur) if cur else None
+
+    def set(self, symbol: str, side: str, wall: Optional[Dict[str, Any]]) -> None:
+        key = (str(symbol).upper(), side)
+        with self._lock:
+            if wall is None:
+                self._current.pop(key, None)
+            else:
+                self._current[key] = dict(wall)
+
+    def clear_symbol(self, symbol: str) -> None:
+        sym = str(symbol).upper()
+        with self._lock:
+            for key in [k for k in self._current if k[0] == sym]:
+                self._current.pop(key, None)
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {f"{s}:{side}": dict(v) for (s, side), v in self._current.items()}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._current.clear()
+
+
+WALLS = WallState()
+
+
+def _normalize(values: Sequence[float]) -> List[float]:
+    """A [0,1] contra el máximo observado. Sin máximo positivo, todo a cero."""
+    vals = [abs(float(v)) for v in values]
+    peak = max(vals) if vals else 0.0
+    if peak <= 1e-12:
+        return [0.0] * len(vals)
+    return [v / peak for v in vals]
+
+
+def _side_exposure(row: Dict[str, Any], side: str) -> Optional[float]:
+    """Exposición del LADO que corresponde al muro.
+
+    El muro de calls es donde se concentra la gamma DE LAS CALLS, no donde el neto
+    es mayor: un strike con mucha call gamma y mucha put gamma tiene un neto
+    pequeño y el método neto lo pasa por alto justo donde más cobertura hay.
+
+    Cuando el proveedor no desglosa por lado se cae al neto con su signo, que es la
+    mejor aproximación disponible, y el método lo declara.
+    """
+    field = "call_gex" if side == CALL_WALL else "put_gex"
+    explicit = _f(row.get(field))
+    if explicit is not None:
+        return abs(explicit)
+    net = _f(row.get("gex"))
+    if net is None:
+        return None
+    # Sin desglose: el neto positivo pesa para el muro de calls y el negativo para
+    # el de puts. Usar |neto| en los dos lados haría que el mismo strike fuera
+    # candidato a los dos muros a la vez.
+    if side == CALL_WALL:
+        return net if net > 0 else 0.0
+    return -net if net < 0 else 0.0
+
+
+def build_candidates(symbol: str, exposure_rows: Sequence[Dict[str, Any]],
+                     oi_rows: Sequence[Dict[str, Any]] | None,
+                     spot: Optional[float], side: str) -> Dict[str, Any]:
+    """Puntúa cada strike del lado correcto. No elige todavía: sólo mide."""
+    sym = str(symbol or "").upper()
+    px = _f(spot)
+    rows = [r for r in (exposure_rows or []) if isinstance(r, dict)]
+    if px is None or not rows:
+        return {"ready": False, "side": side, "symbol": sym, "rows": [],
+                "reason": ("sin precio de referencia" if px is None
+                           else "sin exposición por strike")}
+
+    oi_by_k: Dict[float, float] = {}
+    for r in (oi_rows or []):
+        if not isinstance(r, dict):
+            continue
+        k = _f(r.get("strike"))
+        v = _f(r.get("oi") if r.get("oi") is not None else r.get("value"))
+        if k is not None and v is not None:
+            oi_by_k[k] = abs(v)
+    # El OI del LADO importa más que el total: un strike con 50k puts abiertas no
+    # sostiene un muro de calls. Se usa cuando el proveedor lo desglosa.
+    oi_side_by_k: Dict[float, float] = {}
+    side_field = "call_oi" if side == CALL_WALL else "put_oi"
+    for r in (oi_rows or []):
+        if not isinstance(r, dict):
+            continue
+        k = _f(r.get("strike"))
+        v = _f(r.get(side_field) if r.get(side_field) is not None
+               else (r.get("call") if side == CALL_WALL else r.get("put")))
+        if k is not None and v is not None:
+            oi_side_by_k[k] = abs(v)
+
+    picked: List[Dict[str, Any]] = []
+    for r in rows:
+        k = _f(r.get("strike"))
+        if k is None:
+            continue
+        # Regla de lado: un muro de calls por debajo del precio ya fue atravesado.
+        if side == CALL_WALL and k <= px:
+            continue
+        if side == PUT_WALL and k >= px:
+            continue
+        exp = _side_exposure(r, side)
+        if exp is None or exp <= 0:
+            continue
+        oi = oi_side_by_k.get(k, oi_by_k.get(k))
+        picked.append({"strike": k, "exposure": exp, "oi": oi,
+                       "distance_pct": round((k - px) / px * 100.0, 4)})
+
+    if not picked:
+        return {"ready": False, "side": side, "symbol": sym, "rows": [],
+                "reason": f"sin strikes con exposición de {'calls' if side == CALL_WALL else 'puts'} "
+                          f"{'por encima' if side == CALL_WALL else 'por debajo'} del precio"}
+
+    exp_norm = _normalize([p["exposure"] for p in picked])
+    oi_values = [p["oi"] for p in picked if p["oi"] is not None]
+    oi_available = len(oi_values) >= max(2, len(picked) // 4)
+    oi_norm = (_normalize([p["oi"] or 0.0 for p in picked]) if oi_available
+               else [None] * len(picked))
+
+    for p, e, o in zip(picked, exp_norm, oi_norm):
+        p["exposure_norm"] = round(e, 6)
+        p["oi_norm"] = (None if o is None else round(o, 6))
+        if o is None:
+            # Sin OI se puntúa sólo con exposición y se declara. No se multiplica
+            # por cero: eso sería afirmar que no hay libro, no que no se sabe.
+            p["score"] = round(100.0 * e, 4)
+        else:
+            p["score"] = round(100.0 * (e ** (1.0 - OI_WEIGHT)) * (o ** OI_WEIGHT), 4)
+        p["within_range"] = abs(p["distance_pct"]) <= MAX_DISTANCE_PCT
+
+    picked.sort(key=lambda p: -p["score"])
+    return {"ready": True, "side": side, "symbol": sym, "rows": picked,
+            "oi_available": oi_available,
+            "method": ("geometric-exposure-x-open-interest" if oi_available
+                       else "exposure-only-no-open-interest"),
+            "spot": px}
+
+
+def _apply_hysteresis(symbol: str, side: str, candidates: List[Dict[str, Any]],
+                      spot: float) -> Tuple[Optional[Dict[str, Any]], str, Optional[Dict[str, Any]]]:
+    """Elige el muro vigente respetando el que ya estaba.
+
+    Devuelve (muro, motivo del cambio, muro anterior retirado).
+    """
+    in_range = [c for c in candidates if c.get("within_range")]
+    best = in_range[0] if in_range else None
+    previous = WALLS.get(symbol, side)
+
+    if best is None:
+        if previous is not None:
+            return None, "sin candidato válido en rango", previous
+        return None, "sin candidato válido en rango", None
+
+    if previous is None:
+        return best, "primer muro de la sesión", None
+
+    prev_strike = _f(previous.get("strike"))
+    # ¿Sigue siendo válido el muro anterior? Deja de serlo si el precio lo
+    # atravesó —un muro de calls por debajo del precio es historia— o si su strike
+    # ya no aparece en la cadena.
+    crossed = (prev_strike is not None
+               and ((side == CALL_WALL and prev_strike <= spot)
+                    or (side == PUT_WALL and prev_strike >= spot)))
+    still_listed = next((c for c in candidates if prev_strike is not None
+                         and abs(c["strike"] - prev_strike) < 1e-9), None)
+
+    if crossed:
+        return best, f"el precio atravesó {prev_strike:g}", previous
+    if still_listed is None:
+        return best, f"{prev_strike:g} desapareció de la cadena", previous
+    if best["strike"] == prev_strike:
+        return best, "sin cambio", None
+
+    # Histéresis: el candidato tiene que ser CLARAMENTE mejor, no marginalmente.
+    prev_score = float(still_listed["score"])
+    if prev_score <= 0:
+        return best, f"{prev_strike:g} perdió toda su exposición", previous
+    improvement = (best["score"] - prev_score) / prev_score
+    if improvement >= HYSTERESIS_MARGIN:
+        return best, (f"{best['strike']:g} supera a {prev_strike:g} "
+                      f"en {improvement * 100:.0f}%"), previous
+    # No mejora lo suficiente: se mantiene el muro vigente para que la línea no
+    # baile. Se devuelve el candidato ANTERIOR con su score actualizado.
+    kept = dict(still_listed)
+    return kept, "se mantiene por histéresis", None
+
+
+def resolve_walls(symbol: str, *, exposure_rows: Sequence[Dict[str, Any]],
+                  oi_rows: Sequence[Dict[str, Any]] | None = None,
+                  spot: Optional[float] = None,
+                  fallback: Optional[Dict[str, Any]] = None,
+                  provider_direct: bool = True) -> Dict[str, Any]:
+    """LA autoridad de Call Wall y Put Wall. Ninguna sección calcula otra cosa.
+
+    `fallback` admite los muros del cálculo propio antiguo (`structural_walls`)
+    para el caso en que el proveedor no sirva exposición por strike de ese activo.
+    Entra etiquetado como respaldo, nunca disfrazado del resultado principal.
+    """
+    sym = str(symbol or "").upper()
+    px = _f(spot)
+    out: Dict[str, Any] = {
+        "symbol": sym, "spot": px, "ready": False,
+        "source_mode": DERIVED, "provider": DL.ITM_QUANT,
+        "authority": "ITMQ_WALL_ENGINE",
+        "inputs": ["QD_GEX", "QD_OPEN_INTEREST_BY_STRIKE", "UNDERLYING_PRICE"],
+        "contract": "ITMQ_WALLS_V1",
+    }
+
+    for side, metric in ((CALL_WALL, "ITMQ_CALL_WALL"), (PUT_WALL, "ITMQ_PUT_WALL")):
+        cand = build_candidates(sym, exposure_rows, oi_rows, px, side)
+        if not cand.get("ready"):
+            used = _fallback_wall(sym, side, fallback, px)
+            out[side] = used
+            LINEAGE.record(metric, sym,
+                           source_mode=(DERIVED if used.get("ready") else UNAVAILABLE),
+                           state=(DATA_OK if used.get("ready") else NO_PROVIDER_DATA),
+                           provider=DL.ITM_QUANT,
+                           final_value=used.get("strike"),
+                           fallback_used=bool(used.get("fallback_used")),
+                           derivation=used.get("method") or "",
+                           detail=cand.get("reason") or "")
+            continue
+
+        chosen, reason, retired = _apply_hysteresis(sym, side, cand["rows"], px)
+        if chosen is None:
+            WALLS.set(sym, side, None)
+            used = _fallback_wall(sym, side, fallback, px)
+            used["retired"] = retired
+            used["change_reason"] = reason
+            out[side] = used
+            LINEAGE.record(metric, sym,
+                           source_mode=(DERIVED if used.get("ready") else UNAVAILABLE),
+                           state=(DATA_OK if used.get("ready") else NO_PROVIDER_DATA),
+                           provider=DL.ITM_QUANT, final_value=used.get("strike"),
+                           fallback_used=bool(used.get("fallback_used")),
+                           detail=reason)
+            continue
+
+        wall = {
+            "ready": True, "side": side, "strike": chosen["strike"],
+            "score": chosen["score"], "exposure": chosen.get("exposure"),
+            "oi": chosen.get("oi"), "distance_pct": chosen.get("distance_pct"),
+            "method": cand["method"], "oi_available": cand.get("oi_available", False),
+            "source_mode": DERIVED, "provider": DL.ITM_QUANT,
+            "fallback_used": False,
+            "change_reason": reason,
+            "retired": retired,
+            "candidates": cand["rows"][:6],
+            "updated_at": _now(),
+            "label": ("CALL WALL" if side == CALL_WALL else "PUT WALL"),
+        }
+        WALLS.set(sym, side, {"strike": wall["strike"], "score": wall["score"],
+                              "updated_at": wall["updated_at"]})
+        out[side] = wall
+        LINEAGE.record(metric, sym, source_mode=DERIVED, state=DATA_OK,
+                       provider=DL.ITM_QUANT,
+                       normalized_value=chosen["score"],
+                       final_value=chosen["strike"],
+                       derivation=cand["method"], rows=len(cand["rows"]),
+                       detail=reason)
+
+    out["ready"] = bool(out.get(CALL_WALL, {}).get("ready")
+                        or out.get(PUT_WALL, {}).get("ready"))
+    out["levels"] = [
+        {"kind": side, "name": out[side]["label"], "price": out[side]["strike"],
+         "source_mode": DERIVED, "score": out[side].get("score"),
+         "fallback_used": out[side].get("fallback_used", False)}
+        for side in (CALL_WALL, PUT_WALL)
+        if out.get(side, {}).get("ready") and out[side].get("strike") is not None
+    ]
+    return out
+
+
+def _fallback_wall(symbol: str, side: str, fallback: Optional[Dict[str, Any]],
+                   spot: Optional[float]) -> Dict[str, Any]:
+    """Muro del cálculo propio antiguo, etiquetado como respaldo.
+
+    Se valida la regla de lado igual que en la vía principal: un respaldo que
+    coloque un Call Wall por debajo del precio sería peor que no tener muro.
+    """
+    label = "CALL WALL" if side == CALL_WALL else "PUT WALL"
+    base = {"ready": False, "side": side, "strike": None, "label": label,
+            "source_mode": UNAVAILABLE, "provider": DL.ITM_QUANT,
+            "fallback_used": False, "score": None, "candidates": [],
+            "method": None, "display": DL.NO_DATA_LABEL}
+    if not isinstance(fallback, dict):
+        return base
+    k = _f(fallback.get(side))
+    px = _f(spot)
+    if k is None:
+        return base
+    if px is not None:
+        if side == CALL_WALL and k <= px:
+            return base
+        if side == PUT_WALL and k >= px:
+            return base
+    return {**base, "ready": True, "strike": k, "source_mode": DERIVED,
+            "fallback_used": True, "display": None,
+            "method": str(fallback.get("method") or "structural-walls-engine"),
+            "distance_pct": (None if not px else round((k - px) / px * 100.0, 4)),
+            "updated_at": _now(),
+            "detail": "respaldo declarado: el proveedor no sirvió exposición por strike"}
+
+
+def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = None,
+                   fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Entrada canónica: Data Hub → Wall Engine.
+
+    Es la única función que las secciones deben llamar. Recibe el MISMO snapshot
+    del Hub que alimenta a la interfaz, así que no hay forma de que TRACE y FLUJO
+    midan sobre entradas distintas.
+    """
+    h = hub if isinstance(hub, dict) else {}
+    exposure = (h.get("exposure_by_strike") or {}).get("rows") or []
+    oi = (h.get("open_interest") or {}).get("by_strike") or []
+    return resolve_walls(symbol, exposure_rows=exposure, oi_rows=oi, spot=spot,
+                         fallback=fallback)
+
+
+__all__ = ["resolve_walls", "walls_from_hub", "build_candidates", "WALLS",
+           "WallState", "CALL_WALL", "PUT_WALL", "HYSTERESIS_MARGIN",
+           "OI_WEIGHT", "MAX_DISTANCE_PCT"]

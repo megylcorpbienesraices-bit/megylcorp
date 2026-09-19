@@ -1,38 +1,38 @@
 {
-  "version": "1.43.0",
-  "release": "ITM_QUANT_v1.43.0_PRE_VPS",
+  "version": "1.44.0",
+  "release": "ITM_QUANT_v1.44.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.42.7",
+  "base_version": "1.43.0",
   "focus": [
-    "Quant Data como AUTORIDAD de la estructura de opciones: GEX, DEX, VEX, CHEX, Interval Map, Interés Abierto, Greeks por contrato, Net Flow, Net Drift, Order Flow, Dark Flow, Dark Pool Levels, IV Rank, Skew y Term Structure.",
-    "Data Hub: ruta Quant Data -> Data Hub -> interfaz, en PARALELO al motor.",
-    "TRACE con mapa DINAMICO del Interval Map (GAMMA/DELTA/VANNA/CHARM) bajo el precio, sobre el mismo eje temporal.",
-    "QFLOW deja de quedarse en Net Flow: las concentraciones se atribuyen con order-flow consolidado y sin consolidar.",
-    "Registro de PROCEDENCIA obligatorio por metrica con cuatro modos de fuente y seis estados de dato; la sustitucion silenciosa falla, no avisa.",
-    "Normalizacion por activo: ningun umbral fijo en dolares, ningun ticker en codigo.",
-    "El motor cuantitativo pasa de generar datos redundantes a interpretarlos."
+    "AUTORIDAD UNICA de Call Wall y Put Wall: Quant Data -> Data Hub -> Wall Engine.",
+    "Las mismas Walls en TRACE y en FLUJO DE ORDENES, consumidas, no recalculadas.",
+    "Gamma Migration anclada al strike donde se confirmo, sin tarjeta ni panel.",
+    "Concentraciones QFLOW ancladas a la vela exacta, con el detalle en hover.",
+    "Resiliencia del Data Hub: deduplicacion en vuelo, Last Known Good, merge incremental y aislamiento por canal.",
+    "Cambio de simbolo transaccional con epoca: ninguna respuesta atrasada aterriza bajo el ticker nuevo.",
+    "Verificador LIVE de Quant Data para ejecutar con credenciales reales."
   ],
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "AUTORIDAD: gex, dex, vex, chex, open_interest, interval_map, option_greeks, iv_rank, volatility_skew, term_structure, max_pain, dark_flow y dark_pool_levels pasan de ITM/ALPACA a QUANTDATA con fallback DEGRADED. La fusion numerica sigue PROHIBIDA: dos construcciones distintas no se promedian.",
-    "NUEVO: app/core/data_lineage.py — procedencia por metrica (provider, endpoint, source_mode, raw/normalized/final, fallback_used, derivation) y guard_primary_source, que falla cuando un calculo propio intentaria tapar una fuente primaria sana.",
-    "NUEVO: app/core/asset_normalization.py — umbral de concentracion medido sobre la distribucion del propio activo con tres lentes simultaneas (cuantil de sesion, fraccion del pico y z robusta mediana+MAD).",
-    "NUEVO: app/core/quant_data_hub.py — capability check por activo y bloques normalizados con estado de dato explicito.",
-    "NUEVO: app/core/itmq_intelligence.py — inteligencia propia DERIVED: presion de gamma, migracion, confluencia/divergencia de flujo, persistencia, strikes dominantes, BREAK/CONTAINMENT/TRANSITION, regimen y Structural Score 0-100.",
-    "SIN CAMBIOS: el Scanner sigue siendo la unica autoridad direccional. Net Drift sigue leyendose del endpoint oficial, nunca reconstruido."
+    "NUEVO: app/core/wall_engine.py — Call/Put Wall como DERIVED ITM QUANT sobre exposicion por strike + interes abierto del proveedor, media geometrica, regla de lado, histeresis y tope de distancia RELATIVO al precio.",
+    "CAMBIO: RESUMEN deja de leer los muros de key_levels_report. Antes habia tres llamadas a structural_walls() con tres frames distintos y el Call Wall de TRACE podia no ser el de RESUMEN sin que nada lo detectara.",
+    "NUEVO: app/core/data_hub_runtime.py — InFlight (deduplicacion), LastKnownGood (degradacion por edad en vez de hueco), merge_time_series (el bucket abierto no se duplica ni se pierde historia) y ChannelIsolator (timeout y cortocircuito por canal; lo que llega tarde alimenta el LKG).",
+    "CAMBIO: los dos carriles de Quant Data pasan por el runtime. Un gather desnudo hacia que el ciclo entero durase lo que el endpoint mas lento.",
+    "CAMBIO: el carril de paginas lleva epoca de simbolo y prioridad de carga; los datasets criticos entran antes que el contexto secundario.",
+    "SIN CAMBIOS: Scanner sigue siendo la unica autoridad direccional. Net Drift sigue leyendose del endpoint oficial. Las marcas derivadas no aprobadas (Confluence, Containment, Break, Divergence, Transition) se calculan pero NO se dibujan en TRACE."
   ],
   "tests": {
-    "collected": 1745,
-    "passed": 1745,
+    "collected": 1778,
+    "passed": 1778,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 143,
+    "files": 144,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "ae231827b094a76fbb48ee3c654664206c25326850c608ab44978b5392e5ef1b"
+    "plan_sha256": "d871306fd601c8ea640ab34de7a9c3bce4112a1420f4e2b282b1bbd8fdf2cbf3"
   },
-  "certification_status": "FUNCTIONAL_VERIFIED_PROVIDER_AUTHORITY",
+  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
   "environment_note": "Production toolchain certification remains independent and fail-closed.",
   "runtime_hotfix": {

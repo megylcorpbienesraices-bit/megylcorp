@@ -1,5 +1,29 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.44.0 · Autoridad única de Wall, anclaje real y resiliencia del Data Hub
+
+- **Un solo Call Wall y un solo Put Wall.** Antes `structural_walls()` se llamaba
+  desde tres sitios con tres frames distintos: el Call Wall de TRACE podía no ser
+  el de RESUMEN y **nada lo detectaba**. Ahora hay un `Wall Engine` con una entrada
+  —el Data Hub— y una salida que TRACE, FLUJO DE ÓRDENES y RESUMEN consumen sin
+  recalcular. Se mide como **exposición por strike × interés abierto**, con regla
+  de lado, histéresis y tope de distancia **relativo al precio**, no en dólares.
+- **Gamma Migration sobre el strike.** `Γ MIG 516 → 517` a la altura del strike que
+  ganó exposición, con flecha desde el que la perdió. Sin tarjeta ni panel.
+- **QFLOW anclado a la vela exacta.** La marca se resuelve a la vela que *contiene*
+  el instante y se apoya en su máximo o su mínimo, no en un precio aproximado de
+  otro feed. El detalle enriquecido del Order Flow vive en el hover.
+- **Resiliencia del Data Hub:** deduplicación en vuelo, Last Known Good que se
+  degrada por edad en vez de desaparecer, merge incremental que no duplica el
+  bucket abierto, y aislamiento por canal. Un endpoint lento ya no puede retener el
+  ciclo, y **lo que llega tarde alimenta el respaldo** en vez de tirarse.
+- **Cambio de símbolo transaccional.** La época avanza antes de tocar nada: una
+  respuesta en vuelo del activo anterior se descarta en vez de aterrizar bajo el
+  ticker nuevo. Los datasets críticos cargan primero.
+- **Verificador LIVE** (`scripts/verify_live_quantdata.py`) para comprobar con
+  credenciales reales que cada dataset llega como `DIRECT_PROVIDER` y que la
+  muestra sobrevive de la respuesta cruda al frontend.
+
 ## v1.43.0 · Quant Data como autoridad de la estructura de opciones
 
 - **El reparto, escrito.** `Alpaca → qué hace el precio` · `Quant Data → cómo está

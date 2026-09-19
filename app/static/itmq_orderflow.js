@@ -13,6 +13,25 @@
   'use strict';
 
   const Q = global.ITMQ;
+
+  // v1.44.0 · Estados de dato traducidos a lenguaje de ANÁLISIS.
+  //
+  // `NO_PROVIDER_DATA` es un código interno perfecto para el Auditor y pésimo en
+  // pantalla: no dice si el mercado está tranquilo o si faltan datos, que es lo
+  // único que el operador necesita decidir en ese momento.
+  const ESTADO_DATO = {
+    DATA_OK: 'CON DATOS',
+    NO_PROVIDER_DATA: 'SIN DATOS',
+    FILTERED_ALL: 'SIN DATOS ÚTILES',
+    PROVIDER_ERROR: 'SIN DATOS',
+    PARSER_ERROR: 'SIN DATOS',
+    STALE: 'DATO ANTIGUO',
+  };
+
+  function estadoDato(state) {
+    return ESTADO_DATO[String(state || '')] || 'SIN DATOS';
+  }
+
   if (!Q) { console.error('[ORDERFLOW] falta itmq_core.js'); return; }
 
   const PAD = { left: 26, right: 62, top: 10, bottom: 20 };
@@ -1056,15 +1075,15 @@
     const d = S.drift;
     if (!d || !d.ready) {
       for (const id of ['ndCall', 'ndPut', 'ndNet', 'ndVolume']) set(id, 'SIN DATOS');
-      set('ndState', d ? String(d.state || 'SIN DATOS') : 'SIN DATOS');
-      set('ndStateDetail', d ? String(d.detail || '') : 'Quant Data no publicó Net Drift');
+      set('ndState', estadoDato(d && d.state));
+      set('ndStateDetail', (d && d.detail) ? String(d.detail) : 'sin deriva neta en este ciclo');
       return;
     }
     set('ndCall', Q.money(Q.num(d.cum_call_premium, 0), 1));
     set('ndPut', Q.money(Q.num(d.cum_put_premium, 0), 1));
     set('ndNet', Q.money(Q.num(d.cum_net_premium, 0), 1));
     set('ndVolume', `${Q.compact(Q.num(d.cum_call_volume, 0), 1)} / ${Q.compact(Q.num(d.cum_put_volume, 0), 1)}`);
-    set('ndState', String(d.state || ''));
+    set('ndState', estadoDato(d.state));
     set('ndStateDetail', `${d.buckets || 0} buckets · ${d.detail || ''}`);
   }
 

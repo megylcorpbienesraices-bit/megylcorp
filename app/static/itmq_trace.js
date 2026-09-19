@@ -114,6 +114,8 @@
     showLevels: true,
     showPrints: true,
     showQflow: true,
+    showGammaMigration: true,
+    qflowHits: [],
   };
 
   const GUT = { left: 48, right: 48 };     // carriles de etiquetas de precio
@@ -546,6 +548,9 @@
       ctx.restore();
     }
 
+    // 5c · migración de gamma sobre el strike donde se confirmó
+    if (S.showGammaMigration) drawGammaMigration(ctx, box, sy, d.gamma_migration);
+
     // 6 · precio actual en ambos bordes (como en la referencia)
     const spot = S.spot.get();
     if (Q.isNum(spot)) {
@@ -697,39 +702,152 @@
       { align: 'right', bg: Q.alpha(col, 0.92), color: '#06101c' });
   }
 
-  /** Concentraciones QFLOW marcadas sobre el precio: ▲ $X.XM / ▼ $X.XM.
+  /** La vela de TRACE que CONTIENE un instante dado.
    *
-   * La MISMA marca aparece en el panel de flujo. Si el flujo dice que hubo 4.2 M$
-   * en calls a las 10:14 y el gráfico de precio no enseña dónde estaba el precio en
-   * ese instante, la lectura no se puede cerrar.
+   * Es la diferencia entre anclar y aproximar. `m.price` es el precio de referencia
+   * del bucket de 1 min del proveedor de opciones; la vela es del feed del
+   * subyacente, con otro reloj y otra granularidad. Dibujar la marca a la altura de
+   * `m.price` la deja flotando cerca del gráfico pero sin pertenecer a ninguna vela,
+   * y con el eje comprimido eso son varios píxeles de mentira.
+   *
+   * Se busca la vela cuyo intervalo [t, t+bar) contiene el instante. Búsqueda
+   * binaria porque esto corre por frame y por marca.
+   */
+  function candleAt(t) {
+    const d = S.data || {};
+    const cs = d.candles || [];
+    if (!cs.length || !Q.isNum(t)) return null;
+    const bar = Q.num(d.bar_interval_ms, 60_000);
+    let lo = 0, hi = cs.length - 1, found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const ct = Q.parseTime(cs[mid].t);
+      if (!Q.isNum(ct)) { lo = mid + 1; continue; }
+      if (ct <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (found < 0) return null;
+    const c = cs[found];
+    const ct = Q.parseTime(c.t);
+    // Fuera del intervalo de su propia vela: el evento cae en un hueco de la serie
+    // (mercado cerrado, vela ausente). Se declara en vez de asignarlo a la anterior.
+    if (!Q.isNum(ct) || t - ct >= bar) return null;
+    return { candle: c, index: found, t: ct, bar };
+  }
+
+  /** Concentraciones QFLOW ancladas a su vela exacta: ▲ $X.XM / ▼ $X.XM.
+   *
+   * La marca se coloca en el CENTRO temporal de la vela que contiene el evento y a
+   * la altura de su máximo (concentración de calls) o su mínimo (de puts), no a un
+   * precio aproximado de otra fuente. Así la marca pertenece visiblemente a una
+   * vela concreta y se puede leer «esto pasó AQUÍ».
+   *
+   * Cuando el evento no cae en ninguna vela se dibuja con menos opacidad y sobre el
+   * precio del bucket, declarado: una marca huérfana es información, pero no debe
+   * parecer tan firme como una anclada.
    */
   function drawQflowMarkers(ctx, box, sx, sy, qflow) {
     const marks = (qflow && qflow.markers) || [];
     if (!marks.length) return;
+    S.qflowHits = [];
     ctx.save();
     ctx.font = '600 10px ui-monospace, monospace';
     ctx.textAlign = 'center';
     for (const m of marks) {
       const t = Q.parseTime(m.t);
-      const px = Q.num(m.price, NaN);
-      if (!Q.isNum(t) || !Q.isNum(px)) continue;
-      const x = sx(t);
-      if (x < box.x - 20 || x > box.x + box.w + 20) continue;
-      const y = sy(px);
+      if (!Q.isNum(t)) continue;
       const up = m.side === 'CALL';
+      const hit = candleAt(t);
+
+      let x, y, anchored;
+      if (hit) {
+        // Centro de la vela: la marca pertenece a la vela, no al borde entre dos.
+        x = sx(hit.t + hit.bar / 2);
+        const hi = Q.num(hit.candle.h, NaN), lo = Q.num(hit.candle.l, NaN);
+        const close = Q.num(hit.candle.c, NaN);
+        y = sy(up ? (Q.isNum(hi) ? hi : close) : (Q.isNum(lo) ? lo : close));
+        anchored = true;
+      } else {
+        const px = Q.num(m.price, NaN);
+        if (!Q.isNum(px)) continue;
+        x = sx(t);
+        y = sy(px);
+        anchored = false;
+      }
+      if (!Q.isNum(x) || !Q.isNum(y)) continue;
+      if (x < box.x - 20 || x > box.x + box.w + 20) continue;
+
       const col = up ? Q.token('--pos', '#22c55e')
                      : m.side === 'PUT' ? Q.token('--neg', '#ef4444') : Q.token('--gold', '#d9a441');
       const dy = up ? -14 : 14;
-      ctx.fillStyle = Q.alpha(col, 0.95);
+      const a = anchored ? 0.95 : 0.45;
+      ctx.fillStyle = Q.alpha(col, a);
       ctx.textBaseline = up ? 'bottom' : 'top';
       ctx.fillText(m.label || (up ? '▲' : '▼'), x, y + dy);
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x, y + dy * 0.45);
-      ctx.strokeStyle = Q.alpha(col, 0.7);
+      ctx.strokeStyle = Q.alpha(col, a * 0.75);
       ctx.lineWidth = 1;
       ctx.stroke();
+      // Zona sensible para el hover: el detalle enriquecido del Order Flow no se
+      // pinta encima del gráfico, se pide al pasar por la marca.
+      S.qflowHits.push({ x, y: y + dy, marker: m, anchored });
     }
+    ctx.restore();
+  }
+
+  /** Marca QFLOW bajo el cursor, si la hay. */
+  function qflowUnderPointer(px, py) {
+    for (const h of (S.qflowHits || [])) {
+      if (Math.abs(h.x - px) <= 14 && Math.abs(h.y - py) <= 16) return h;
+    }
+    return null;
+  }
+
+  /** Migración de gamma sobre el STRIKE donde se confirmó.
+   *
+   * No es una tarjeta ni un panel: es una marca en el eje de precio, a la altura
+   * del strike que GANÓ exposición, con una flecha desde el que la perdió. Leerla
+   * contra el precio es el objetivo; resumirla en un número aparte la desconecta
+   * justo de lo que explica.
+   *
+   * `QD_INTERVAL_MAP` es dato del proveedor; esta lectura es DERIVED y se dibuja
+   * con el estilo tenue que la distingue de un nivel estructural.
+   */
+  function drawGammaMigration(ctx, box, sy, mig) {
+    if (!mig || mig.ready !== true || !mig.label) return;
+    const to = Q.num(mig.to_strike, NaN);
+    const from = Q.num(mig.from_strike, NaN);
+    const anchor = Q.isNum(to) ? to : from;
+    if (!Q.isNum(anchor)) return;
+    const y = sy(anchor);
+    if (y < box.y - 2 || y > box.y + box.h + 2) return;
+
+    const col = Q.token('--gold', '#d9a441');
+    ctx.save();
+    // Flecha desde el strike que perdió exposición hasta el que la ganó: la
+    // dirección de la migración es la mitad del mensaje.
+    if (Q.isNum(to) && Q.isNum(from)) {
+      const y0 = sy(from);
+      if (Q.isNum(y0)) {
+        const x = box.x + box.w - 92;
+        ctx.strokeStyle = Q.alpha(col, 0.55);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y); ctx.stroke();
+        ctx.setLineDash([]);
+        const dir = y < y0 ? -1 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 3, y - dir * 5);
+        ctx.lineTo(x + 3, y - dir * 5);
+        ctx.closePath();
+        ctx.fillStyle = Q.alpha(col, 0.7);
+        ctx.fill();
+      }
+    }
+    Q.chip(ctx, box.x + box.w - 86, Q.clamp(y, box.y + 9, box.y + box.h - 9),
+      mig.label, { align: 'left', bg: Q.alpha(col, 0.85), color: '#06101c' });
     ctx.restore();
   }
 
@@ -774,6 +892,77 @@
     const t = sx.invert(p.x);
     Q.chip(ctx, p.x, box.y + box.h + 12, Q.hhmm(t),
       { align: 'center', bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7') });
+
+    // El detalle enriquecido del Order Flow vive en el hover, no pintado encima del
+    // gráfico: lo que la marca tiene que decir de un vistazo es «▲ 4.2M aquí»; lo
+    // que la explica —cuántas calls, de quién, en qué strike, BLOCK o SWEEP— sólo
+    // interesa cuando se pregunta por ella, y pintarlo siempre taparía las velas.
+    const hover = qflowUnderPointer(p.x, p.y);
+    if (hover) drawQflowTooltip(ctx, box, hover);
+  }
+
+  /** Qué operaciones produjeron esta concentración, al pasar por encima. */
+  function drawQflowTooltip(ctx, box, hit) {
+    const m = hit.marker || {};
+    const att = attributionAt(m.t);
+    const lines = [m.label || '—'];
+    lines.push(hit.anchored ? Q.hhmm(Q.parseTime(m.t)) : Q.hhmm(Q.parseTime(m.t)) + ' · sin vela');
+    if (att) {
+      const parts = [];
+      if (att.calls) parts.push(att.calls + ' call');
+      if (att.puts) parts.push(att.puts + ' put');
+      if (parts.length) lines.push(parts.join(' · '));
+      const side = [];
+      if (att.buys) side.push(att.buys + ' compra');
+      if (att.sells) side.push(att.sells + ' venta');
+      if (side.length) lines.push(side.join(' · '));
+      const tags = Object.keys(att.executions || {});
+      if (tags.length) lines.push(tags.join(' · '));
+      if (att.dominant_strike && Q.isNum(Q.num(att.dominant_strike.strike, NaN))) {
+        lines.push('strike ' + Q.num(att.dominant_strike.strike).toFixed(0)
+          + ' · ' + Q.money(Q.num(att.dominant_strike.premium, 0), 1));
+      }
+      const top = (att.top_trades || [])[0];
+      if (top && top.expiration) {
+        lines.push('vto ' + String(top.expiration)
+          + (Q.isNum(Q.num(top.dte, NaN)) ? ' · ' + Q.num(top.dte).toFixed(0) + ' DTE' : ''));
+      }
+    } else {
+      lines.push('sin operaciones atribuidas');
+    }
+
+    ctx.save();
+    ctx.font = '10px ui-monospace, monospace';
+    let w = 0;
+    for (const l of lines) w = Math.max(w, ctx.measureText(l).width);
+    w += 14;
+    const h = lines.length * 13 + 10;
+    let x = hit.x + 12, y = hit.y - h / 2;
+    if (x + w > box.x + box.w) x = hit.x - 12 - w;
+    y = Q.clamp(y, box.y + 2, box.y + box.h - h - 2);
+    Q.roundRect(ctx, x, y, w, h, 4);
+    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.96);
+    ctx.fill();
+    ctx.strokeStyle = Q.alpha(Q.token('--gold', '#d9a441'), 0.6);
+    ctx.lineWidth = 1; ctx.stroke();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    lines.forEach((l, i) => {
+      ctx.fillStyle = i === 0 ? Q.token('--text', '#e6edf7') : Q.token('--text-dim', '#8494ad');
+      ctx.fillText(l, x + 7, y + 5 + i * 13);
+    });
+    ctx.restore();
+  }
+
+  /** Atribución del Order Flow para el instante exacto de una marca. */
+  function attributionAt(t) {
+    const att = ((S.data || {}).qflow || {}).attribution;
+    if (!att || att.ready !== true || !Array.isArray(att.events)) return null;
+    const target = Q.parseTime(t);
+    if (!Q.isNum(target)) return null;
+    for (const e of att.events) {
+      if (Q.parseTime(e.t) === target && e.matched) return e;
+    }
+    return null;
   }
 
   /* -------------------------------------------------------- interacción */

@@ -13,6 +13,7 @@ from .client import QuantDataClient
 from .settings import QuantDataSettings, load_settings
 from ...core.provider_bus import FEATURE_BUS
 from ...core.obs import note as _obs_note, expected as _obs_expected
+from ...core.data_hub_runtime import HUB_RUNTIME
 
 
 def _f(value: Any, default: float | None = None) -> float | None:
@@ -433,7 +434,25 @@ class QuantDataRuntime:
             due_names = list(ENGINE_FAST_JOBS) + (list(ENGINE_SLOW_JOBS) if slow_due else [])
             self._cycle += 1
 
-            jobs = {n: self._post(*requests[n]) for n in due_names if n in requests}
+            # v1.44.0 · Cada endpoint es un CANAL AISLADO.
+            #
+            # Antes esto era un `gather` desnudo: el ciclo terminaba cuando
+            # terminaba el más lento, así que un `dark-flow` de nueve segundos
+            # retrasaba nueve segundos la estructura que sostiene TRACE. Ahora cada
+            # canal lleva su propio timeout y su propio cortocircuito, la respuesta
+            # que llega tarde alimenta el Last Known Good, y las peticiones
+            # duplicadas entre carriles se funden en una.
+            async def _channel(name: str):
+                path, payload_body = requests[name]
+                gate = await HUB_RUNTIME.fetch(
+                    name, target.active_symbol,
+                    lambda: self._post(path, payload_body),
+                    timeout_s=self.settings.request_timeout_seconds + 1.0)
+                if gate.get("ready") and isinstance(gate.get("payload"), dict):
+                    return gate["payload"]
+                raise RuntimeError(str(gate.get("detail") or "canal no disponible"))
+
+            jobs = {n: _channel(n) for n in due_names if n in requests}
             names = list(jobs)
             results = await asyncio.gather(*jobs.values(), return_exceptions=True)
             payloads: dict[str, dict[str, Any]] = {}

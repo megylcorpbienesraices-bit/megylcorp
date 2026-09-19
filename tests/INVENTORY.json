@@ -2373,8 +2373,44 @@
     "test_trace_offers_the_four_greeks_of_the_dynamic_map",
     "test_with_quant_data_healthy_the_terminal_really_uses_quant_data"
    ]
+  },
+  "tests/test_v1440_walls_and_hub_resilience.py": {
+   "casos": 33,
+   "tests": [
+    "test_a_call_wall_is_never_placed_below_the_price",
+    "test_a_crossed_wall_is_retired_immediately_without_hysteresis",
+    "test_a_late_answer_never_lands_under_the_new_ticker",
+    "test_a_late_answer_still_feeds_the_last_known_good",
+    "test_a_slow_channel_does_not_hold_the_cycle_nor_the_other_channels",
+    "test_a_wall_too_far_from_the_price_is_not_the_wall_of_this_session",
+    "test_call_and_put_wall_are_derived_itm_quant_never_provider_data",
+    "test_concurrent_requests_for_the_same_dataset_become_one",
+    "test_critical_datasets_load_before_secondary_context",
+    "test_flow_consumes_the_same_levels_as_trace_without_recomputing",
+    "test_gamma_migration_is_drawn_on_the_price_axis_not_in_a_card",
+    "test_gamma_migration_publishes_the_strikes_it_moved_between",
+    "test_incremental_merge_neither_duplicates_the_open_bucket_nor_loses_history",
+    "test_missing_open_interest_does_not_zero_a_strike",
+    "test_no_section_repeats_a_request_the_hub_already_holds",
+    "test_qflow_markers_resolve_to_the_candle_that_contains_the_event",
+    "test_resumen_and_trace_cannot_disagree_about_the_wall",
+    "test_switching_symbol_invalidates_every_per_symbol_layer",
+    "test_the_asset_switch_does_not_fail_when_invalidation_does",
+    "test_the_breaker_opens_after_repeated_failures_and_stops_burning_quota",
+    "test_the_engine_fallback_enters_declared_never_disguised",
+    "test_the_engine_still_computes_them_internally",
+    "test_the_enriched_order_flow_detail_lives_in_the_hover",
+    "test_the_interval_map_stays_provider_data_while_migration_is_derived",
+    "test_the_last_known_good_degrades_by_age_instead_of_vanishing",
+    "test_the_new_symbol_is_cleared_too_not_only_the_previous_one",
+    "test_the_unapproved_derived_marks_are_not_drawn_in_trace",
+    "test_the_wall_does_not_jump_on_noise_but_does_move_on_structure",
+    "test_the_wall_engine_combines_exposure_and_open_interest",
+    "test_the_wall_levels_carry_the_engine_authority_tag",
+    "test_there_is_exactly_one_wall_authority_for_the_whole_terminal"
+   ]
   }
  },
- "total_minimo": 1745,
- "version": "1.43.0"
+ "total_minimo": 1778,
+ "version": "1.44.0"
 }

@@ -24,8 +24,32 @@ from .tools import (build_catalog, is_missing_tool_error, CADENCE, PAGES, QuantD
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS
 from ...core.obs import note as _obs_note, expected as _obs_expected
+from ...core.data_hub_runtime import HUB_RUNTIME
 
 PAGE_MAX_CONCURRENCY = 2
+
+# Orden de carga tras un cambio de activo. Número más bajo = se pide antes.
+#
+#   0 · lo que dibuja el gráfico principal y sus niveles
+#   1 · flujo de la sesión
+#   2 · estructura de vencimientos y volatilidad
+#   3 · contexto secundario, que puede esperar al ciclo siguiente sin que se note
+_PRIORITY: dict[str, int] = {
+    "gex_by_strike": 0, "dex_by_strike": 0, "oi_by_strike": 0,
+    "interval_map_gamma": 0,
+    "net_flow": 1, "net_drift": 1, "options_order_flow_raw": 1,
+    "options_order_flow": 1, "dark_flow": 1, "dark_pool_levels": 1,
+    "vex_by_strike": 2, "chex_by_strike": 2, "oi_change": 2,
+    "interval_map_delta": 2, "interval_map_vanna": 2, "interval_map_charm": 2,
+    "iv_rank": 2, "volatility_skew": 2, "term_structure": 2, "volatility_drift": 2,
+    "max_pain": 2, "max_pain_over_time": 2,
+    "gex_by_expiration": 3, "dex_by_expiration": 3, "vex_by_expiration": 3,
+    "chex_by_expiration": 3, "oi_by_expiration": 3, "oi_over_time": 3,
+    "equity_prints": 3, "stock_price_over_time": 3,
+    "contract_statistics": 3, "trade_side_statistics": 3, "market_share": 3,
+    "gainers_losers": 4, "news": 4,
+}
+_PRIORITY_DEFAULT = 3
 
 
 class QuantDataIntelligence:
@@ -44,6 +68,9 @@ class QuantDataIntelligence:
         self._fetched_at: Dict[str, float] = {}
         self._running = False
         self._cycle = 0
+        # Época del símbolo: avanza en cada cambio de activo y ata cada respuesta
+        # al ticker que la pidió.
+        self._epoch = 0
 
     # ------------------------------------------------------------- ciclo
 
@@ -85,11 +112,22 @@ class QuantDataIntelligence:
         sym = str(symbol or "DIA").upper().strip()
         if sym == self._symbol:
             return
+        previous = self._symbol
+        # v1.44.0 · El cambio de símbolo es TRANSACCIONAL.
+        #
+        # La época avanza ANTES de tocar nada: cualquier respuesta que siga en
+        # vuelo del símbolo anterior llegará con una época caducada y se
+        # descartará en `_fetch` en vez de escribirse bajo el ticker nuevo. Sin
+        # esto, una petición lenta de DIA podía aterrizar en la pantalla de AAPL
+        # con los números de DIA y nada lo habría señalado.
+        self._epoch += 1
         self._symbol = sym
-        # Los datos del símbolo anterior no describen el nuevo: se descartan en
-        # vez de mostrarse bajo otro ticker mientras llega el primer ciclo.
         self._data.clear()
         self._fetched_at.clear()
+        # Se limpia la caché de los DOS símbolos: la del anterior porque ya no
+        # describe nada que vaya a mostrarse, y la del nuevo porque pudo quedar
+        # sembrada por una consulta previa y ser más vieja que este cambio.
+        RAW_CACHE.clear_symbol(previous)
         RAW_CACHE.clear_symbol(sym)
         if self.settings.configured:
             self._wake.set()
@@ -144,12 +182,21 @@ class QuantDataIntelligence:
                 if payload is None:
                     remaining_due.append(tool)
                     continue
-                self._adopt(tool, payload, source="ENGINE_LANE_SHARED")
+                self._adopt(tool, payload, source="ENGINE_LANE_SHARED", epoch=self._epoch)
                 reused += 1
 
             # 2 · El resto se pide dentro del presupuesto que deja el motor.
             allowed = QUOTA.budget_for_pages(len(remaining_due))
-            batch = sorted(remaining_due, key=lambda t: self._fetched_at.get(t.key, 0.0))[:allowed]
+            # v1.44.0 · Los datos CRÍTICOS primero.
+            #
+            # Con presupuesto corto, ordenar sólo por antigüedad hacía que tras un
+            # cambio de activo se gastara el turno en noticias y gainers/losers
+            # mientras la exposición —que es la que dibuja TRACE— esperaba al ciclo
+            # siguiente. La prioridad la fija para qué sirve cada herramienta, no
+            # cuánto lleva sin refrescarse.
+            batch = sorted(remaining_due,
+                           key=lambda t: (_PRIORITY.get(t.key, _PRIORITY_DEFAULT),
+                                          self._fetched_at.get(t.key, 0.0)))[:allowed]
             if batch:
                 # Las páginas son corroboración, no autoridad del motor. Lanzar ocho
                 # POST pesados a la vez contra una cuenta pequeña aumenta timeouts y
@@ -170,7 +217,8 @@ class QuantDataIntelligence:
             return {"ready": True, "fetched": len(batch), "reused": reused,
                     "deferred": max(0, len(remaining_due) - len(batch)), "cycle": self._cycle}
 
-    def _adopt(self, tool: QuantDataTool, payload: dict[str, Any], *, source: str) -> None:
+    def _adopt(self, tool: QuantDataTool, payload: dict[str, Any], *, source: str,
+               epoch: int | None = None) -> None:
         """Normaliza un payload que ya obtuvo otro carril, sin gastar cuota."""
         tool.mark_success()
         tool.last_success = time.time()
@@ -180,6 +228,9 @@ class QuantDataIntelligence:
         except Exception as exc:
             normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
             _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")
+        if epoch is not None and epoch != self._epoch:
+            _obs_expected("quantdata.intelligence.stale_symbol_adopt")
+            return
         self._data[tool.key] = {
             **normalized,
             "symbol": self._symbol,
@@ -191,13 +242,34 @@ class QuantDataIntelligence:
     async def _fetch(self, tool: QuantDataTool) -> None:
         assert self.client is not None
         ticker = self._symbol
+        epoch = self._epoch
         QUOTA.spend(1)
         body = tool.body(ticker)
         last_err: str | None = None
 
         for path in tool.candidates():
             try:
-                response = await self.client.post(path, body)
+                # v1.44.0 · La petición pasa por el runtime del Data Hub:
+                #   · deduplicación en vuelo — dos secciones que piden lo mismo a la
+                #     vez comparten UNA petición en lugar de gastar dos de cuota;
+                #   · aislamiento por canal — si esta herramienta tarda, el ciclo
+                #     sigue sin ella y las demás no se contagian;
+                #   · Last Known Good — lo que llegue tarde alimenta el respaldo.
+                # El precio no pasa por aquí: viaja por otro carril y no puede
+                # quedarse esperando a un endpoint de opciones.
+                _client = self.client
+                gate = await HUB_RUNTIME.fetch(
+                    tool.key, ticker,
+                    lambda: _client.post(path, body),
+                    timeout_s=self.settings.request_timeout_seconds + 1.0,
+                    accept_stale=False)
+                if not gate.get("ready"):
+                    detail = str(gate.get("detail") or "canal no disponible")
+                    tool.note_attempt(path, detail)
+                    tool.mark_transient(detail)
+                    self._fetched_at[tool.key] = time.time()
+                    return
+                response = gate["payload"]
             except QuantDataError as exc:
                 msg = str(exc)
                 last_err = msg
@@ -232,6 +304,13 @@ class QuantDataIntelligence:
             except Exception as exc:
                 normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
                 _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")
+            if epoch != self._epoch:
+                # Llegó tarde: el usuario ya cambió de activo. El dato es válido
+                # para SU ticker, no para el que está en pantalla, así que no se
+                # publica. Mezclarlos sería el defecto más difícil de detectar de
+                # todos: números correctos bajo el símbolo equivocado.
+                _obs_expected("quantdata.intelligence.stale_symbol_write")
+                return
             self._data[tool.key] = {
                 **normalized,
                 "symbol": ticker,

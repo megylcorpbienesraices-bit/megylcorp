@@ -82,6 +82,16 @@ def _resumen(state: Dict[str, Any], trace: Dict[str, Any],
     zone = scanner.get("zone") or {}
     spot = _f(state.get("spot"))
 
+    # v1.44.0 · Call Wall y Put Wall vienen del WALL ENGINE, no de `key_levels_report`.
+    # Ese informe sigue recalculándolos por su cuenta sobre otro frame, y mientras
+    # RESUMEN los leyera de ahí podía enseñar un muro distinto del que TRACE dibuja.
+    # Hay UNA autoridad, y es la que viaja en el trace.
+    walls = (trace or {}).get("walls") or {}
+    wall_override = {
+        "call_wall": _f((walls.get("call_wall") or {}).get("strike")),
+        "put_wall": _f((walls.get("put_wall") or {}).get("strike")),
+    }
+
     level_rows = []
     for name, key in (
         ("Zero Gamma", "zero_gamma"), ("Call Wall", "call_wall"), ("Put Wall", "put_wall"),
@@ -89,7 +99,7 @@ def _resumen(state: Dict[str, Any], trace: Dict[str, Any],
         ("Gamma Center", "gamma_center"),
         ("Rango esperado alto", "expected_high"), ("Rango esperado bajo", "expected_low"),
     ):
-        v = _f(levels.get(key))
+        v = wall_override[key] if key in wall_override else _f(levels.get(key))
         if v is None:
             continue
         level_rows.append({
@@ -128,6 +138,8 @@ def _resumen(state: Dict[str, Any], trace: Dict[str, Any],
         "net_gex": _f(pos.get("net_gex")), "net_delta": _f(pos.get("net_delta")),
         "gross_gex": _f(pos.get("gross_gex")),
         "zero_gamma": _f(levels.get("zero_gamma")), "max_pain": _f(levels.get("max_pain")),
+        "call_wall": wall_override["call_wall"], "put_wall": wall_override["put_wall"],
+        "walls": walls,
         "levels": level_rows,
         "prints": prints[:40],
         "flow_regime": flow.get("regime"), "flow_net": _f(flow.get("net")),
@@ -1030,7 +1042,7 @@ def _net_drift(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
 
     if not isinstance(block, dict):
         return {**build_net_drift(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "Quant Data no publicó el bloque net_drift en este ciclo",
+                "detail": "sin datos de deriva neta en este ciclo",
                 "order_flow": order_flow}
     if not block.get("ready"):
         err = block.get("error") or block.get("reason") or block.get("detail")
@@ -1038,7 +1050,7 @@ def _net_drift(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
             return {**build_net_drift(None, symbol=symbol, provider_error=str(err)),
                     "order_flow": order_flow}
         return {**build_net_drift(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "el bloque net_drift existe pero no está listo",
+                "detail": "la serie de deriva neta aún no está lista",
                 "order_flow": order_flow}
 
     out = build_net_drift(block.get("rows"), symbol=symbol)
@@ -1073,7 +1085,7 @@ def _net_drift_order_flow(intel: Dict[str, Any]) -> Dict[str, Any]:
         detail = block.get("error") or block.get("reason")
     return {"ready": False, "source": "QUANTDATA", "tool": "options_order_flow_raw",
             "rows": [], "count": 0,
-            "detail": detail or "Quant Data no publicó Order Flow en este ciclo",
+            "detail": detail or "sin cinta de opciones en este ciclo",
             "fallback": "cinta propia de opciones"}
 
 
@@ -1107,7 +1119,7 @@ def _qflow(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
 
     if not isinstance(block, dict):
         return {**build_qflow(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "Quant Data no publicó el bloque net_flow en este ciclo",
+                "detail": "sin serie de flujo neto en este ciclo",
                 "order_flow": of}
     if not block.get("ready"):
         err = block.get("error") or block.get("reason") or block.get("detail")
@@ -1115,7 +1127,7 @@ def _qflow(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
             return {**build_qflow(None, symbol=symbol, provider_error=str(err)),
                     "order_flow": of}
         return {**build_qflow(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "el bloque net_flow existe pero no está listo",
+                "detail": "la serie de flujo neto aún no está lista",
                 "order_flow": of}
 
     out = build_qflow(block.get("rows"), symbol=symbol,
@@ -2162,6 +2174,10 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         "montecarlo": _montecarlo(state),
         "exposure_forecast": _exposure_forecast(trace, state),
         "interval_map": _interval_map(intel, trace, interval_greek),
+        # Autoridad única de muros y lectura de migración, tal y como las resolvió
+        # el Wall Engine sobre el trace. Ninguna sección las recalcula.
+        "walls": (trace or {}).get("walls") or {},
+        "gamma_migration": (trace or {}).get("gamma_migration") or {},
         "backtest": _backtest(state),
         "arquitectura": _arquitectura(state, trace),
         "fuentes": {

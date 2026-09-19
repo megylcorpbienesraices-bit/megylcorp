@@ -359,9 +359,9 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
     rows = [r for r in (order_flow or []) if isinstance(r, dict)]
     if not rows:
         return {"ready": False, "rows": 0, "tool": tool or None,
-                "detail": ("Quant Data no publicó Order Flow en este ciclo; la "
-                           "concentración queda sin atribuir en vez de atribuida a "
-                           "operaciones inventadas")}
+                "detail": ("sin cinta de opciones en este ciclo; la concentración queda "
+                           "SIN ATRIBUIR en vez de atribuida a operaciones que "
+                           "nadie vio")}
 
     parsed: List[Dict[str, Any]] = []
     for r in rows:
