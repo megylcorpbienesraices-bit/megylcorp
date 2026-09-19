@@ -355,17 +355,39 @@
         if (!Q.isNum(t) || !Q.isNum(pxv)) continue;
         const x = sx(t), y = sy(pxv);
         if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) continue;
-        const up = String(ev.side) === 'CALL';
-        const col = Q.token(up ? '--pos' : '--neg', up ? '#22c55e' : '#ef4444');
+        /* v1.48.0 · Marca DORADA en el punto exacto, flecha para el sentido.
+         *
+         * El color codificaba CALL/PUT con el mismo verde y el mismo rojo que
+         * usa el precio, así que una marca sobre un tramo de su color se perdía
+         * dentro de él. El oro no lo usa ningún otro elemento del gráfico.
+         *
+         * La marca lleva la flecha Y la magnitud —«▲ $4.2M»—: un triángulo
+         * suelto dice que pasó algo; la etiqueta dice cuánto, que es lo que
+         * permite comparar dos concentraciones sin abrir el panel.
+         */
+        const dir = String(ev.direction || ev.aggressor || ev.side || '').toUpperCase();
+        const up = dir === 'BUY' || dir === 'CALL' || Q.num(ev.premium, 0) > 0;
+        const col = Q.token('--gold', '#d9a441');
+        const tip = up ? -1 : 1;
         ctx.fillStyle = col;
         ctx.beginPath();
-        if (up) { ctx.moveTo(x, y - 12); ctx.lineTo(x - 4, y - 5); ctx.lineTo(x + 4, y - 5); }
-        else { ctx.moveTo(x, y + 12); ctx.lineTo(x - 4, y + 5); ctx.lineTo(x + 4, y + 5); }
+        ctx.moveTo(x, y + tip * 3);
+        ctx.lineTo(x - 5, y + tip * 11);
+        ctx.lineTo(x + 5, y + tip * 11);
         ctx.closePath(); ctx.fill();
-        // v1.43.0 · La marca lleva la flecha Y la magnitud: «▲ $4.2M». Un triángulo
-        // suelto dice que pasó algo; la etiqueta dice cuánto, que es lo que permite
-        // comparar dos concentraciones de un vistazo sin abrir el panel.
-        ctx.fillText(markerLabel(ev), x, up ? y - 14 : y + 24);
+
+        // Cifra sobre fondo propio: el texto suelto sobre el área de precio se
+        // pierde en cuanto el relleno tiene algo de opacidad.
+        const label = markerLabel(ev);
+        const ly = up ? y - 20 : y + 20;
+        const tw = ctx.measureText(label).width + 10;
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.92);
+        Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4); ctx.fill();
+        ctx.strokeStyle = Q.alpha(col, 0.85); ctx.lineWidth = 1;
+        Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.fillText(label, x, ly);
       }
       ctx.restore();
     }
@@ -707,12 +729,20 @@
 
 
   /** «▲ $4.2M» / «▼ $1.8M» · la misma etiqueta que dibuja TRACE sobre el precio. */
+  /* La flecha dice el SENTIDO y la cifra la CANTIDAD; el color es siempre oro.
+   *
+   * Codificar el sentido en el color obligaba a usar el mismo verde y el mismo
+   * rojo que las velas, y una marca sobre una vela de su color desaparecía
+   * dentro de ella. La flecha no se confunde con nada.
+   */
   function markerLabel(ev) {
     if (!ev) return '';
     if (ev.label) return String(ev.label);
-    const up = String(ev.side) === 'CALL';
-    const arrow = up ? '▲' : String(ev.side) === 'PUT' ? '▼' : '◆';
-    return arrow + ' ' + Q.money(Q.num(ev.premium, 0), 1);
+    const dir = String(ev.direction || ev.aggressor || ev.side || '').toUpperCase();
+    const up = dir === 'BUY' || dir === 'CALL' || Q.num(ev.premium, 0) > 0;
+    const arrow = up ? '▲' : '▼';
+    const amount = Q.money(Math.abs(Q.num(ev.premium, NaN)), 1);
+    return amount === '—' ? arrow : arrow + ' ' + amount;
   }
 
   /** Qué operaciones produjeron una concentración, en una línea legible.

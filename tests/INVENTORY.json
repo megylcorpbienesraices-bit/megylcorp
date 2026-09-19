@@ -2477,18 +2477,22 @@
    ]
   },
   "tests/test_v1470_adaptive_rendering.py": {
-   "casos": 168,
+   "casos": 178,
    "tests": [
     "test_a_dominated_group_declares_its_peak",
     "test_a_missing_open_interest_aggregate_is_not_a_zero",
     "test_a_tiny_panel_degrades_without_lying",
+    "test_absent_dark_volume_is_not_summed_as_zero",
     "test_aggregation_keeps_range_extreme_count_and_members",
+    "test_dark_flow_resolves_its_volume_field_from_the_real_response",
     "test_dark_pool_shows_the_lanes_that_do_have_data",
     "test_few_observations_get_thick_bars_without_becoming_blocks",
+    "test_flow_markers_are_golden_with_an_arrow_and_an_amount",
     "test_grouping_is_not_used_when_the_data_already_reads_well",
     "test_more_data_never_makes_the_bars_thinner",
     "test_no_density_produces_a_hairline_or_an_overlap",
     "test_nothing_in_the_render_path_knows_a_ticker",
+    "test_one_bar_per_strike_keeps_its_thickness",
     "test_open_interest_audits_the_aggregate_apart_from_the_breakdown",
     "test_statistics_never_fabricate_a_zero_premium",
     "test_temporal_aggregation_keeps_the_bars_on_their_real_instant",
@@ -2496,22 +2500,28 @@
     "test_the_component_is_loaded_before_everything_that_needs_it",
     "test_the_empty_reason_can_change_between_cycles",
     "test_the_engine_reports_an_unmeasurable_drift_as_unmeasured",
+    "test_the_exposure_profile_draws_one_bar_per_strike",
+    "test_the_field_fills_gaps_smooths_and_ranks",
     "test_the_first_frame_already_has_the_real_values",
     "test_the_heatmap_draws_zones_not_dots",
     "test_the_heatmap_intensity_is_rank_based_and_two_dimensional",
+    "test_the_interval_map_is_a_surface_not_a_painted_table",
     "test_the_minimum_extent_cannot_make_a_small_value_look_big",
     "test_the_plan_is_identical_for_every_asset_scale",
     "test_the_real_renderers_draw_readable_bars_in_every_case",
     "test_the_reliability_chart_needs_something_to_reference",
+    "test_the_relief_is_another_view_of_the_same_profile",
+    "test_the_relief_is_available_as_a_second_view",
     "test_the_replica_matches_the_shipped_constants",
     "test_the_target_thickness_is_reached_whenever_the_panel_allows_it",
     "test_the_trace_no_longer_raises_a_name_error_building_its_window",
     "test_the_two_aggregation_modes_mean_what_they_say",
     "test_there_is_a_single_bar_renderer_and_the_panels_use_it",
+    "test_trace_and_the_interval_map_treat_the_same_data_the_same_way",
     "test_volatility_drift_is_not_published_as_zero_without_a_measurement"
    ]
   }
  },
- "total_minimo": 2008,
- "version": "1.47.0"
+ "total_minimo": 2018,
+ "version": "1.48.0"
 }

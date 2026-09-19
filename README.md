@@ -1,5 +1,27 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.48.0 · Un campo, un strike por barra, una marca que se ve
+
+- **El Interval Map era una tabla pintada.** Celdas duras sobre fondo negro, con
+  huecos sin rellenar. La exposición por strike y tiempo es un **campo**: huecos
+  interpolados desde las vecinas (un cero medido sigue siendo cero), suavizado en
+  celdas, normalización por rango **con suelo de ruido** —sin él media pantalla
+  sale a media opacidad y el mapa es un bloque macizo— y contornos cerrados en
+  los dos ejes.
+- **TRACE trataba el mismo dato de otra forma**, con su propio umbral y su propia
+  curva. Los dos pasan ahora por el mismo campo.
+- **Una barra por strike, siempre.** El strike es la unidad de lectura: `516…518`
+  obliga a abrir el hover para saber cuál de los tres tiene el muro. El panel
+  crece —166 strikes → 2.403 px, 11 px por barra— y el contenedor hace scroll.
+- **Relieve 3D** del mismo perfil: proyección isométrica con los mismos ejes y la
+  misma escala. Las barras comparan magnitudes; el relieve enseña la forma.
+- **Marcas de flujo doradas** con flecha y cantidad. El verde y el rojo ya los usa
+  el precio, y una marca sobre un tramo de su color desaparecía dentro de él.
+- **Dark Flow publicaba ceros que no eran ceros.** Con una lista fija de nombres,
+  un campo con otro nombre daba `0.0` y salía «608 intervalos · 0.0 acc». Ahora el
+  campo se **deriva de la respuesta**, se declara cuál se usó en el Auditor, y si
+  ninguno sirve el valor es `None`.
+
 ## v1.47.0 · Densidad no se resuelve adelgazando
 
 Se estaba intentando resolver **densidad de datos con grosor fijo**. No existe un

@@ -209,10 +209,15 @@ def test_aggregation_keeps_range_extreme_count_and_members():
 def test_the_two_aggregation_modes_mean_what_they_say():
     js = _read("app/static/itmq_adaptive_bars.js")
     assert "mode === 'sum' ? sum : peak" in js
-    # Perfil por strike → extremo. Histograma temporal → suma.
+    # v1.48.0 · Perfil por strike → NINGUNA agrupación: el strike es la unidad
+    # de lectura y una barra que dice «516…518» obliga a abrir el hover para
+    # saber cuál de los tres tiene el muro. Histograma temporal → suma.
     panels = _read("app/static/itmq_panels.js")
-    assert "o.aggregate || 'extreme'" in panels, "el perfil por strike conserva el extremo"
+    assert "o.aggregate || 'none'" in panels, "el perfil por strike no agrupa strikes"
     assert "o.aggregate || 'sum'" in panels, "el histograma temporal suma"
+    ab = _read("app/static/itmq_adaptive_bars.js")
+    assert "if (o.aggregate === 'none')" in ab
+    assert "function extentFor(" in ab, "alguien tiene que reservar el sitio"
 
 
 def test_a_dominated_group_declares_its_peak():
@@ -248,13 +253,47 @@ def test_the_minimum_extent_cannot_make_a_small_value_look_big():
 # ═══════════════════════════════════════════ 4 · EL MAPA DE CALOR
 
 def test_the_heatmap_draws_zones_not_dots():
-    """Item 14: círculos de 1.3 px con escala lineal daban puntos dispersos."""
+    """Item 14 y v1.48.0: de puntos a celdas, y de celdas a SUPERFICIE.
+
+    Una rejilla de celdas duras con huecos negros entre ellas no es un mapa de
+    calor: es una tabla pintada. La exposición por strike y tiempo es un campo
+    continuo, y lo que hay que leer son sus zonas y hacia dónde se mueven.
+    """
     js = _read("app/static/itmq_panels.js")
     heat = js[js.index("function heatmap("):]
-    assert "AB.grid(matrix" in heat
-    assert "ctx.fillRect(b.x + x * cw" in heat, "celdas rellenas, no círculos"
+    assert "AB.field(matrix" in heat, "el campo lo prepara el componente común"
+    assert "ctx.drawImage(fieldCanvas" in heat, "superficie interpolada"
+    assert "imageSmoothingEnabled = true" in heat, "sin interpolación son celdas duras"
     assert "ctx.arc(" not in heat, "el mapa ya no se dibuja con puntos"
     assert "Math.abs(v) / peak" not in heat, "escala lineal por el máximo"
+    # El lienzo del campo se reutiliza: reasignarlo en cada fotograma dispara el
+    # recolector sesenta veces por segundo.
+    assert "fieldCanvas.width !== f.w" in heat
+
+
+def test_the_field_fills_gaps_smooths_and_ranks():
+    """Los tres pasos que convierten celdas sueltas en una superficie legible."""
+    js = _read("app/static/itmq_adaptive_bars.js")
+    body = js[js.index("function field("):]
+    # 1 · un hueco no es un cero: se interpola desde las vecinas.
+    assert "1 / d2" in body, "peso inverso a la distancia"
+    assert "has[i]" in body, "un cero MEDIDO sigue siendo cero"
+    # 2 · suavizado separable, en CELDAS y no en píxeles.
+    assert "FIELD_BLUR_CELLS" in js and "_gaussKernel" in body
+    # 3 · normalización por rango conservando el signo.
+    assert "FIELD_RANK_PERCENTILE" in body
+
+
+def test_the_relief_is_another_view_of_the_same_profile():
+    """El 3D no puede ser un segundo dato, ni deformar magnitudes."""
+    js = _read("app/static/itmq_panels.js")
+    body = js[js.index("function relief("):js.index("mapa de intervalos 2D")]
+    assert "robustPeak(values)" in body, "misma escala que las barras"
+    # Proyección, no perspectiva: una barra el doble de larga mide el doble.
+    assert "Q.clamp(v / mx, -1, 1)" in body
+    app = _read("app/static/itmq_app.js")
+    assert "expRelief.set(expRows)" in app, "las dos vistas leen las mismas filas"
+    assert "P.relief(" in app
 
 
 def test_the_heatmap_intensity_is_rank_based_and_two_dimensional():
@@ -487,3 +526,155 @@ def test_the_real_renderers_draw_readable_bars_in_every_case():
     if len(same) >= 5:
         vals = [r["thickness"] for r in same]
         assert max(vals) - min(vals) < 0.5, f"la escala del activo cambia el grosor: {vals}"
+
+
+# ═══════════════════════════════════════════ 9 · v1.48.0 · CAMPO, STRIKE, ORO
+
+def test_the_interval_map_is_a_surface_not_a_painted_table():
+    """Una rejilla de celdas duras con huecos negros no es un mapa de calor.
+
+    La exposición por strike y tiempo es un campo: varía de forma continua
+    entre strikes vecinos y entre intervalos vecinos. Dibujar la celda obliga a
+    leer celda por celda justo lo que hay que leer como zona.
+    """
+    js = _read("app/static/itmq_panels.js")
+    # `relief` se define ANTES que `heatmap`, así que el corte va hasta el final.
+    heat = js[js.index("function heatmap("):]
+    assert "AB.field(matrix" in heat
+    assert "imageSmoothingEnabled = true" in heat
+    # Suelo de ruido: sin él, la normalización por rango deja media pantalla a
+    # media opacidad y el mapa sale como un bloque macizo.
+    assert "noiseFloor" in heat and "gammaCurve" in heat
+    # Contornos cerrados: barriendo sólo un eje salen segmentos sueltos que
+    # parecen ruido en vez de un borde.
+    assert heat.count("if ((a0 < level) === (a1 < level)) continue;") == 2
+
+
+def test_trace_and_the_interval_map_treat_the_same_data_the_same_way():
+    """Dos tratamientos del mismo dato hacen que dos pantallas no se parezcan."""
+    trace = _read("app/static/itmq_trace.js")
+    body = trace[trace.index("function buildHeatBitmap("):]
+    assert "AB.field(upright" in body, "TRACE usa el campo común"
+    assert "const NOISE = 0.55, GAMMA = 1.9;" in body
+    # Y el tratamiento propio que tenía ya no está.
+    assert "Math.pow(a, 0.62)" not in body
+
+
+def test_the_exposure_profile_draws_one_bar_per_strike():
+    """El strike es la unidad de lectura: «516…518» esconde cuál tiene el muro."""
+    ab = _read("app/static/itmq_adaptive_bars.js")
+    assert "if (o.aggregate === 'none')" in ab
+    assert "function extentFor(" in ab
+    panels = _read("app/static/itmq_panels.js")
+    assert "o.aggregate || 'none'" in panels
+    app = _read("app/static/itmq_app.js")
+    # El panel crece y el contenedor hace scroll: no se elige entre resolución
+    # y grosor, se tienen las dos.
+    assert "growForRows('chartExposure'" in app
+    assert "growForRows('chartOiStrike'" in app
+    html = _read("app/templates/terminal.html")
+    assert 'id="chartExposureScroll"' in html and 'class="chart-scroll"' in html
+    css = _read("app/static/itmq_terminal.css")
+    assert ".chart-scroll" in css and "overflow-y: auto" in css
+
+
+def test_one_bar_per_strike_keeps_its_thickness():
+    """Sin agrupar y con el panel crecido, la barra conserva su grosor."""
+    import subprocess as sp
+    src = """
+      global.window = {};
+      global.ITMQ = { clamp: (v,a,b) => Math.min(b, Math.max(a, v)), compact: v => String(v) };
+      window.ITMQ = global.ITMQ;
+      require(process.argv[1]);
+      const B = window.ITMQBars;
+      const out = [];
+      for (const n of [12, 21, 45, 90, 166, 240]) {
+        const need = B.extentFor(n, { targetThickness: 11 });
+        const p = B.layout(n, need, { aggregate: 'none' });
+        out.push([n, p.bins, Number(p.thickness.toFixed(2)), Number(p.gap.toFixed(2))]);
+      }
+      console.log(JSON.stringify(out));
+    """
+    r = sp.run(["node", "-e", src, str(ROOT / "app/static/itmq_adaptive_bars.js")],
+               capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    for n, bins, thick, gap in json.loads(r.stdout):
+        assert bins == n, f"{n} strikes se agruparon en {bins} barras"
+        assert thick >= 10.5, f"{n} strikes → {thick}px"
+        assert gap > 0, "sin hueco, n barras son un bloque"
+
+
+def test_the_relief_is_available_as_a_second_view():
+    html = _read("app/templates/terminal.html")
+    assert 'data-expview="relief"' in html and 'data-expview="bars"' in html
+    app = _read("app/static/itmq_app.js")
+    assert "function applyExpView(" in app
+    assert "segment('expView'" in app
+
+
+def test_flow_markers_are_golden_with_an_arrow_and_an_amount():
+    """El color codificaba CALL/PUT con el verde y el rojo que usa el precio.
+
+    Una marca sobre un tramo de su propio color desaparecía dentro de él. El
+    oro no lo usa ningún otro elemento del gráfico; el sentido va en la flecha
+    y la cantidad al lado.
+    """
+    for rel in ("app/static/itmq_trace.js", "app/static/itmq_orderflow.js"):
+        js = _read(rel)
+        assert "Q.token('--gold', '#d9a441')" in js, rel
+    flow = _read("app/static/itmq_orderflow.js")
+    body = flow[flow.index("function markerLabel("):]
+    body = body[:body.index("\n  /**")]
+    assert "'▲'" in body and "'▼'" in body, "la flecha dice el sentido"
+    assert "Q.money" in body, "y la cifra, la cantidad"
+    # Ni el verde ni el rojo vuelven a codificar el sentido de la marca.
+    qmark = flow[flow.index("const qEvents ="):flow.index("// último precio")]
+    assert "'--pos'" not in qmark and "'--neg'" not in qmark
+
+
+def test_dark_flow_resolves_its_volume_field_from_the_real_response():
+    """«608 intervalos · 0.0 acc» no se puede corregir sin saber qué llegó."""
+    from app.providers.quantdata.tools import norm_dark_flow
+
+    # Nombre declarado.
+    a = norm_dark_flow({"buckets": [
+        {"timestamp": "2026-09-19T14:30:00Z", "darkVolume": 12000, "totalVolume": 50000}]})
+    assert a["rows"][0]["dark_volume"] == 12000
+    assert a["field_map"]["dark_volume"] == "darkVolume"
+
+    # Nombre DISTINTO: se deriva de la propia respuesta y se declara cuál.
+    b = norm_dark_flow({"buckets": [
+        {"timestamp": "2026-09-19T14:30:00Z", "offExchangeShares": 9000,
+         "consolidatedShares": 40000}]})
+    assert b["rows"][0]["dark_volume"] == 9000
+    assert b["field_map"]["dark_volume"] == "offExchangeShares"
+
+    # Ningún campo sirve: `None`, NUNCA cero, y se dice qué campos llegaron.
+    c = norm_dark_flow({"buckets": [
+        {"timestamp": "2026-09-19T14:30:00Z", "stockPrice": 516.2}]})
+    assert c["rows"][0]["dark_volume"] is None
+    assert c["volume_field_resolved"] is False
+    assert "stockPrice" in c["observed_fields"]
+
+
+def test_absent_dark_volume_is_not_summed_as_zero():
+    """Seiscientos intervalos sin campo de volumen no son «0.0 acc»."""
+    from datetime import datetime, timezone
+    from app.core import quant_data_hub as HUB
+
+    now = datetime.now(timezone.utc).isoformat()
+    intel = {"dark_flow": {
+        "ready": True, "count": 608, "fetched_at": now,
+        "rows": [{"t": "x", "dark_volume": None, "stock_price": 516.2}] * 608,
+        "observed_fields": ["timestamp", "stockPrice"],
+        "volume_field_resolved": False, "intervals_with_volume": 0}}
+    out = HUB.dark_pool("DIA", intel)
+    assert out["shares"] is None and out["dark_share_pct"] is None
+    assert out["ready"] is False, "un carril del que no se lee nada no deja lista la sección"
+    ff = out["flow_fields"]
+    assert ff["intervals"] == 608 and ff["intervals_with_volume"] == 0
+    assert ff["volume_field_resolved"] is False
+    assert "stockPrice" in ff["observed"]
+    # Y llega al Auditor, que es donde se puede actuar sobre ello.
+    html = _read("app/templates/terminal.html")
+    assert 'id="tblDarkFields"' in html

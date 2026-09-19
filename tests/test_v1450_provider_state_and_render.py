@@ -327,9 +327,11 @@ def test_one_dominant_strike_no_longer_flattens_the_whole_profile():
     assert "function robustPeak(" in js
     assert "OUTLIER_RATIO" in js
     assert "clipMark" in js, "una barra recortada debe decirlo, no truncarse"
-    # Las dos familias de barras usan la misma escala robusta (2 llamadas + 1
-    # definición).
-    assert js.count("= robustPeak(values)") == 2
+    # v1.48.0 · Tres familias: barras verticales, perfil horizontal y relieve.
+    # El relieve es OTRA VISTA del mismo perfil, así que tiene que compartir la
+    # escala: si la comprimiera de otra forma, las dos vistas del mismo dato se
+    # contradirían al alternarlas.
+    assert js.count("= robustPeak(values)") == 3
 
 
 def test_bars_aggregate_instead_of_overlapping_when_they_do_not_fit():

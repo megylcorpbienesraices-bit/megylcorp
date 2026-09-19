@@ -338,8 +338,23 @@
       </div>
     </div>
     <article class="card">
-      <header><h2 id="expTitle">EXPOSICIÓN POR STRIKE</h2><span class="pill" id="expPill">—</span></header>
-      <div class="chart lg" id="chartExposure"></div>
+      <header><h2 id="expTitle">EXPOSICIÓN POR STRIKE</h2>
+        <div class="tools">
+          <!-- v1.48.0 · Dos lecturas del MISMO perfil. Las barras comparan
+               magnitudes con precisión; el relieve enseña la forma de la
+               estructura y dónde cambia de signo de un vistazo. -->
+          <div class="view-toggle" id="expView">
+            <button data-expview="bars" class="active">Barras</button>
+            <button data-expview="relief">Relieve 3D</button>
+          </div>
+          <span class="pill" id="expPill">—</span>
+        </div>
+      </header>
+      <!-- Una barra por strike: el panel crece y el contenedor hace scroll. -->
+      <div class="chart-scroll" id="chartExposureScroll">
+        <div class="chart lg" id="chartExposure"></div>
+      </div>
+      <div class="chart lg" id="chartExposureRelief" style="display:none"></div>
     </article>
     <div class="grid c2">
       <article class="card">
@@ -367,7 +382,9 @@
     </div>
     <article class="card">
       <header><h2>INTERÉS ABIERTO POR STRIKE · CALL / PUT</h2></header>
-      <div class="chart lg" id="chartOiStrike"></div>
+      <div class="chart-scroll" id="chartOiStrikeScroll">
+        <div class="chart lg" id="chartOiStrike"></div>
+      </div>
     </article>
     <div class="grid c2">
       <article class="card">
@@ -672,6 +689,14 @@
         <small>Tres carriles independientes. La pantalla del analista dice SIN DATOS; la causa exacta y qué hacer con ella están aquí.</small></header>
       <div class="body"><div class="table-wrap"><table class="data" id="tblDarkLanes">
         <thead><tr><th>CARRIL</th><th>ESTADO</th><th>FILAS</th><th>CAMPOS RECHAZADOS</th><th>DETALLE</th><th>QUÉ HACER</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+
+    <article class="card">
+      <header><h2>DARK POOL · CAMPOS DE LA RESPUESTA</h2>
+        <small>Con qué campo se leyó cada magnitud. Un carril con intervalos y volumen cero es indistinguible de un mercado sin actividad hasta que se ve esto.</small></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblDarkFields">
+        <thead><tr><th>MAGNITUD</th><th>CAMPO USADO</th><th>INTERVALOS CON VALOR</th><th>CAMPOS PUBLICADOS</th></tr></thead><tbody></tbody>
       </table></div></div>
     </article>
 

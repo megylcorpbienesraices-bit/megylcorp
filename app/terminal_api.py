@@ -1102,6 +1102,7 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
         # reintentar. `screen` es lo único que la terminal está autorizada a pintar.
         "diagnosis": _hub_dp.get("diagnosis"),
         "lanes": _hub_dp.get("lane_rows"),
+        "flow_fields": _hub_dp.get("flow_fields"),
         "display_reason": ((_hub_dp.get("diagnosis") or {}).get("screen") or None) if not ready else None,
         "latest_stock_price": (_qd_block(intel, "dark_pool_levels") or {}).get("latest_stock_price"),
         "sources": {
@@ -2251,6 +2252,12 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     auditor["dark_pool"] = {
         "lanes": dark_pool_section.get("lanes") or [],
         "diagnosis": dark_pool_section.get("diagnosis") or {},
+        # v1.48.0 · Con qué campo se leyó cada magnitud del flujo oscuro y qué
+        # campos publicó el proveedor. Sin esto, un carril que responde con
+        # seiscientos intervalos y un volumen de cero no se puede corregir: no
+        # hay forma de saber si el mercado no tuvo actividad o si el campo se
+        # llama de otra manera.
+        "flow_fields": dark_pool_section.get("flow_fields") or {},
         "note": ("Tres carriles independientes. Que uno rechace el cuerpo no dice "
                  "nada sobre los otros dos, y presentarlos juntos hacía parecer "
                  "rota la sección entera teniendo dos de tres sanos."),

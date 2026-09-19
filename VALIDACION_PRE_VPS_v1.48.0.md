@@ -1,14 +1,84 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.47.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.48.0
 
-Release: `ITM_QUANT_v1.47.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.48.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A11** es la de esta release.
+> Documento acumulativo. La sección **A12** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2008 casos / 147 ficheros**
-- Particiones: 21 · `plan_sha256`: `f2ef2d39b5f0add232d5f572a2e085e82c9f698fd1647ca07dfe790ffee2ebaa`
+- Inventario nominal: **2018 casos / 147 ficheros**
+- Particiones: 21 · `plan_sha256`: `cb163e95767687e58ad2d4e8ce60e0b3d2a18d68c01911d69e232514fa484617`
 - Resultado: **PASS**
+
+---
+
+## A12 · v1.48.0 · Campo continuo, un strike por barra y marca dorada
+
+### Qué se certifica
+
+`tests/test_v1470_adaptive_rendering.py` — 178 casos; ocho bloques de v1.47.0 más
+un noveno para esta release.
+
+**1 · El Interval Map es una superficie.** Que el campo lo prepare el componente
+común, que se dibuje con interpolación activada, que tenga suelo de ruido y curva
+—sin ellos la normalización por rango deja media pantalla a media opacidad y sale
+un bloque macizo— y que los contornos se cierren en **los dos** ejes: barriendo
+sólo uno salían segmentos sueltos que parecían ruido.
+
+**2 · Los tres pasos del campo.** Relleno de huecos con peso inverso a la
+distancia conservando el cero medido, suavizado gaussiano declarado en **celdas**
+y normalización por rango con signo.
+
+**3 · TRACE y la sección tratan el dato igual.** Que TRACE use el campo común y
+que su tratamiento propio —`a^0.62` y el umbral de 0.02— haya desaparecido. Dos
+tratamientos del mismo dato es lo que hace que dos pantallas del mismo programa
+no se parezcan.
+
+**4 · Una barra por strike.** Que exista el modo sin agrupar, que exista la cuenta
+del alto que hace falta, que EXPOSICIÓN e INTERÉS ABIERTO la usen, y que el
+contenedor con scroll esté en el marcado y en el CSS. Y la comprobación
+ejecutada en el navegador: de 12 a 240 strikes, **tantas barras como strikes**,
+ninguna por debajo de 10.5 px y todas con hueco.
+
+**5 · El relieve es otra vista del mismo dato.** Que comparta la escala robusta
+—si la comprimiera de otra forma, las dos vistas se contradirían al alternarlas—,
+que sea proyección y no perspectiva, y que lea las mismas filas.
+
+**6 · Las marcas son doradas.** Que el oro esté en TRACE y en FLUJO, que la
+flecha diga el sentido y la cifra la cantidad, y que **ni el verde ni el rojo**
+vuelvan a codificar el sentido de la marca en el gráfico de precio.
+
+**7 · Dark Flow deriva su campo.** Con el nombre declarado, con un nombre
+distinto —se deriva y se declara cuál— y sin ningún campo útil: `None` y nunca
+cero, con los campos observados publicados. Y que 608 intervalos sin volumen
+legible **no** se sumen como «0.0 acc» ni dejen la sección lista.
+
+### Verificación visual
+
+Banco de regresión, 46 paneles + 46 tras redimensionar: grosor 5.47–13.68 px,
+ocupación máxima 0.760, ningún panel con rayitas, masa sólida ni barras sin
+separación.
+
+Campo del Interval Map, 90 strikes × 81 intervalos con un 22 % de huecos: la
+superficie sale continua, mayormente vacía, con las dos zonas —resistencia arriba,
+soporte abajo— separadas por el recorrido del precio y con sus contornos
+trazados. Sin suelo de ruido el mismo dato salía como dos bloques macizos.
+
+Perfil por strike, 21 y 166 strikes: una barra por strike en los dos, 11 px de
+grosor, el panel creciendo a 304 px y 2.403 px respectivamente. El relieve del
+mismo perfil enseña la forma con las etiquetas en el margen.
+
+Terminal real, cero errores de consola: EXPOSICIÓN dibuja 21 barras —una por
+strike— con el conmutador **Barras / Relieve 3D** operativo; TRACE dibuja el mapa
+como superficie continua con sus muros y su migración de gamma.
+
+### Lo que esta validación NO cubre
+
+- No hay un 200 real de `dark-pool-levels`. Sigue **pendiente**.
+- Sin credenciales, el Interval Map y el mapa de TRACE se verifican con el campo
+  del motor y con datasets sintéticos de la forma real. Con la clave del usuario
+  la misma ruta la alimenta el proveedor.
+- El carril de FLUJO no se ha podido ver con cinta real en este entorno.
 
 ---
 

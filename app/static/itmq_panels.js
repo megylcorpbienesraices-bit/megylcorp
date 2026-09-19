@@ -262,10 +262,15 @@
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!data.length) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin || { l: 62, r: 16, t: 10, b: 24 });
-      // Perfil por strike: el contenedor muestra el valor EXTREMO del grupo, que
-      // es un valor que existió de verdad. Una media podría cancelar un +8 con
-      // un −8 vecinos y hacer desaparecer la concentración justo donde importa.
-      const fit = fitBars(data, b.h, { aggregate: o.aggregate || 'extreme', maxThickness: o.maxBar || 22 });
+      // v1.48.0 · Por defecto, UNA barra por strike. El strike es la unidad de
+      // lectura de un perfil de exposición: una barra que dice «516…518» obliga
+      // a abrir el hover para saber cuál de los tres tiene el muro, que es
+      // justo lo que se estaba mirando. El panel crece —`ITMQBars.extentFor`—
+      // y el contenedor hace scroll, así que no hay que elegir entre resolución
+      // y grosor.
+      const fit = fitBars(data, b.h, { aggregate: o.aggregate || 'none',
+                                       targetThickness: o.targetBar,
+                                       maxThickness: o.maxBar || 26 });
       const draw = fit.rows;
       let hasNeg = false;
       const values = draw.map(d => { const v = Q.num(d.value); if (v < 0) hasNeg = true; return v; });
@@ -670,6 +675,164 @@
     };
   }
 
+  /* --------------------------------------------- perfil en relieve (3D) */
+
+  /**
+   * El MISMO perfil por strike, en proyección isométrica.
+   *
+   * No sustituye a las barras: responde a otra pregunta. Las barras comparan
+   * magnitudes con precisión —cuál es mayor, cuánto—; el relieve enseña la
+   * FORMA de la estructura: dónde está la masa, cómo de abrupto es el borde y
+   * en qué strike cambia el signo. Con ciento sesenta strikes eso no se lee en
+   * una lista de barras aunque cada una sea legible.
+   *
+   * Es una proyección, no una simulación: no hay cámara libre ni perspectiva
+   * que deforme magnitudes. Dos ejes reales —strike y valor— y una profundidad
+   * constante que sólo da volumen, así que una barra el doble de larga sigue
+   * midiendo el doble en pantalla.
+   *
+   * data: [{label, value, color?}]
+   */
+  function relief(host, opts) {
+    const o = Object.assign({ fmt: v => Q.signedCompact(v, 2), depth: 0.34 }, opts || {});
+    let data = [];
+    const maxG = new Q.GlideValue(280);
+
+    const panel = new Q.Panel(host, (ctx, env) => {
+      if (!data.length) { noData(ctx, env, o.empty); return false; }
+      const b = box(env, o.margin || { l: 58, r: 20, t: 16, b: 26 });
+
+      /* El relieve SÍ agrupa, y por una razón distinta a la de las barras.
+       *
+       * Las barras responden «cuánto vale este strike» y por eso conservan uno
+       * por uno, con el panel creciendo. El relieve responde «qué forma tiene
+       * la estructura», y para eso no hace falta —ni cabe— una cara por
+       * strike: con ciento sesenta y seis en un panel fijo cada una mediría dos
+       * píxeles y la forma se perdería en el ruido. Se agrupa conservando el
+       * EXTREMO, así que una cresta sigue siendo una cresta.
+       */
+      const plan = AB.bin(data, b.h - Math.min(b.h * o.depth, b.w * 0.20),
+                          { aggregate: 'extreme', targetThickness: o.targetBar || 9 });
+      const rowsR = plan.rows;
+      const values = rowsR.map(d => Q.num(d.value));
+      const scale = robustPeak(values);
+      maxG.set(scale.peak);
+      const mx = Math.max(Q.num(maxG.get(), 0), 1e-9);
+
+      // Profundidad total reservada al eje isométrico. El resto del lienzo es
+      // el plano de strike × valor, que es donde se miden las magnitudes.
+      const dz = Math.min(b.h * o.depth, b.w * 0.20);
+      const plotH = b.h - dz;
+      const plotW = b.w - dz;
+      const n = rowsR.length;
+      const pitch = plotH / n;
+      const bh = Math.max(1.5, pitch * AB.FILL);
+      const zero = b.x + plotW * 0.5;
+      const sx = v => zero + Q.clamp(v / mx, -1, 1) * (plotW * 0.5);
+
+      // Suelo: la referencia sin la que un relieve flota y no se puede situar.
+      ctx.save();
+      ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.85);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y + plotH);
+      ctx.lineTo(b.x + plotW, b.y + plotH);
+      ctx.lineTo(b.x + plotW + dz, b.y + plotH - dz);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(Math.round(zero) + 0.5, b.y);
+      ctx.lineTo(Math.round(zero) + 0.5, b.y + plotH);
+      ctx.lineTo(Math.round(zero + dz) + 0.5, b.y + plotH - dz);
+      ctx.stroke();
+      ctx.restore();
+
+      // De atrás hacia delante: el strike más alto se dibuja primero para que
+      // el de delante lo tape, que es lo que produce la sensación de relieve.
+      ctx.save();
+      ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+      for (let i = n - 1; i >= 0; i--) {
+        const d = rowsR[i];
+        const v = Q.num(d.value);
+        if (!v) continue;
+        // El desplazamiento isométrico crece con el índice: los strikes altos
+        // quedan al fondo y los bajos al frente.
+        const t = i / Math.max(1, n - 1);
+        const ox = dz * t, oy = -dz * t;
+        const y = b.y + plotH - (i + 1) * pitch + oy;
+        const x0 = Math.min(zero, sx(v)) + ox;
+        const w = Math.max(1.5, Math.abs(sx(v) - zero));
+        const col = d.color || colorFor(v, o);
+
+        // Cara superior y lateral: dan el volumen sin inventar perspectiva.
+        const lift = Math.min(bh * 0.55, dz * 0.14);
+        ctx.fillStyle = Q.alpha(col, 0.22);
+        ctx.beginPath();
+        ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y);
+        ctx.lineTo(x0 + w + lift, y - lift); ctx.lineTo(x0 + lift, y - lift);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = Q.alpha(col, 0.92);
+        ctx.fillRect(x0, y, w, bh);
+        ctx.strokeStyle = Q.alpha(col, 1);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y) + 0.5,
+                       Math.max(1, Math.round(w) - 1), Math.max(1, Math.round(bh) - 1));
+        if (scale.clipped && Math.abs(v) > mx) {
+          clipMark(ctx, v >= 0 ? b.x + plotW - 2 : b.x + 8, y, 1.5, bh, false, col);
+        }
+      }
+      ctx.restore();
+
+      // Ejes: sólo las etiquetas que caben, sobre el strike real.
+      ctx.save();
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      const skip = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotH / 14))));
+      for (let i = 0; i < n; i++) {
+        if (i % skip) continue;
+        const t = i / Math.max(1, n - 1);
+        // La etiqueta se queda en el margen: seguir el desplazamiento
+        // isométrico la metía dentro del gráfico y tapaba las propias barras.
+        // Sólo sigue la altura, que es lo que la ata a su fila.
+        const lbl = rowsR[i];
+        ctx.fillText(String(lbl.grouped > 1 ? lbl.from : lbl.label),
+                     b.x - 6, b.y + plotH - (i + 0.5) * pitch - dz * t);
+      }
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(o.fmt(-mx), b.x, b.y + plotH + 6);
+      ctx.textAlign = 'right';
+      ctx.fillText(o.fmt(mx), b.x + plotW, b.y + plotH + 6);
+      ctx.restore();
+
+      if (panel.pointer.inside) {
+        // El puntero se mapea deshaciendo el desplazamiento isométrico, así que
+        // señala el strike que se ve, no el que estaría sin relieve.
+        let hit = -1, bestD = Infinity;
+        for (let i = 0; i < n; i++) {
+          const t = i / Math.max(1, n - 1);
+          const cy = b.y + plotH - (i + 0.5) * pitch - dz * t;
+          const d = Math.abs(panel.pointer.y - cy);
+          if (d < bestD) { bestD = d; hit = i; }
+        }
+        if (hit >= 0 && bestD <= Math.max(pitch, 6)) {
+          const d = rowsR[hit];
+          Q.chip(ctx, Q.clamp(panel.pointer.x + 10, b.x, b.x + b.w - 190),
+                 Q.clamp(panel.pointer.y - 10, b.y + 8, b.y + b.h - 8),
+                 AB.describe(d, o.fmt),
+                 { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
+        }
+      }
+      return maxG.step(env.dt);
+    }, { id: (host.id || 'relief') + ':relief',
+         onPointer: () => panel.invalidate(), onPointerLeave: () => panel.invalidate() });
+
+    return {
+      panel,
+      set(rows) { data = Array.isArray(rows) ? rows : []; panel.animate(true); panel.invalidate(); },
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
+    };
+  }
+
   /* ------------------------------------------------ mapa de intervalos 2D */
 
   /**
@@ -680,9 +843,18 @@
    * `price` superpone el recorrido del precio sobre los mismos intervalos: sin él
    * el mapa dice dónde estaba la exposición, pero no por qué zonas pasó el mercado.
    */
+  /** '#rrggbb' → [r,g,b], con respaldo si el token no es hexadecimal. */
+  function _rgb(hex, fallback) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return fallback;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
   function heatmap(host, opts) {
     const o = Object.assign({ fmtY: v => v.toFixed(2), fmtX: v => String(v) }, opts || {});
     let rows = [], cols = [], matrix = [], price = [], peak = 0;
+    let fieldCanvas = null, fieldCtx = null, fieldImage = null;
 
     function rescale() {
       peak = 0;
@@ -693,40 +865,121 @@
       if (!rows.length || !cols.length || peak <= 0) { noData(ctx, env, o.empty); return false; }
       const b = box(env, o.margin || { l: 62, r: 52, t: 12, b: 26 });
 
-      /* v1.47.0 · Zonas, no puntos.
+      /* v1.48.0 · Superficie continua, no una tabla pintada.
        *
-       * Antes cada celda era un CÍRCULO de radio `min(cw,ch)*0.46`. Con 90
-       * strikes en 250 px eso da 1.3 px, y la intensidad era `|v| / max`: una
-       * normalización lineal que, con una cadena concentrada, deja casi todo por
-       * debajo del umbral de 0.02 y sin pintar. El mapa se veía como puntos
-       * diminutos y dispersos teniendo 7.290 observaciones.
+       * La exposición por strike y tiempo es un CAMPO: varía de forma continua
+       * entre strikes vecinos y entre intervalos vecinos. Dibujarla como una
+       * rejilla de celdas duras con huecos negros entre ellas es pintar una
+       * tabla, y obliga a leer celda por celda justo lo que hay que leer como
+       * zona: dónde está la concentración, qué forma tiene y hacia dónde se
+       * mueve.
        *
-       * Ahora la celda se agrupa hasta tener tamaño real y se pinta RELLENA, así
-       * que una concentración se lee como una zona continua y no como una nube.
-       * La intensidad es por rango dentro de lo visible, que es lo que hace que
-       * el mapa se lea igual en un ETF enorme y en una acción pequeña.
+       * El campo se prepara en `ITMQBars.field` —huecos rellenados desde sus
+       * vecinas, suavizado gaussiano y normalización por rango con signo— y se
+       * pinta aquí con un lienzo a resolución de celda que el propio navegador
+       * escala con interpolación bilineal. Así la superficie es continua a
+       * cualquier tamaño sin dibujar una celda por píxel.
        */
-      const g = AB.grid(matrix, b.w, b.h);
-      const cw = g.cw, ch = g.ch;
-      const pos = Q.token('--pos', '#22c55e');
-      const neg = Q.token('--neg', '#ef4444');
-      ctx.save();
-      for (let y = 0; y < g.rows; y++) {
-        const src = g.cells[y] || [];
-        // La fila 0 es el strike más bajo: el eje Y crece hacia arriba.
-        const cy = b.y + b.h - (y + 1) * ch;
-        for (let x = 0; x < g.cols; x++) {
-          const v = Q.num(src[x]);
-          if (!v) continue;
-          const a = g.intensity(v);
-          if (a < 0.12) continue;
-          ctx.globalAlpha = 0.14 + 0.86 * Math.pow(a, 0.75);
-          ctx.fillStyle = v >= 0 ? pos : neg;
-          ctx.fillRect(b.x + x * cw, cy, Math.max(1, cw), Math.max(1, ch));
+      const f = AB.field(matrix, { blur: o.blur, fillRadius: o.fillRadius });
+      if (!f.w || !f.h) { noData(ctx, env, o.empty); return false; }
+      // Percentil por debajo del cual el campo es fondo, no zona.
+      const noiseFloor = o.noiseFloor === undefined ? 0.55 : o.noiseFloor;
+      const gammaCurve = o.gamma === undefined ? 1.9 : o.gamma;
+
+      const posC = Q.token('--pos', '#22c55e');
+      const negC = Q.token('--neg', '#ef4444');
+      const rgbPos = _rgb(posC, [34, 197, 94]);
+      const rgbNeg = _rgb(negC, [239, 68, 68]);
+
+      // Lienzo del campo, una muestra por celda. Se reutiliza entre fotogramas:
+      // reasignarlo en cada uno dispara el recolector sesenta veces por segundo.
+      if (!fieldCanvas || fieldCanvas.width !== f.w || fieldCanvas.height !== f.h) {
+        fieldCanvas = document.createElement('canvas');
+        fieldCanvas.width = f.w; fieldCanvas.height = f.h;
+        fieldCtx = fieldCanvas.getContext('2d');
+        fieldImage = fieldCtx.createImageData(f.w, f.h);
+      }
+      const px = fieldImage.data;
+      for (let y = 0; y < f.h; y++) {
+        // La fila 0 del dato es el strike más bajo y el eje Y crece hacia
+        // arriba, así que el lienzo se llena invertido.
+        const srcRow = (f.h - 1 - y) * f.w;
+        for (let x = 0; x < f.w; x++) {
+          const v = f.values[srcRow + x];
+          const i = (y * f.w + x) * 4;
+          const c = v >= 0 ? rgbPos : rgbNeg;
+          px[i] = c[0]; px[i + 1] = c[1]; px[i + 2] = c[2];
+          /* Suelo de ruido y rampa: el mapa tiene que estar MAYORMENTE vacío.
+           *
+           * La normalización por rango reparte los percentiles de forma
+           * uniforme, así que sin suelo la mitad del lienzo sale con media
+           * opacidad y el resultado es un bloque macizo de verde y rojo donde
+           * no se distingue ninguna concentración: lo contrario de un mapa.
+           *
+           * Por debajo de `floor` no se pinta nada —es el fondo del campo, no
+           * una zona— y por encima la rampa es rápida, así que sólo los
+           * percentiles altos llegan a saturar. Lo que queda saturado ES la
+           * concentración, y por eso se ve dónde está.
+           */
+          const a = (f.intensity(v) - noiseFloor) / (1 - noiseFloor);
+          px[i + 3] = a <= 0 ? 0
+            : Math.round(255 * Math.min(1, Math.pow(a, gammaCurve)));
         }
       }
-      ctx.globalAlpha = 1;
+      fieldCtx.putImageData(fieldImage, 0, 0);
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(fieldCanvas, 0, 0, f.w, f.h, b.x, b.y, b.w, b.h);
       ctx.restore();
+
+      // Contornos de las zonas dominantes. Marcan el borde de una concentración
+      // sin taparla, que es lo que convierte una mancha en una lectura.
+      if (o.contours !== false) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        ctx.lineWidth = 1;
+        const cw0 = b.w / f.w, ch0 = b.h / f.h;
+        for (const level of (o.contourLevels || [0.80, 0.93])) {
+          ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'), level >= 0.8 ? 0.22 : 0.12);
+          /* Cruces en LOS DOS ejes.
+           *
+           * Barriendo sólo en X se obtienen segmentos verticales sueltos: la
+           * isolínea no se cierra y el resultado parece ruido en vez de un
+           * borde. Con los cruces horizontales y verticales el contorno rodea
+           * la zona, que es lo que hace legible dónde empieza y dónde acaba
+           * una concentración.
+           */
+          const at = (x, y) => f.intensity(f.values[(f.h - 1 - y) * f.w + x]);
+          ctx.beginPath();
+          for (let y = 0; y < f.h; y++) {
+            for (let x = 0; x < f.w - 1; x++) {
+              const a0 = at(x, y), a1 = at(x + 1, y);
+              if ((a0 < level) === (a1 < level)) continue;
+              const t = (level - a0) / ((a1 - a0) || 1e-9);
+              const xx = b.x + (x + 0.5 + t) * cw0;
+              const yy = b.y + (y + 0.5) * ch0;
+              ctx.moveTo(xx, yy - ch0 * 0.5);
+              ctx.lineTo(xx, yy + ch0 * 0.5);
+            }
+          }
+          for (let x = 0; x < f.w; x++) {
+            for (let y = 0; y < f.h - 1; y++) {
+              const a0 = at(x, y), a1 = at(x, y + 1);
+              if ((a0 < level) === (a1 < level)) continue;
+              const t = (level - a0) / ((a1 - a0) || 1e-9);
+              const yy = b.y + (y + 0.5 + t) * ch0;
+              const xx = b.x + (x + 0.5) * cw0;
+              ctx.moveTo(xx - cw0 * 0.5, yy);
+              ctx.lineTo(xx + cw0 * 0.5, yy);
+            }
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       // Precio sobre los mismos strikes, en la escala del eje Y.
       const lo = Q.num(rows[0]), hi = Q.num(rows[rows.length - 1]);
@@ -753,42 +1006,45 @@
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      // Los ejes recorren las celdas DIBUJADAS y etiquetan con el valor original
-      // del primer elemento de cada bloque: si la celda agrupa tres strikes, la
-      // etiqueta es la del primero y el hover dice el rango completo.
-      const skipY = Math.max(1, Math.ceil(g.rows / Math.max(1, Math.floor(b.h / 16))));
-      for (let i = 0; i < g.rows; i++) {
+      // Los ejes recorren el dato ORIGINAL: el campo es continuo, así que cada
+      // etiqueta cae en su strike y en su intervalo reales, sin agrupaciones
+      // que traducir.
+      const chY = b.h / rows.length;
+      const cwX = b.w / cols.length;
+      const skipY = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(b.h / 16))));
+      for (let i = 0; i < rows.length; i++) {
         if (i % skipY) continue;
-        const src = rows[i * g.rowGroup];
-        if (src === undefined) continue;
-        ctx.fillText(o.fmtY(Q.num(src)), b.x - 6, b.y + b.h - (i + 0.5) * ch);
+        ctx.fillText(o.fmtY(Q.num(rows[i])), b.x - 6, b.y + b.h - (i + 0.5) * chY);
       }
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      const skipX = Math.max(1, Math.ceil(g.cols / Math.max(1, Math.floor(b.w / 64))));
-      for (let i = 0; i < g.cols; i++) {
+      const skipX = Math.max(1, Math.ceil(cols.length / Math.max(1, Math.floor(b.w / 64))));
+      for (let i = 0; i < cols.length; i++) {
         if (i % skipX) continue;
-        const src = cols[i * g.colGroup];
-        if (src === undefined) continue;
-        ctx.fillText(o.fmtX(src), b.x + (i + 0.5) * cw, b.y + b.h + 6);
+        ctx.fillText(o.fmtX(cols[i]), b.x + (i + 0.5) * cwX, b.y + b.h + 6);
       }
       ctx.restore();
 
       if (panel.pointer.inside) {
-        const ix = Math.floor((panel.pointer.x - b.x) / cw);
-        const iy = g.rows - 1 - Math.floor((panel.pointer.y - b.y) / ch);
-        if (ix >= 0 && ix < g.cols && iy >= 0 && iy < g.rows) {
-          // El valor que se enseña es el EXTREMO del bloque —el que se dibujó—
-          // y se dice de cuántas observaciones originales sale.
-          const v = Q.num((g.cells[iy] || [])[ix]);
-          const y0 = rows[iy * g.rowGroup], y1 = rows[Math.min(rows.length - 1, (iy + 1) * g.rowGroup - 1)];
-          const x0 = cols[ix * g.colGroup], x1 = cols[Math.min(cols.length - 1, (ix + 1) * g.colGroup - 1)];
-          const yTxt = g.rowGroup > 1 ? `${o.fmtY(Q.num(y0))}…${o.fmtY(Q.num(y1))}` : o.fmtY(Q.num(y0));
-          const xTxt = g.colGroup > 1 ? `${o.fmtX(x0)}…${o.fmtX(x1)}` : o.fmtX(x0);
-          const n = g.rowGroup * g.colGroup;
-          Q.chip(ctx, Q.clamp(panel.pointer.x + 8, b.x, b.x + b.w - 210), b.y + 12,
-            `${yTxt} · ${xTxt} · ${Q.signedCompact(v, 2)}${n > 1 ? ` · máx de ${n}` : ''}`,
-            { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
-        }
+        const ix = Q.clamp(Math.floor((panel.pointer.x - b.x) / cwX), 0, cols.length - 1);
+        const iy = Q.clamp(rows.length - 1 - Math.floor((panel.pointer.y - b.y) / chY),
+                           0, rows.length - 1);
+        // Se enseña el valor MEDIDO de esa celda, no el suavizado: el suavizado
+        // sirve para ver la forma, no para leer magnitudes.
+        const v = Q.num((matrix[iy] || [])[ix]);
+        const measured = f.measured(ix, iy);
+        // Retícula fina sobre la celda apuntada: sin ella, en un campo continuo
+        // no se sabe qué celda se está leyendo.
+        ctx.save();
+        ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'), 0.35);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(b.x + ix * cwX) + 0.5,
+                       Math.round(b.y + b.h - (iy + 1) * chY) + 0.5,
+                       Math.max(2, Math.round(cwX)), Math.max(2, Math.round(chY)));
+        ctx.restore();
+        Q.chip(ctx, Q.clamp(panel.pointer.x + 8, b.x, b.x + b.w - 210), b.y + 12,
+          `${o.fmtY(Q.num(rows[iy]))} · ${o.fmtX(cols[ix])} · ` +
+          (measured ? Q.signedCompact(v, 2) : 'sin observación'),
+          { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
       }
       return false;
     }, { id: (host.id || 'heat') + ':heat', onPointer: () => panel.invalidate(), onPointerLeave: () => panel.invalidate() });
@@ -806,5 +1062,5 @@
     };
   }
 
-  global.ITMQPanels = { bars, hbars, lines, tbars, curve, pricePrints, heatmap };
+  global.ITMQPanels = { bars, hbars, lines, tbars, curve, pricePrints, heatmap, relief };
 })(window);

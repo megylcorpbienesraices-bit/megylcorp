@@ -338,6 +338,28 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .chart.sm { height: 210px; }
 .chart.lg { height: 420px; }
 
+/* v1.48.0 · Perfil por strike: UNA barra por strike, siempre.
+   Agrupar tres strikes en una barra obliga a abrir el hover para saber cuál de
+   los tres tiene el muro, que es justo lo que se estaba mirando. El panel crece
+   para que quepan todos con grosor real y el contenedor hace scroll. */
+.chart-scroll { position: relative; width: 100%; max-height: 620px; overflow-y: auto;
+                overflow-x: hidden; border-radius: 6px; }
+.chart-scroll::-webkit-scrollbar { width: 9px; }
+.chart-scroll::-webkit-scrollbar-track { background: var(--panel-2, #141b28); }
+.chart-scroll::-webkit-scrollbar-thumb { background: var(--grid, #243044); border-radius: 5px; }
+.chart-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-mute, #5b6880); }
+.chart-scroll .chart { height: auto; }
+
+/* Selector de vista del perfil: barras o relieve tridimensional. */
+.view-toggle { display: flex; gap: 2px; }
+.view-toggle button { background: var(--panel-2, #141b28); border: 1px solid var(--grid, #243044);
+  color: var(--text-dim, #8494ad); font-family: var(--sans); font-size: 10px; font-weight: 600;
+  letter-spacing: .06em; padding: 4px 9px; cursor: pointer; }
+.view-toggle button:first-child { border-radius: 5px 0 0 5px; }
+.view-toggle button:last-child { border-radius: 0 5px 5px 0; }
+.view-toggle button.active { background: var(--panel-3, #1b2436); color: var(--text, #e6edf7);
+  border-color: var(--accent, #38bdf8); }
+
 /* -------------------------------------------------------------- table */
 
 table.data { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }

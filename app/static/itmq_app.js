@@ -53,6 +53,7 @@
     timeframe: '1m',
     tailMinutes: 390,
     intervalGreek: 'GAMMA',
+    expView: 'bars',
     catalog: [],
     calendar: null,
     charts: {},
@@ -532,12 +533,25 @@
     const rowsE = ex.by_expiration || [];
     pill('expPill', rowsK.length ? 'live' : 'off', rowsK.length ? `${rowsK.length} strikes` : 'esperando estructura');
 
-    const main = chart('chartExposure', () => P.hbars(el('chartExposure'), { fmt: v => Q.signedCompact(v, 2), empty: 'SIN ESTRUCTURA' }));
-    if (axis === 'strike') {
-      main.set(rowsK.map(r => ({ label: Q.num(r.strike).toFixed(2), value: Q.num(r[field], 0), key: r.strike })));
-    } else {
-      main.set(rowsE.map(r => ({ label: String(r.expiration).slice(5), value: Q.num(r[field], 0), key: r.expiration })));
-    }
+    // v1.48.0 · Una barra por strike, con grosor real. El panel crece hasta lo
+    // que haga falta y el contenedor hace scroll; agrupar tres strikes en una
+    // barra escondia justo el dato que se estaba buscando.
+    const expRows = axis === 'strike'
+      ? rowsK.map(r => ({ label: Q.num(r.strike).toFixed(2), value: Q.num(r[field], 0), key: r.strike }))
+      : rowsE.map(r => ({ label: String(r.expiration).slice(5), value: Q.num(r[field], 0), key: r.expiration }));
+
+    growForRows('chartExposure', expRows.length);
+    const main = chart('chartExposure', () => P.hbars(el('chartExposure'), {
+      fmt: v => Q.signedCompact(v, 2), empty: 'SIN ESTRUCTURA', targetBar: EXP_BAR_PX,
+    }));
+    main.set(expRows);
+
+    // El relieve lee EL MISMO perfil: dos vistas de un dato, nunca dos datos.
+    const expRelief = chart('chartExposureRelief', () => P.relief(el('chartExposureRelief'), {
+      fmt: v => Q.signedCompact(v, 2), empty: 'SIN ESTRUCTURA',
+    }));
+    expRelief.set(expRows);
+    applyExpView();
 
     chart('chartExposureExp', () => P.bars(el('chartExposureExp'), { fmt: v => Q.signedCompact(v, 1), empty: 'SIN DESGLOSE POR VENCIMIENTO' }))
       .set(rowsE.map(r => ({ label: String(r.expiration).slice(5), value: Q.num(r[field], 0), key: r.expiration })));
@@ -569,7 +583,10 @@
     // ABIERTO» son dos verdades que juntas se leen como un fallo.
     const oiEmpty = oi.breakdown_reason || 'SIN INTERÉS ABIERTO';
     // Call arriba y put abajo del cero: el desequilibrio se lee de un vistazo.
-    const oiStrike = chart('chartOiStrike', () => P.hbars(el('chartOiStrike'), { fmt: v => Q.signedCompact(v, 1), empty: oiEmpty }));
+    growForRows('chartOiStrike', rows.length);
+    const oiStrike = chart('chartOiStrike', () => P.hbars(el('chartOiStrike'), {
+      fmt: v => Q.signedCompact(v, 1), empty: oiEmpty, targetBar: EXP_BAR_PX,
+    }));
     if (oiStrike.setEmpty) oiStrike.setEmpty(oiEmpty);
     oiStrike.set(rows.map(r => ({ label: Q.num(r.strike).toFixed(2), value: Q.num(r.net_oi, 0), key: r.strike })));
 
@@ -1587,6 +1604,24 @@
       esc(l.remedy || '—'),
     ], 'Sin ciclo de dark pool todavía', true);
 
+    // v1.48.0 · Con qué campo se leyó cada magnitud del flujo oscuro. Un carril
+    // que responde con seiscientos intervalos y volumen cero es indistinguible
+    // de un mercado sin actividad hasta que se ve ESTO.
+    const ff = ((d.auditor || {}).dark_pool || {}).flow_fields || {};
+    const ffRows = Object.entries(ff.map || {}).map(([k, v]) => ({ magnitud: k, campo: v }));
+    if (!ffRows.length && (ff.intervals || 0) > 0) {
+      ffRows.push({ magnitud: 'volumen oscuro', campo: null });
+    }
+    fillTable('tblDarkFields', ffRows, r => [
+      esc(r.magnitud),
+      r.campo ? `<code class="mute">${esc(r.campo)}</code>`
+              : '<span class="neg">ningún campo de la respuesta sirve</span>',
+      `${Q.num(ff.intervals_with_volume, 0)} / ${Q.num(ff.intervals, 0)}`,
+      (ff.observed || []).length
+        ? `<code class="mute">${esc((ff.observed || []).slice(0, 12).join(' · '))}</code>`
+        : '<span class="dim">—</span>',
+    ], 'Sin respuesta de flujo oscuro en este ciclo', true);
+
     fillTable('tblDiag', (state.diagnostics || {}).checks || [], c => [
       c.panel,
       c.ok ? '<span class="pos">CON DATOS</span>' : '<span class="neg">SIN DATOS</span>',
@@ -1634,6 +1669,38 @@
   }
 
   /** Crea el panel la primera vez y lo reutiliza después. */
+  /* --------------------------------------- perfil por strike: una barra cada uno
+   *
+   * El alto del panel deja de ser una constante de CSS y pasa a derivarse del
+   * numero de observaciones. Es la otra mitad de `aggregate: 'none'`: si cada
+   * strike tiene que llevar su barra, alguien tiene que reservarle sitio.
+   */
+  const EXP_BAR_PX = 11;
+
+  function growForRows(id, count) {
+    const host = el(id);
+    if (!host || !window.ITMQBars) return;
+    const need = window.ITMQBars.extentFor(count, { targetThickness: EXP_BAR_PX });
+    // Nunca por debajo del alto de tarjeta: con pocos strikes el panel no debe
+    // encogerse hasta parecer roto.
+    host.style.height = Math.max(300, need + 42) + 'px';
+  }
+
+  /** Barras o relieve. El dato es el mismo; cambia la pregunta que responde. */
+  function applyExpView() {
+    const scroll = el('chartExposureScroll');
+    const relief = el('chartExposureRelief');
+    if (!scroll || !relief) return;
+    const bars = state.expView !== 'relief';
+    scroll.style.display = bars ? '' : 'none';
+    relief.style.display = bars ? 'none' : '';
+    for (const btn of document.querySelectorAll('#expView button')) {
+      btn.classList.toggle('active', (btn.dataset.expview === 'relief') === !bars);
+    }
+    const r = state.charts['chartExposureRelief'];
+    if (!bars && r) { r.panel.resize(); r.panel.invalidate(); }
+  }
+
   function chart(id, factory) {
     if (!state.charts[id]) {
       const host = el(id);
@@ -1714,6 +1781,9 @@
     // La griega del Interval Map la resuelve el backend: cambiarla pide bundle nuevo.
     el('imGreek')?.addEventListener('change', e => { state.intervalGreek = e.target.value; pullBundle(); });
     segment('expAxis', () => { if (state.bundle) renderExposicion(state.bundle); });
+    // Barras o relieve: no pide datos nuevos, sólo cambia qué se dibuja con los
+    // que ya hay.
+    segment('expView', b => { state.expView = b.dataset.expview; applyExpView(); });
 
     // Búsqueda de instrumento
     el('symbolPill')?.addEventListener('click', openSymbolSearch);

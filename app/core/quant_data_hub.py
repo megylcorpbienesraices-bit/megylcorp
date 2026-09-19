@@ -726,8 +726,17 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
                        detail=(lane["detail"] or cls["detail"]),
                        age_seconds=cls["age_seconds"], rows=cls["rows"])
 
-    dark_vol = sum(_f(r.get("dark_volume"), 0.0) or 0.0 for r in flow)
-    total_vol = sum(_f(r.get("total_volume"), 0.0) or 0.0 for r in flow)
+    # v1.48.0 · Un intervalo SIN volumen publicado no suma cero: no suma. Antes
+    # `_f(..., 0.0) or 0.0` convertía seiscientos intervalos sin campo de
+    # volumen en «0.0 acc», que afirma que no hubo actividad fuera de bolsa
+    # cuando lo cierto es que no se pudo leer.
+    _dark_vals = [_f(r.get("dark_volume")) for r in flow]
+    _dark_vals = [v for v in _dark_vals if v is not None]
+    _total_vals = [_f(r.get("total_volume")) for r in flow]
+    _total_vals = [v for v in _total_vals if v is not None]
+    dark_vol = sum(_dark_vals) if _dark_vals else None
+    total_vol = sum(_total_vals) if _total_vals else None
+    flow_block = _block(intel, "dark_flow")
     notional = 0.0
     notional_seen = False
     for r in flow:
@@ -755,15 +764,19 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
         notional = level_notional
         notional_seen = True
 
-    ready = bool(flow or levels or dark_prints)
+    # Un carril que responde pero del que no se puede leer ninguna magnitud no
+    # deja la sección «lista»: deja constancia de que respondió y de por qué no
+    # sirve todavía.
+    flow_usable = bool(flow) and (dark_vol is not None or notional_seen)
+    ready = bool(flow_usable or levels or dark_prints)
     payload = {
         "ready": ready,
         "flow": flow, "levels": levels, "prints": dark_prints,
         "notional": round(notional, 2) if notional_seen else None,
-        "shares": round(dark_vol, 2) if flow else None,
+        "shares": round(dark_vol, 2) if dark_vol is not None else None,
         "trades": (len(dark_prints) or None),
         "dark_share_pct": (round(100.0 * dark_vol / total_vol, 2)
-                           if total_vol > 0 else None),
+                           if (dark_vol is not None and total_vol) else None),
         "level_count": len(levels),
         "prints_total": len(prints),
         "prints_unclassified": len(unknown_prints),
@@ -781,6 +794,15 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
         # estados internos lo produjo y qué hay que hacer con él.
         "lanes": lanes,
         "lane_rows": dark_pool_state.lane_rows(lanes),
+        # Con qué campo se leyó cada magnitud y qué campos trajo el proveedor.
+        # Es lo que convierte «608 intervalos · 0.0 acc» en algo corregible.
+        "flow_fields": {
+            "map": flow_block.get("field_map") or {},
+            "observed": flow_block.get("observed_fields") or [],
+            "intervals": len(flow),
+            "intervals_with_volume": int(flow_block.get("intervals_with_volume") or 0),
+            "volume_field_resolved": bool(flow_block.get("volume_field_resolved")),
+        },
         "diagnosis": dark_pool_state.section_state(lanes),
         "source": "QUANTDATA_DARK_POOL",
         "audit_channel": "ITM_QUANT_VENUE_CLASSIFICATION",

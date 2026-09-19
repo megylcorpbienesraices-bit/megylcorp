@@ -668,6 +668,57 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "source": "QUANTDATA_OPTIONS_ORDER_FLOW"}
 
 
+#: Sufijos que, en el nombre de un campo, identifican una MAGNITUD de volumen.
+#: Se usan sólo cuando ninguno de los nombres declarados aparece en la respuesta.
+_VOLUME_HINTS = ("volume", "shares", "size", "qty", "quantity")
+
+
+def resolve_numeric_field(row: Dict[str, Any], names: tuple, *, contains: tuple = (),
+                          hints: tuple = ()) -> tuple[Optional[float], str]:
+    """Valor numérico de un campo, y CÓMO se encontró.
+
+    v1.48.0 · Un normalizador con una lista fija de nombres falla en silencio
+    cuando el proveedor usa otro: devuelve 0.0 y la sección publica «0.0 acc»
+    teniendo seiscientos intervalos descargados. Un cero ahí afirma «no hubo
+    volumen oscuro», que es una conclusión sobre el mercado y no un hueco.
+
+    Aquí se intenta primero por NOMBRE DECLARADO, que es lo correcto cuando el
+    contrato se conoce. Si ninguno aparece, se DERIVA de la propia respuesta:
+    el campo numérico cuyo nombre contiene a la vez el concepto y una pista de
+    magnitud. No es adivinar un valor —el valor lo manda el proveedor—; es
+    descubrir bajo qué nombre lo manda, y se DECLARA cuál se usó para que el
+    Auditor pueda enseñarlo y el contrato quede fijado después.
+    """
+    if not isinstance(row, dict):
+        return None, ""
+    direct = _pick(row, *names)
+    v = _f(direct)
+    if v is not None:
+        for n in names:
+            if n in row and row[n] is not None:
+                return v, n
+        return v, names[0]
+    if not contains:
+        return None, ""
+    want = tuple(c.lower() for c in contains)
+    pistas = tuple(h.lower() for h in (hints or _VOLUME_HINTS))
+    best: Optional[tuple[float, str]] = None
+    for key, raw in row.items():
+        k = str(key).lower()
+        if not any(c in k for c in want):
+            continue
+        if pistas and not any(h in k for h in pistas):
+            continue
+        n = _f(raw)
+        if n is None:
+            continue
+        # Se prefiere el nombre más corto: `darkVolume` antes que
+        # `darkVolumeFiveDayAverage`, que mide otra cosa.
+        if best is None or len(key) < len(best[1]):
+            best = (n, str(key))
+    return best if best else (None, "")
+
+
 def norm_dark_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Flujo de dark pool tal y como lo publica Quant Data.
 
@@ -679,31 +730,61 @@ def norm_dark_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     rows = _rows(payload, "buckets", "series", "points", "timeline", "flow") or _keyed_rows(payload, "timestamp")
     out: List[Dict[str, Any]] = []
+    # Qué campo acabó sirviendo cada magnitud, y qué campos trajo la respuesta.
+    # Es lo que convierte un «0.0 acc» inexplicable en algo sobre lo que actuar.
+    field_map: Dict[str, str] = {}
+    observed_fields: set = set()
     for r in rows:
         if not isinstance(r, dict):
             continue
         t = _ts_iso(_pick(r, "timestamp", "time", "t", "bucket", "date"))
         if t is None:
             continue
+        observed_fields.update(str(k) for k in r)
         price = _f(_pick(r, "stockPrice", "price", "underlyingPrice"), None)
         if price is not None and price <= 0:
             price = None
-        dark = _f(_pick(r, "darkVolume", "darkPoolVolume", "offExchangeVolume", "volume"), 0.0) or 0.0
-        total = _f(_pick(r, "totalVolume", "litAndDarkVolume", "consolidatedVolume"), None)
-        lit = _f(_pick(r, "litVolume", "exchangeVolume"), None)
-        if total is None and lit is not None:
+        # El volumen oscuro por nombre declarado y, si el proveedor usa otro,
+        # derivado de la propia respuesta dejando dicho cuál se usó.
+        dark, dark_key = resolve_numeric_field(
+            r, ("darkVolume", "darkPoolVolume", "offExchangeVolume", "volume"),
+            contains=("dark", "offexchange", "off_exchange"))
+        total, total_key = resolve_numeric_field(
+            r, ("totalVolume", "litAndDarkVolume", "consolidatedVolume"),
+            contains=("total", "consolidated"))
+        lit, _lit_key = resolve_numeric_field(
+            r, ("litVolume", "exchangeVolume"), contains=("lit",))
+        if total is None and lit is not None and dark is not None:
             total = lit + dark
+        if dark_key:
+            field_map["dark_volume"] = dark_key
+        if total_key:
+            field_map["total_volume"] = total_key
         out.append({
             "t": t,
+            # `None` y no 0.0: si el proveedor no publica volumen oscuro en este
+            # intervalo, la sección lo dice en vez de afirmar que fue cero.
             "dark_volume": dark,
             "lit_volume": lit,
             "total_volume": total,
             "dark_notional": _f(_pick(r, "darkNotional", "notional", "dollarVolume"), None),
-            "dark_share_pct": (round(100.0 * dark / total, 4) if total and total > 0 else None),
+            "dark_share_pct": (round(100.0 * dark / total, 4)
+                               if (dark is not None and total and total > 0) else None),
             "stock_price": price,
         })
     out.sort(key=lambda x: x["t"])
-    return {"ready": bool(out), "rows": out, "count": len(out), "source": "QUANTDATA_DARK_FLOW"}
+    measured = sum(1 for r in out if r.get("dark_volume") is not None)
+    return {
+        "ready": bool(out), "rows": out, "count": len(out),
+        "source": "QUANTDATA_DARK_FLOW",
+        # Diagnóstico para el Auditor: con qué campo se leyó cada magnitud,
+        # cuántos intervalos traen volumen y qué campos publicó el proveedor.
+        # Sin esto, «608 intervalos · 0.0 acc» no se puede corregir.
+        "field_map": dict(field_map),
+        "observed_fields": sorted(observed_fields)[:40],
+        "intervals_with_volume": measured,
+        "volume_field_resolved": bool(field_map.get("dark_volume")),
+    }
 
 
 # Códigos de centro de ejecución que identifican una operación FUERA de bolsa.

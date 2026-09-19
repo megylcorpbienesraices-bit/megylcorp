@@ -1,39 +1,35 @@
 {
-  "version": "1.47.0",
-  "release": "ITM_QUANT_v1.47.0_PRE_VPS",
+  "version": "1.48.0",
+  "release": "ITM_QUANT_v1.48.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.46.0",
+  "base_version": "1.47.0",
   "focus": [
-    "AdaptiveBarProfile: un unico componente de barras para EXPOSICION, FLUJO, OI y todo histograma. Grosor, agrupacion, hueco, autoescala y hover salen del espacio de pantalla y de la densidad, no de constantes por seccion.",
-    "El suelo de grosor se aplica al PASO y no a la barra. Antes fitBars dejaba 3px de paso y barThickness cogia el 82% de eso: 2.46px, por debajo del minimo que el codigo creia garantizar.",
-    "Muchas observaciones -> AGRUPAR -> engrosar. Nunca adelgazar hasta desaparecer. Se elige la agrupacion cuyo grosor queda mas cerca del objetivo, asi que no se tira resolucion para ganar un grosor que no hacia falta.",
-    "Los carriles de FLUJO agrupan el INTERVALO (2m, 3m, 5m...) y no la posicion, para seguir alineados con las velas de TRACE. Volumen, prima, flujo neto y conteo se SUMAN; el pico del intervalo se conserva y se marca cuando domina a la suma.",
-    "Mapa de calor: zonas rellenas en vez de circulos de 1.3px, con agrupacion en las dos dimensiones y normalizacion por rango dentro de lo visible.",
-    "Primer fotograma correcto: Glide adopta la primera aparicion de cada clave en vez de animar desde cero. Un panel que entra en pantalla dibuja UN fotograma y ese era el que se quedaba, con el eje bien y las barras a cero.",
-    "tools/visual_regression.py mide la geometria REAL de los renderizadores en 46 combinaciones de activo, distribucion, densidad y viewport. Es la comprobacion que las pruebas numericas no podian hacer.",
-    "Coherencia de datos: OI audita agregado y desglose por separado, la deriva de volatilidad sin medir deja de publicarse como cero, la prima sin cinta deja de ser $0.0 y la diagonal de fiabilidad no se dibuja sin nada que referenciar.",
-    "La regresion visual incluye una pasada de REDIMENSIONADO: la geometria se vuelve a medir con la ventana cambiada, porque una geometria correcta solo al primer render no sirve en una terminal que se redimensiona."
+    "INTERVAL MAP: de rejilla de celdas a SUPERFICIE continua. Huecos rellenados desde las vecinas por distancia inversa, suavizado gaussiano en celdas, normalizacion por rango con signo, suelo de ruido y contornos cerrados en los dos ejes. Una rejilla de celdas duras con huecos negros no es un mapa de calor: es una tabla pintada.",
+    "TRACE usa EL MISMO campo que el Interval Map de la seccion. Tenia su propio umbral y su propia curva, asi que el mismo dato se veia distinto en dos pantallas del mismo programa.",
+    "EXPOSICION e INTERES ABIERTO: UNA barra por strike, siempre. El panel crece (ITMQBars.extentFor) y el contenedor hace scroll, asi que no hay que elegir entre resolucion y grosor. Una barra que dice 516...518 obliga a abrir el hover para saber cual de los tres tiene el muro.",
+    "Vista de RELIEVE 3D del mismo perfil: proyeccion isometrica con los mismos dos ejes reales y la misma escala robusta. Las barras comparan magnitudes; el relieve ensena la forma de la estructura.",
+    "Marcadores de flujo DORADOS con flecha y cantidad, en TRACE y en FLUJO. El color codificaba CALL/PUT con el mismo verde y el mismo rojo que usa el precio, asi que una marca sobre un tramo de su color desaparecia dentro de el.",
+    "DARK FLOW deriva de la respuesta REAL bajo que campo llega el volumen, y lo declara. Un normalizador con lista fija de nombres devolvia 0.0 y publicaba '608 intervalos - 0.0 acc'."
   ],
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "SIN CAMBIOS de formula. Ninguna metrica cambia de valor por esta release. Lo que cambia es representacion, agrupacion visual y escalado.",
-    "CORRECCION: NameError: name '_f' is not defined en _resolve_visual_window. Se escribio copiando dos lineas de terminal_api, donde el conversor se llama _f; en service.py se llama _finite. CADA construccion del trace lanzaba el error, se tragaba en el except de /api/terminal/bundle y la terminal servia un trace VACIO: velas, perfiles y niveles en blanco. Un except Exception que convierte un fallo de programacion en un panel vacio es el peor sitio donde puede esconderse un error, porque parece falta de datos.",
-    "CORRECCION: la cabecera de INTERES ABIERTO leia state.positioning y el desglose leia otra fuente. Que existiera el agregado no decia nada sobre el desglose, asi que la pantalla mostraba 'OI TOTAL 37.1K' encima de 'SIN INTERES ABIERTO'. Ademas un agregado ausente se convertia en cero.",
-    "CORRECCION: iv_change = 0.0 cuando solo hay una observacion. Sin dos observaciones NO hay cambio que medir, y eso no es un cambio de cero: la terminal mostraba 'DERIVA DE VOLATILIDAD +0.000 pp' junto a un panel que decia 'NO DISPONIBLE'.",
-    "CORRECCION: la prima se sumaba sobre impresiones y los contratos podian venir de la cadena oficial. Sin cinta, sum() daba 0.0 y salia 'Contratos 14K' junto a 'Prima $0.0'. No hubo prima cero: no hubo prima observada.",
-    "CORRECCION: la curva de fiabilidad dibujaba la diagonal de referencia tambien con cero sesiones medidas. Una recta de esquina a esquina se lee como un resultado.",
-    "CORRECCION: FLUJO 5M publicaba $0.0 sin cinta observada. sum() sobre una columna rellenada con ceros afirma 'en los ultimos cinco minutos no se pago prima direccional'; lo cierto es que no se observo ninguna impresion con la que medirlo."
+    "SIN CAMBIOS de formula. Ninguna metrica cambia de valor. El cambio es de representacion, agrupacion visual y escalado; los valores originales no se tocan.",
+    "CORRECCION: el mapa de calor dibujaba celdas duras sobre fondo negro con huecos sin pintar. Una celda sin observacion no es un cero: es un hueco, y se interpola desde sus vecinas. Un cero MEDIDO sigue siendo cero.",
+    "CORRECCION: sin suelo de ruido, la normalizacion por rango deja media pantalla a media opacidad y el mapa sale como un bloque macizo de verde y rojo. Por debajo del percentil de fondo no se pinta nada.",
+    "CORRECCION: los contornos se barrian solo en un eje, asi que salian segmentos verticales sueltos que parecian ruido en vez de un borde. Ahora se cierran en los dos.",
+    "CORRECCION: el perfil por strike agrupaba tres strikes en una barra. El strike es la unidad de lectura de un perfil de exposicion.",
+    "CORRECCION: norm_dark_flow devolvia 0.0 cuando el proveedor usaba otro nombre de campo. Un cero ahi afirma que no hubo actividad fuera de bolsa; lo cierto era que no se pudo leer. Ahora es None, se deriva el campo de la respuesta y se declara cual se uso."
   ],
   "tests": {
-    "collected": 2008,
-    "passed": 2008,
+    "collected": 2018,
+    "passed": 2018,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
     "files": 147,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "f2ef2d39b5f0add232d5f572a2e085e82c9f698fd1647ca07dfe790ffee2ebaa"
+    "plan_sha256": "cb163e95767687e58ad2d4e8ce60e0b3d2a18d68c01911d69e232514fa484617"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -94,11 +90,17 @@
     "volatility_drift_unmeasured": "PUBLISHED_AS_NULL_NOT_ZERO",
     "statistics_premium_without_tape": "PUBLISHED_AS_NULL_NOT_ZERO",
     "backtest_reliability_reference": "ONLY_DRAWN_WITH_OBSERVATIONS",
-    "opra_five_minute_without_tape": "PUBLISHED_AS_NULL_NOT_ZERO"
+    "opra_five_minute_without_tape": "PUBLISHED_AS_NULL_NOT_ZERO",
+    "interval_map_rendering": "CONTINUOUS_FIELD_GAP_FILLED_SMOOTHED_RANK_NORMALIZED",
+    "trace_heat_treatment": "UNIFIED_WITH_INTERVAL_MAP_FIELD",
+    "strike_profile_resolution": "ONE_BAR_PER_STRIKE_PANEL_GROWS",
+    "strike_profile_second_view": "ISOMETRIC_RELIEF_SAME_SCALE",
+    "flow_markers": "GOLD_WITH_DIRECTION_ARROW_AND_AMOUNT",
+    "dark_flow_field_resolution": "DERIVED_FROM_RESPONSE_AND_DECLARED"
   },
   "verification_limits": [
-    "Sin salida hacia quantdata.us: NO hay un 200 real de dark-pool-levels y el contrato del proveedor sigue sin poder leerse. Dark Pool Levels sigue PENDIENTE.",
-    "Sin credenciales de Quant Data: la validacion LIVE (verify_live_quantdata.py, incluido --dark-pool) queda pendiente de ejecutarse donde exista la API key.",
-    "La regresion visual se ejecuta sobre los renderizadores reales con datasets sinteticos de las formas que rompen; la comparacion contra una sesion de mercado real queda pendiente en el VPS."
+    "Sin salida hacia quantdata.us: NO hay un 200 real de dark-pool-levels. Dark Pool Levels sigue PENDIENTE y la seccion lo declara por carril.",
+    "Sin credenciales de Quant Data en el entorno de construccion: el Interval Map y el mapa de TRACE se han verificado con el campo del motor y con datasets sinteticos de la forma real (90 strikes x 81 intervalos con huecos). Con la clave del usuario la misma ruta la alimenta el proveedor.",
+    "El carril de FLUJO no se ha podido ver con cinta real en este entorno: su geometria esta certificada en el banco con 390 y 780 buckets."
   ]
 }

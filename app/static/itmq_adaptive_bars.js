@@ -134,6 +134,28 @@
      */
     const target = Math.max(minPx, o.targetThickness || TARGET_BAR_PX);
     const thicknessFor = g => (span / Math.ceil(n / g)) * fill;
+
+    /* v1.48.0 · `aggregate: 'none'` — una barra por observación, siempre.
+     *
+     * En un perfil por strike, agrupar es la decisión equivocada aunque la
+     * geometría la permita: el strike ES la unidad de lectura. Una barra que
+     * dice «516…518» obliga a abrir el hover para saber cuál de los tres tiene
+     * el muro, que es justo lo que se estaba mirando. Cuando el panel crece
+     * para que quepan todos, la resolución se conserva Y las barras son
+     * gruesas; no hay que elegir.
+     *
+     * El llamador es quien decide: `heightFor()` le dice cuánto alto necesita.
+     */
+    if (o.aggregate === 'none') {
+      const pitch0 = span / n;
+      return {
+        bins: n, group: 1, pitch: pitch0,
+        thickness: Q.clamp(pitch0 * fill, Math.min(minPx, pitch0), maxPx),
+        gap: Math.max(0, pitch0 - pitch0 * fill),
+        aggregated: false, reason: '', target_px: target,
+      };
+    }
+
     let group = 1;
     let best = Infinity;
     for (let g = 1; g <= n; g++) {
@@ -397,8 +419,175 @@
     };
   }
 
+  /* ── Campo continuo: de celdas sueltas a superficie ───────────────────────
+   *
+   * Una rejilla de celdas duras con huecos negros entre ellas no es un mapa de
+   * calor: es una tabla pintada. La exposición por strike y tiempo es un CAMPO
+   * —varía de forma continua entre strikes vecinos y entre intervalos
+   * vecinos—, y lo que hay que ver son sus zonas, sus crestas y por dónde se
+   * desplazan, no la celda individual.
+   *
+   * `field()` prepara ese campo en tres pasos:
+   *
+   *   1 · RELLENO DE HUECOS. Una celda sin observación no es un cero: es un
+   *       hueco. Se interpola desde sus vecinas con peso inverso a la
+   *       distancia, así que una cresta no queda cortada porque falte un
+   *       intervalo. Un cero MEDIDO sigue siendo cero.
+   *   2 · SUAVIZADO. Un núcleo gaussiano separable difumina el campo lo justo
+   *       para que las zonas se lean como zonas. El radio se da en CELDAS, así
+   *       que no depende del tamaño del panel ni del activo.
+   *   3 · NORMALIZACIÓN POR RANGO, con signo. La intensidad es el percentil que
+   *       ocupa |valor| dentro del campo visible, que es lo que hace que una
+   *       cadena concentrada y una repartida se lean igual de bien.
+   *
+   * La superficie se pinta después con interpolación bilineal del propio
+   * lienzo, así que el resultado es continuo a cualquier resolución sin
+   * dibujar una celda por píxel.
+   */
+
+  // Radio del suavizado, en CELDAS. Es una propiedad de cuánto se parecen dos
+  // strikes vecinos, no del tamaño del panel.
+  const FIELD_BLUR_CELLS = 1.15;
+  // Hasta dónde se busca una vecina para rellenar un hueco.
+  const FIELD_FILL_RADIUS = 2;
+
+  function _gaussKernel(sigma) {
+    const r = Math.max(1, Math.ceil(sigma * 2.5));
+    const k = [];
+    let sum = 0;
+    for (let i = -r; i <= r; i++) {
+      const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+      k.push(w); sum += w;
+    }
+    return { k: k.map(w => w / sum), r };
+  }
+
+  function field(matrix, opts) {
+    const o = opts || {};
+    const src = Array.isArray(matrix) ? matrix : [];
+    const h = src.length;
+    const w = h ? (Array.isArray(src[0]) ? src[0].length : 0) : 0;
+    if (!h || !w) return { w: 0, h: 0, values: [], intensity: () => 0, max: 0 };
+
+    // ── 1 · relleno de huecos ────────────────────────────────────────────
+    // `null`/`undefined`/no finito = hueco. Un 0 explícito es una medición.
+    const known = new Float64Array(w * h);
+    const has = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const row = src[y] || [];
+      for (let x = 0; x < w; x++) {
+        const v = row[x];
+        const n = typeof v === "number" ? v : Number(v);
+        if (v !== null && v !== undefined && Number.isFinite(n)) {
+          known[y * w + x] = n; has[y * w + x] = 1;
+        }
+      }
+    }
+    const filled = new Float64Array(known);
+    const R = o.fillRadius === undefined ? FIELD_FILL_RADIUS : o.fillRadius;
+    if (R > 0) {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (has[i]) continue;
+          let acc = 0, wsum = 0;
+          for (let dy = -R; dy <= R; dy++) {
+            const yy = y + dy;
+            if (yy < 0 || yy >= h) continue;
+            for (let dx = -R; dx <= R; dx++) {
+              const xx = x + dx;
+              if (xx < 0 || xx >= w) continue;
+              const j = yy * w + xx;
+              if (!has[j]) continue;
+              const d2 = dx * dx + dy * dy;
+              if (!d2) continue;
+              const ww = 1 / d2;                  // peso inverso a la distancia
+              acc += known[j] * ww; wsum += ww;
+            }
+          }
+          if (wsum > 0) filled[i] = acc / wsum;
+        }
+      }
+    }
+
+    // ── 2 · suavizado gaussiano separable ────────────────────────────────
+    const sigma = o.blur === undefined ? FIELD_BLUR_CELLS : o.blur;
+    let out = filled;
+    if (sigma > 0) {
+      const { k, r } = _gaussKernel(sigma);
+      const tmp = new Float64Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let acc = 0, wsum = 0;
+          for (let i = -r; i <= r; i++) {
+            const xx = x + i;
+            if (xx < 0 || xx >= w) continue;
+            const ww = k[i + r];
+            acc += filled[y * w + xx] * ww; wsum += ww;
+          }
+          tmp[y * w + x] = wsum > 0 ? acc / wsum : 0;
+        }
+      }
+      const blur = new Float64Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let acc = 0, wsum = 0;
+          for (let i = -r; i <= r; i++) {
+            const yy = y + i;
+            if (yy < 0 || yy >= h) continue;
+            const ww = k[i + r];
+            acc += tmp[yy * w + x] * ww; wsum += ww;
+          }
+          blur[y * w + x] = wsum > 0 ? acc / wsum : 0;
+        }
+      }
+      out = blur;
+    }
+
+    // ── 3 · normalización por rango, conservando el signo ────────────────
+    const mags = [];
+    let max = 0;
+    for (let i = 0; i < out.length; i++) {
+      const a = Math.abs(out[i]);
+      if (a > 0) mags.push(a);
+      if (a > max) max = a;
+    }
+    mags.sort((a, b) => a - b);
+    const intensity = v => {
+      const a = Math.abs(v);
+      if (!(a > 0) || !mags.length) return 0;
+      let lo = 0, hi = mags.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (mags[m] < a) lo = m + 1; else hi = m; }
+      return (lo + 0.5) / mags.length;
+    };
+
+    return {
+      w, h, values: out, max, intensity,
+      raw: (x, y) => known[y * w + x],
+      measured: (x, y) => !!has[y * w + x],
+      normalization: "FIELD_RANK_PERCENTILE",
+    };
+  }
+
+  /**
+   * Alto (o ancho) que necesita un panel para dar a cada observación una barra
+   * del grosor pedido, SIN agrupar.
+   *
+   * Es la otra mitad de `aggregate: 'none'`: si el perfil tiene que enseñar un
+   * strike por barra, alguien tiene que decidir cuánto sitio hace falta, y esa
+   * cuenta no puede quedar repartida por los paneles.
+   */
+  function extentFor(count, opts) {
+    const o = opts || {};
+    const fill = o.fill || FILL;
+    const thickness = Math.max(o.minThickness || MIN_BAR_PX,
+                               o.targetThickness || TARGET_BAR_PX);
+    return Math.ceil(Math.max(0, Math.floor(count)) * (thickness / fill));
+  }
+
   global.ITMQBars = {
-    layout, bin, extent, describe, timeLayout, timeBins, reduceBin, grid, MIN_CELL_PX,
+    layout, bin, extent, describe, timeLayout, timeBins, reduceBin, grid, field,
+    extentFor, MIN_CELL_PX, FIELD_BLUR_CELLS,
     FILL, MIN_BAR_PX, TARGET_BAR_PX, MAX_BAR_PX,
     MIN_EXTENT_PX, MAX_EXTENT_FRACTION,
   };

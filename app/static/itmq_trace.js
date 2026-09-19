@@ -245,26 +245,37 @@
     const pos = hexRGB(Q.token('--heat-pos', '#22c55e'));
     const neg = hexRGB(Q.token('--heat-neg', '#ef4444'));
 
+    /* v1.48.0 · EL MISMO campo que el Interval Map de la sección.
+     *
+     * TRACE tenía aquí su propio tratamiento —umbral y curva propios— así que
+     * el mapa de fondo de TRACE y el INTERVAL MAP de la sección se veían
+     * distintos con el MISMO dato. Dos tratamientos del mismo dato es lo que
+     * hace que dos pantallas del mismo programa no se parezcan, y obliga a
+     * corregir dos veces cada ajuste visual.
+     *
+     * Ahora los dos pasan por `ITMQBars.field`: huecos rellenados desde sus
+     * vecinas, suavizado en celdas y normalización por rango. El resultado es
+     * una superficie continua con zonas, no una rejilla de celdas sueltas.
+     */
+    const AB = window.ITMQBars;
+    // La matriz que espera el campo es [strike][tiempo]; si llega traspuesta se
+    // endereza antes, no dentro del bucle de píxeles.
+    const upright = rowsAreStrikes ? m
+      : Array.from({ length: H }, (_, si) => Array.from({ length: W }, (_, xi) => (m[xi] || [])[si]));
+    const f = AB ? AB.field(upright, {}) : null;
+
+    const NOISE = 0.55, GAMMA = 1.9;
     for (let yi = 0; yi < H; yi++) {
       // fila 0 del bitmap = strike más alto (el eje de precio crece hacia arriba)
       const si = H - 1 - yi;
       for (let xi = 0; xi < W; xi++) {
-        const raw = rowsAreStrikes ? (m[si] || [])[xi] : (m[xi] || [])[si];
-        const v = Q.clamp(Q.num(raw, 0), -1, 1);
-        const a = Math.abs(v);
+        const v = f ? f.values[si * W + xi] : Q.num((upright[si] || [])[xi], 0);
         const c = v >= 0 ? pos : neg;
         const o = (yi * W + xi) * 4;
-        // v1.45.0 · El suelo de ruido ya lo aplica el normalizador por RANGO
-        // (percentil dentro de la matriz), así que aquí no hace falta recortar otra
-        // vez: hacerlo era recortar dos veces y dejaba el mapa casi vacío en las
-        // cadenas concentradas, que son la mayoría.
-        //
-        // La curva gamma 0.62 (antes 0.78) levanta la parte media de la
-        // distribución, que es donde vive la estructura que hay que ver; el techo
-        // sube de 240 a 252 para que la concentración real destaque.
-        const k = a < 0.02 ? 0 : Math.pow(a, 0.62);
+        const rank = f ? f.intensity(v) : Math.min(1, Math.abs(v));
+        const a = (rank - NOISE) / (1 - NOISE);
         img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
-        img.data[o + 3] = Math.round(k * 252);
+        img.data[o + 3] = a <= 0 ? 0 : Math.round(255 * Math.min(1, Math.pow(a, GAMMA)));
       }
     }
     ictx.putImageData(img, 0, 0);
@@ -784,19 +795,55 @@
       if (!Q.isNum(x) || !Q.isNum(y)) continue;
       if (x < box.x - 20 || x > box.x + box.w + 20) continue;
 
-      const col = up ? Q.token('--pos', '#22c55e')
-                     : m.side === 'PUT' ? Q.token('--neg', '#ef4444') : Q.token('--gold', '#d9a441');
-      const dy = up ? -14 : 14;
-      const a = anchored ? 0.95 : 0.45;
-      ctx.fillStyle = Q.alpha(col, a);
-      ctx.textBaseline = up ? 'bottom' : 'top';
-      ctx.fillText(m.label || (up ? '▲' : '▼'), x, y + dy);
+      /* v1.48.0 · La marca es DORADA; la flecha dice el sentido.
+       *
+       * Antes el color codificaba CALL/PUT —verde o rojo— y competía con las
+       * velas, que usan ese mismo verde y ese mismo rojo para otra cosa. Una
+       * marca de prima grande sobre una vela verde desaparecía dentro de ella.
+       *
+       * El oro no lo usa ningún otro elemento del gráfico, así que la marca se
+       * ve siempre y en el sitio exacto donde ocurrió. El SENTIDO va en la
+       * flecha —▲ compra, ▼ venta— y la CANTIDAD al lado, que es la lectura
+       * que se pedía: qué pasó, de cuánto, y dónde.
+       */
+      const col = Q.token('--gold', '#d9a441');
+      const dy = up ? -16 : 16;
+      const a = anchored ? 1 : 0.5;
+      const label = m.label || (up ? '▲' : '▼');
+
+      // Guía desde el precio hasta la marca: sin ella la cifra flota y no se
+      // sabe a qué vela pertenece.
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x, y + dy * 0.45);
-      ctx.strokeStyle = Q.alpha(col, a * 0.75);
+      ctx.lineTo(x, y + dy * 0.52);
+      ctx.strokeStyle = Q.alpha(col, a * 0.7);
       ctx.lineWidth = 1;
       ctx.stroke();
+
+      // Punta de flecha rellena en el punto exacto del precio.
+      const tip = up ? -1 : 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y + tip * 2);
+      ctx.lineTo(x - 4.5, y + tip * 8);
+      ctx.lineTo(x + 4.5, y + tip * 8);
+      ctx.closePath();
+      ctx.fillStyle = Q.alpha(col, a);
+      ctx.fill();
+
+      // Cifra sobre un fondo propio: encima del mapa de calor, el texto suelto
+      // se pierde contra el fondo pase lo que pase con el color.
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width + 10;
+      const ly = y + dy;
+      ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), a * 0.92);
+      Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4);
+      ctx.fill();
+      ctx.strokeStyle = Q.alpha(col, a * 0.85);
+      ctx.lineWidth = 1;
+      Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4);
+      ctx.stroke();
+      ctx.fillStyle = Q.alpha(col, a);
+      ctx.fillText(label, x, ly);
       // Zona sensible para el hover: el detalle enriquecido del Order Flow no se
       // pinta encima del gráfico, se pide al pasar por la marca.
       S.qflowHits.push({ x, y: y + dy, marker: m, anchored });

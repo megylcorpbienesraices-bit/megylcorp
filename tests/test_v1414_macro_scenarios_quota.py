@@ -651,7 +651,7 @@ def test_every_id_the_renderer_writes_exists_in_the_template():
 def test_the_heatmap_panel_exists_for_the_interval_map():
     panels = text("app/static/itmq_panels.js")
     assert "function heatmap(host, opts)" in panels
-    assert "heatmap };" in panels or "heatmap }" in panels
+    assert "heatmap," in panels or "heatmap }" in panels
     # Rejilla de puntos: el radio y la opacidad codifican la magnitud, el color el
     # signo. Un degradado continuo escondía la exposición concentrada en pocos strikes.
     assert "ctx.arc(" in panels and "Math.pow(a," in panels
