@@ -21,7 +21,9 @@ from .client import QuantDataClient, QuantDataError
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
 from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
-                    _validation_detail, CADENCE, PAGES, QuantDataTool,
+                    _validation_detail, repair_body, classify_provider_failure,
+                    STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
+                    STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS
 from ...core.obs import note as _obs_note, expected as _obs_expected
@@ -240,104 +242,179 @@ class QuantDataIntelligence:
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def _note_fault(self, tool: QuantDataTool, status: str, detail: str,
+                    *, fields: Any = (), body: Any = None) -> None:
+        """Deja escrita la CAUSA del fallo sin borrar el último dato bueno.
+
+        v1.46.0 · Cuando una herramienta fallaba, no se escribía nada: el bloque
+        quedaba como estaba y el Auditor no podía distinguir «el proveedor
+        rechazó el cuerpo» de «todavía no se ha llamado». Ahora la causa viaja
+        SIEMPRE, y si había datos anteriores se conservan —degradados por edad,
+        que es lo que hace `classify`—, porque un fallo de refresco no es razón
+        para tirar lo que ya teníamos.
+        """
+        previous = self._data.get(tool.key)
+        block = dict(previous) if isinstance(previous, dict) else {
+            "ready": False, "rows": [], "count": 0,
+        }
+        block.update({
+            "symbol": self._symbol,
+            "lane_status": status,
+            "lane_detail": str(detail or "")[:240],
+            "lane_fields": [str(f) for f in (fields or [])][:8],
+            "lane_failed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if body is not None:
+            block["request_body"] = body
+        if not block.get("path"):
+            block["path"] = tool.resolved_path or (tool.paths[0] if tool.paths else None)
+        self._data[tool.key] = block
+
     async def _fetch(self, tool: QuantDataTool) -> None:
-        """Descarga una herramienta, reparando el cuerpo si el proveedor lo rechaza.
+        """Descarga una herramienta, reparando el cuerpo con lo que el proveedor dicta.
 
-        Tres clases de fallo, tres tratamientos distintos, y confundirlas fue lo que
-        dejó `dark-pool-levels` en DEGRADADO durante toda una release:
+        Cinco clases de fallo, cinco tratamientos. Confundirlas fue lo que dejó
+        `dark-pool-levels` en DEGRADADO reintentando indefinidamente un cuerpo que
+        nunca iba a ser aceptado:
 
-          * **404 / herramienta ausente** — la ruta es canónica, así que no se
-            adivinan alternativas: el plan no la incluye o el proveedor la renombró.
-          * **400 de validación** — la ruta existe y el cuerpo está mal. Si la
-            herramienta declara variantes, se prueban en orden y se RECUERDA la
-            aceptada; el descubrimiento se paga una vez, no cada ciclo.
-          * **transitorio** (timeout, red, rate limit) — se reintenta más tarde sin
-            descartar nada.
+          400 REQUEST_INVALID  la ruta existe y el cuerpo está mal. Se lee QUÉ campo
+                               nombró el proveedor y se corrige: añadir el que falta,
+                               quitar el que sobra, cambiar el valor inválido. Si no
+                               sabemos corregirlo, se DICE el campo y se para.
+                               Nunca entra en el ciclo de reintentos.
+          422 NO_DATA          la petición era válida y no hay datos. No es un fallo.
+          404 MISSING_TOOL     el plan no la incluye o el proveedor la renombró.
+          5xx PROVIDER_ERROR   fallo temporal suyo → reintento con backoff.
+          --- TRANSIENT        red, timeout, rate limit → reintento con backoff.
         """
         assert self.client is not None
         ticker = self._symbol
         epoch = self._epoch
-        bodies = tool.request_bodies(ticker)
-        last_err: str | None = None
+        last_err = None
 
         for path in tool.candidates():
-            for index, body in enumerate(bodies):
+            # Como máximo tres correcciones por ciclo. Un 400 que sobrevive a tres
+            # correcciones dictadas por el propio proveedor no se arregla probando
+            # una cuarta: se arregla leyendo el diagnóstico.
+            for _attempt in range(3):
+                body = tool.request_body(ticker)
                 QUOTA.spend(1)
-                outcome = await self._attempt(tool, path, body, ticker, epoch, index)
+                outcome, detail = await self._attempt(tool, path, body, ticker, epoch)
                 if outcome == "OK":
                     return
+                if outcome == "REPAIRED":
+                    continue
                 if outcome == "ROUTE_INVALID":
-                    break                    # esta ruta no existe: siguiente ruta
-                if outcome == "RETRY_BODY":
-                    last_err = tool.validation_error
-                    continue                 # el cuerpo está mal: siguiente variante
-                if outcome == "STOP":
-                    return                   # transitorio o época caducada
+                    last_err = detail
+                    break
+                return
             else:
-                # Se agotaron las variantes sin que ninguna pasara la validación.
-                if tool.validation_error:
-                    tool.mark_unavailable(
-                        f"el proveedor rechaza todas las formas del cuerpo · "
-                        f"{tool.validation_error}")
-                    self._fetched_at[tool.key] = time.time()
-                    return
+                # Se agotaron las correcciones sin que el proveedor aceptara.
+                tool.mark_unavailable(
+                    f"el proveedor sigue rechazando el cuerpo · {tool.validation_error or ''}")
+                self._note_fault(tool, STATUS_REQUEST_INVALID,
+                                 tool.validation_error or "cuerpo rechazado tres veces")
+                self._fetched_at[tool.key] = time.time()
+                return
 
         tool.mark_unavailable(last_err or "NO_CANDIDATE_PATH")
+        self._note_fault(tool, STATUS_MISSING_TOOL,
+                         last_err or "ninguna ruta declarada respondió")
         self._fetched_at[tool.key] = time.time()
 
     async def _attempt(self, tool: QuantDataTool, path: str, body: dict[str, Any],
-                       ticker: str, epoch: int, index: int) -> str:
-        """Un intento: una ruta y un cuerpo. Devuelve qué hacer a continuación."""
+                       ticker: str, epoch: int) -> tuple[str, str]:
+        """Un intento. Devuelve (qué hacer, detalle)."""
         assert self.client is not None
         try:
             # La petición pasa por el runtime del Data Hub: deduplicación en vuelo,
-            # aislamiento por canal y Last Known Good. El precio no pasa por aquí.
+            # aislamiento por canal y Last Known Good. Cada herramienta es su propio
+            # canal, así que un fallo de `dark-pool-levels` no tumba a `dark-flow`.
             _client = self.client
             gate = await HUB_RUNTIME.fetch(
-                f"{tool.key}#{index}", ticker,
+                tool.key, ticker,
                 lambda: _client.post(path, body),
                 timeout_s=self.settings.request_timeout_seconds + 1.0,
                 accept_stale=False)
             if not gate.get("ready"):
-                # El canal envuelve el fallo; la excepción original viaja dentro y
-                # es la que distingue un cuerpo reparable de una ruta inexistente.
                 inner = gate.get("exception")
                 if isinstance(inner, QuantDataError):
                     raise inner
                 detail = str(gate.get("detail") or "canal no disponible")
                 tool.note_attempt(path, detail)
+                tool.provider_status = STATUS_TRANSIENT
                 tool.mark_transient(detail)
+                self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
                 self._fetched_at[tool.key] = time.time()
-                return "STOP"
+                return "STOP", detail
             response = gate["payload"]
         except QuantDataError as exc:
             msg = str(exc)
+            status = classify_provider_failure(exc)
+            tool.provider_status = status
             tool.note_attempt(path, msg)
-            if is_validation_error(exc):
-                # La ruta existe; lo que el proveedor rechaza es el cuerpo. Se
-                # guarda el campo concreto que nombró —es lo único accionable— y se
-                # prueba la siguiente forma, si la herramienta declara alguna.
+
+            if status == STATUS_REQUEST_INVALID:
+                fields = getattr(exc, "validation_fields", None) or []
                 tool.note_validation_failure(_validation_detail(exc))
                 tool.variants_tried += 1
-                _obs_expected(f"quantdata.{tool.key}.body_rejected")
-                return "RETRY_BODY"
-            if is_missing_tool_error(msg):
+                repaired, note = repair_body(body, fields)
+                if repaired is None:
+                    # El proveedor rechaza algo que no sabemos corregir. Lo correcto
+                    # es decir QUÉ campo, no seguir probando formas.
+                    tool.mark_unavailable(
+                        f"cuerpo rechazado y sin corrección conocida · "
+                        f"{tool.validation_error or msg}")
+                    self._note_fault(tool, STATUS_REQUEST_INVALID,
+                                     tool.validation_error or msg,
+                                     fields=fields, body=body)
+                    self._fetched_at[tool.key] = time.time()
+                    _obs_note(f"quantdata:{tool.key}:unrepairable", exc, severity="DEGRADED")
+                    return "STOP", msg
+                tool.learn_repair(body, repaired, note)
+                _obs_expected(f"quantdata.{tool.key}.body_repaired")
+                return "REPAIRED", note
+
+            if status == STATUS_NO_DATA:
+                # Petición válida, sin datos. No es un fallo del programa ni del
+                # proveedor, y no debe marcar la herramienta como averiada.
+                tool.mark_success()
+                tool.last_success = time.time()
+                self._fetched_at[tool.key] = tool.last_success
+                if epoch == self._epoch:
+                    self._data[tool.key] = {
+                        "ready": False, "rows": [], "count": 0,
+                        "state": "NO_PROVIDER_DATA", "symbol": ticker, "path": path,
+                        "request_body": body,
+                        "lane_status": STATUS_NO_DATA, "lane_fields": [],
+                        "detail": "la petición es válida; el proveedor no tiene datos",
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                return "STOP", msg
+
+            if status == STATUS_MISSING_TOOL:
                 tool.route_state = ROUTE_INVALID
-                return "ROUTE_INVALID"
+                self._note_fault(tool, STATUS_MISSING_TOOL, msg, body=body)
+                return "ROUTE_INVALID", msg
+
             tool.mark_transient(msg)
+            self._note_fault(tool, status, msg, body=body)
             self._fetched_at[tool.key] = time.time()
-            return "STOP"
+            return "STOP", msg
         except Exception as exc:
             detail = f"{type(exc).__name__}: {exc}"
             tool.note_attempt(path, detail)
+            tool.provider_status = STATUS_TRANSIENT
             tool.mark_transient(detail)
+            self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
             self._fetched_at[tool.key] = time.time()
-            return "STOP"
+            return "STOP", detail
 
         tool.note_attempt(path, None)
         tool.route_state = ROUTE_OK
         tool.resolved_path = path
-        tool.note_variant_accepted(index)
+        tool.provider_status = None
+        tool.validation_error = None
         tool.mark_success()
         tool.last_success = time.time()
         self._fetched_at[tool.key] = tool.last_success
@@ -347,19 +424,22 @@ class QuantDataIntelligence:
             normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
             _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")
         if epoch != self._epoch:
-            # Llegó tarde: el usuario ya cambió de activo. El dato es válido para SU
-            # ticker, no para el que está en pantalla. Mezclarlos sería el defecto
-            # más difícil de detectar: números correctos bajo el símbolo equivocado.
+            # Llegó tarde: el usuario ya cambió de activo. Números correctos bajo el
+            # símbolo equivocado es el defecto más difícil de detectar de todos.
             _obs_expected("quantdata.intelligence.stale_symbol_write")
-            return "STOP"
+            return "STOP", "época caducada"
         self._data[tool.key] = {
             **normalized,
             "symbol": ticker,
             "path": path,
             "request_body": body,
+            "lane_status": (None if normalized.get("ready") or not normalized.get("error")
+                            else "PARSER_ERROR"),
+            "lane_detail": str(normalized.get("error") or "")[:240],
+            "lane_fields": [],
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
-        return "OK"
+        return "OK", ""
 
     # ------------------------------------------------------------ lectura
 

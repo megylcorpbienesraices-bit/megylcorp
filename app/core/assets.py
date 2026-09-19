@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from .asset_ecosystems import public_summary
 from .obs import note as _obs_note
 from .expiry_clock import year_fraction
@@ -292,9 +294,70 @@ def sigma_chain_window(spot: float, iv_pct: float, horizon_days: float, max_sigm
     return float(max(float(max_sigma)*sigma, s*0.005))
 
 
+# Banda de strikes, EN PORCENTAJE DEL PRECIO, cuando no hay IV con la que
+# calcular la sigma. Es la única forma de que la misma regla valga para un ETF de
+# 600 $ y para una acción de 9 $.
+#
+# El 2.25 % no es arbitrario: es exactamente la banda que venía usándose para DIA
+# (12 $ sobre ~534 $), o sea la que ya estaba validada visualmente. Lo que cambia
+# es que ahora ESA banda se aplica a todos los activos en vez de aplicarse a todos
+# la cantidad de DÓLARES que le correspondía a uno solo.
+UNIVERSAL_CHAIN_WINDOW_PCT = 2.25
+
+
+def proportional_chain_window(symbol: str, spot: float | None) -> float | None:
+    """Ventana de strikes proporcional al precio del activo.
+
+    v1.46.0 · El catálogo daba `window: 12.0` —doce dólares— a TODO activo
+    descubierto en runtime. Sobre los precios reales eso significaba:
+
+        SPY  601 $  →  ± 2.0 %      XLF   48 $  →  ± 24.8 %
+        QQQ  487 $  →  ± 2.5 %      acción 9.5 $ →  ±126.1 %
+        DIA  534 $  →  ± 2.2 %      acción 320 $ →  ±  3.8 %
+
+    Es decir: una banda razonable para los ETF que rondan los 500 $ —los que se
+    usaron para desarrollar— y absurda para todo lo demás. En una acción barata el
+    mapa abarcaba toda la cadena y la estructura real quedaba en unos pocos
+    píxeles; en una cara, recortaba justo la zona que importa.
+
+    Ningún ticker aparece aquí: la banda sale del precio del propio activo.
+    """
+    try:
+        px = float(spot)
+    except (TypeError, ValueError):
+        return None
+    if not (px > 0) or not math.isfinite(px):
+        return None
+    return px * (UNIVERSAL_CHAIN_WINDOW_PCT / 100.0)
+
+
 def chain_window_for(symbol: str, spot: float | None = None, iv_pct: float | None = None,
                      horizon_days: float | None = None, max_sigma: float = 2.5) -> dict:
-    legacy=float(ASSETS.get(str(symbol).upper(),{}).get("window",12.0))
+    sym = str(symbol).upper()
+    record = ASSETS.get(sym, {})
+    declared = record.get("window")
+    # Una ventana declarada manda sólo cuando el INSTRUMENTO tiene otra escala,
+    # no cuando el ticker está en una lista. Es la diferencia entre una regla y un
+    # caso especial, y la lista era un caso especial disfrazado: DIA y DJX
+    # quedaban en ±2.9 % por casualidad, XLF en ±16.5 % y XLI en ±9.2 %, que son
+    # tres bandas distintas para tres ETF que se leen igual.
+    #
+    # Dos clases tienen escala propia de verdad:
+    #   FUTURO       cotiza en puntos de índice (YM ~44.000), no en el precio del
+    #                subyacente: un porcentaje de su cotización no es comparable.
+    #   Volatilidad  una cadena de VIX abarca puntos de volatilidad absolutos; un
+    #                ±2 % sobre un nivel de 17 no cubriría ni el primer strike.
+    # Todo lo demás —ETF, acciones, índices al contado, descubiertos o no— deriva
+    # la banda de su propio precio.
+    proportional = proportional_chain_window(sym, spot)
+    own_scale = (str(record.get("kind") or "").upper() == "FUTURO"
+                 or str(record.get("category") or "").upper().startswith("VOLATILIDAD"))
+    if declared is not None and own_scale:
+        legacy = float(declared)
+    elif proportional is not None:
+        legacy = proportional
+    else:
+        legacy = float(declared if declared is not None else 12.0)
     try:
         if spot is not None and iv_pct is not None and horizon_days is not None:
             w=sigma_chain_window(float(spot),float(iv_pct),float(horizon_days),float(max_sigma))
@@ -305,5 +368,13 @@ def chain_window_for(symbol: str, spot: float | None = None, iv_pct: float | Non
                         "legacy_window":legacy,"universal":True}
     except Exception as _e:
         _obs_note('assets:53', _e)
-    return {"window":legacy,"method":"LEGACY FALLBACK · IV/HORIZON UNAVAILABLE",
-            "horizon_days":horizon_days,"max_sigma":None,"legacy_window":legacy,"universal":False}
+    proportional_used = (declared is None or not own_scale) and proportional is not None
+    return {"window":legacy,
+            "method":("PROPORCIONAL · ±%.2f%% DEL PRECIO · IV/HORIZONTE NO DISPONIBLES"
+                      % UNIVERSAL_CHAIN_WINDOW_PCT) if proportional_used
+                     else "CATÁLOGO · VENTANA DECLARADA · IV/HORIZONTE NO DISPONIBLES",
+            "horizon_days":horizon_days,"max_sigma":None,"legacy_window":legacy,
+            "window_pct_of_spot":(round(UNIVERSAL_CHAIN_WINDOW_PCT,4) if proportional_used else None),
+            # `universal` decía False para la vía proporcional, que es precisamente
+            # la universal. Lo que no es universal es la ventana declarada a mano.
+            "universal":bool(proportional_used)}

@@ -58,18 +58,43 @@ def test_a_validation_error_keeps_the_field_the_provider_named():
 
 
 def test_a_rejected_body_is_repairable_while_a_missing_route_is_not():
-    from app.providers.quantdata.tools import is_validation_error
+    """v1.46.0 · 400 y 422 dejaron de ser lo mismo, y no lo eran.
+
+    Esta prueba afirmaba que un 422 también era «cuerpo reparable». Es falso y
+    tenía consecuencias: un 422 significa que la petición ERA VÁLIDA y el
+    proveedor no tiene datos, así que tratarlo como cuerpo defectuoso hacía que
+    el programa corrigiera un payload correcto y marcara como averiada una
+    herramienta sana. Cinco códigos, cinco tratamientos.
+    """
+    from app.providers.quantdata.tools import (
+        is_validation_error, classify_provider_failure,
+        STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
+        STATUS_PROVIDER_ERROR, STATUS_TRANSIENT)
     from app.providers.quantdata.client import QuantDataError
 
-    e400 = QuantDataError("HTTP 400"); e400.status_code = 400
-    e422 = QuantDataError("HTTP 422"); e422.status_code = 422
-    e404 = QuantDataError("HTTP 404"); e404.status_code = 404
-    assert is_validation_error(e400) and is_validation_error(e422)
-    assert not is_validation_error(e404), "un 404 no es un cuerpo reparable"
+    def err(status):
+        e = QuantDataError(f"HTTP {status}"); e.status_code = status
+        return e
+
+    assert classify_provider_failure(err(400)) == STATUS_REQUEST_INVALID
+    assert classify_provider_failure(err(422)) == STATUS_NO_DATA
+    assert classify_provider_failure(err(404)) == STATUS_MISSING_TOOL
+    assert classify_provider_failure(err(503)) == STATUS_PROVIDER_ERROR
+    assert classify_provider_failure(TimeoutError("agotado")) == STATUS_TRANSIENT
+
+    assert is_validation_error(err(400)), "sólo el 400 dice que el cuerpo está mal"
+    assert not is_validation_error(err(422)), (
+        "un 422 es una petición VÁLIDA sin datos: repararla corrompe un cuerpo correcto")
+    assert not is_validation_error(err(404)), "un 404 no es un cuerpo reparable"
 
 
 def test_the_body_is_repaired_once_and_then_remembered():
-    """Descubrir el contrato en cada ciclo sería pagar la búsqueda una y otra vez."""
+    """Descubrir el contrato en cada ciclo sería pagar la búsqueda una y otra vez.
+
+    v1.46.0 · Lo que cambió es CÓMO se descubre. Antes se probaban formas
+    candidatas hasta que una entraba, que es adivinar con más pasos; ahora se lee
+    el campo que el proveedor nombra en el 400 y se corrige ése.
+    """
     from app.providers.quantdata.intelligence import QuantDataIntelligence
     from app.providers.quantdata.client import QuantDataError, QuantDataResponse
     from app.core.data_hub_runtime import HUB_RUNTIME
@@ -96,11 +121,16 @@ def test_the_body_is_repaired_once_and_then_remembered():
         data = qi.get("dark_pool_levels")
         qi.client.seen.clear(); HUB_RUNTIME.reset()
         await qi._fetch(tool)
-        return first, tool.accepted_variant, data, len(qi.client.seen)
+        return first, dict(tool.repair_added), list(tool.repair_log), data, len(qi.client.seen)
 
-    first, accepted, data, second = asyncio.run(go())
-    assert first > 1, "no se probó ninguna variante tras el 400"
-    assert accepted is not None
+    first, added, log, data, second = asyncio.run(go())
+    # v1.46.0 · La corrección ya no se busca probando formas candidatas: se LEE
+    # del propio 400. El proveedor nombró `aggregationPeriod`, así que ése y sólo
+    # ése es el campo que se añade, y queda escrito de dónde salió.
+    assert first == 2, ("debe bastar una corrección: la primera petición y la "
+                        "corregida, sin variantes intermedias adivinadas")
+    assert added == {"aggregationPeriod": "1d"}, added
+    assert log and "aggregationPeriod" in log[0]
     assert data.get("ready") is True and data.get("count") == 1
     assert second == 1, "el contrato descubierto no se recordó"
 

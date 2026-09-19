@@ -79,15 +79,23 @@
     minPremium: 0,         // 0 = automático
     bucketMs: 60_000,
     hover: NaN,
-    _netMax: new Q.GlideValue(300, 1),
-    _totMax: new Q.GlideValue(300, 1),
+    _netMax: new Q.GlideValue(300),
+    _totMax: new Q.GlideValue(300),
   };
 
   /* ------------------------------------------------------ escala simlog */
 
-  /** Comprime rangos de 5 órdenes de magnitud sin perder el signo ni el cero. */
+  /** Comprime rangos de 5 órdenes de magnitud sin perder el signo ni el cero.
+   *
+   * `linthresh` es el punto donde la escala pasa de lineal a logarítmica, y tiene
+   * que ser RELATIVO al activo: un umbral en dólares hace que el mismo carril se
+   * comporte distinto según lo que valga el subyacente. El defecto de 1e6 que había
+   * aquí como defecto por omisión no llegaba a morder —todas las llamadas pasan su
+   * propio umbral— pero era una trampa esperando a la primera llamada que lo
+   * olvidara, así que se elimina.
+   */
   function symlog(v, linthresh) {
-    const c = linthresh || 1e6;
+    const c = Number.isFinite(linthresh) && linthresh > 0 ? linthresh : 1e-9;
     const x = Q.num(v, 0);
     const s = x < 0 ? -1 : 1;
     return s * Math.log10(1 + Math.abs(x) / c);
@@ -140,8 +148,10 @@
       netMax = Math.max(netMax, Math.abs(b.net));
       totMax = Math.max(totMax, b.total);
     }
-    S._netMax.set(netMax > 0 ? netMax : 1);
-    S._totMax.set(totMax > 0 ? totMax : 1);
+    // v1.46.0 · Un ciclo sin prima da pico 0, no 1. El «1» era un dólar: en un
+    // activo de 10⁸ no se nota y en uno de 10² es la escala entera.
+    S._netMax.set(netMax > 0 ? netMax : 0);
+    S._totMax.set(totMax > 0 ? totMax : 0);
   }
 
   /** Umbral de "print grande": explícito o percentil 92 de la sesión. */
@@ -444,8 +454,25 @@
       if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
       actualPeak = Math.max(actualPeak, Math.abs(Number(b.net) || 0));
     }
-    const max = Math.max(S._netMax.get(), actualPeak, 1);
-    const lin = Math.max(max / 400, 1000);
+    // El pico suavizado puede no existir todavía (ningún `set` aún): entonces
+    // manda el pico real de la ventana. `Math.max` con un NaN devuelve NaN, así
+    // que el valor se sanea antes de compararlo, no después.
+    const smoothed = Q.num(S._netMax.get(), 0);
+    const max = Math.max(smoothed, actualPeak, Number.MIN_VALUE);
+    // v1.46.0 · El umbral es una FRACCIÓN del pico, sin suelo en dólares.
+    //
+    // Antes: `Math.max(max / 400, 1000)`. Por encima de ~400 K$ de pico mandaba
+    // `max/400` y el carril se leía igual en todos los activos; por debajo mandaba
+    // el suelo de MIL DÓLARES y el carril se iba aplanando según lo que valiera el
+    // subyacente. Medido sobre un bucket al 10 % del pico:
+    //
+    //     pico 12 M  →  62 %      pico 40 K  →  43 %
+    //     pico 900 K →  62 %      pico  5 K  →  23 %      pico 800 →  13 %
+    //
+    // Un ETF grande y una acción pequeña con la MISMA forma de sesión se dibujaban
+    // distinto, y la diferencia la fijaba una constante en dólares que nadie había
+    // decidido para esos activos. Ahora los cinco dan 62 %.
+    const lin = Math.max(max / 400, Number.MIN_VALUE);
     const top = symlog(max, lin);
     const sy = Q.scale(-top, top, box.y + box.h, box.y);
 
@@ -552,7 +579,7 @@
       if (b.t < win.t0 - S.bucketMs || b.t > win.t1) continue;
       actualPeak = Math.max(actualPeak, Number(b.total) || 0);
     }
-    const max = Math.max(S._totMax.get(), actualPeak, 1);
+    const max = Math.max(Q.num(S._totMax.get(), 0), actualPeak, Number.MIN_VALUE);
     const sy = Q.scale(0, max * 1.25, box.y + box.h, box.y);
 
     ctx.save();

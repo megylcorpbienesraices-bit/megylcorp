@@ -49,6 +49,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import data_lineage as DL
+from . import dark_pool_state
 from .asset_normalization import normalize_matrix, asset_scale
 from .data_lineage import (LINEAGE, DIRECT_PROVIDER, DERIVED, FALLBACK, UNAVAILABLE,
                            DATA_OK, NO_PROVIDER_DATA, FILTERED_ALL, PROVIDER_ERROR,
@@ -169,6 +170,26 @@ def classify(block: Any, *, cadence: str = "MEDIUM",
         return {"state": STALE, "detail": f"último dato hace {age:.0f} s (límite {limit:.0f} s)",
                 "rows": n or 0, "age_seconds": age}
     return {"state": DATA_OK, "detail": "", "rows": n if n is not None else 0, "age_seconds": age}
+
+
+_CLOSED_PHASES = ("WEEKEND", "HOLIDAY", "MARKET_CLOSED")
+
+
+def _market_is_open() -> Optional[bool]:
+    """¿Hay actividad bursátil posible ahora? `None` si el calendario no responde.
+
+    El `None` es deliberado. Afirmar «mercado cerrado» sin saberlo convertiría un
+    fallo técnico en una explicación tranquilizadora y falsa, que es justo lo que
+    esta versión persigue eliminar. Premarket y afterhours cuentan como abierto:
+    la cinta de equity imprime fuera de bolsa a esas horas.
+    """
+    try:
+        from . import session_resolver
+        return session_resolver.resolve().phase not in _CLOSED_PHASES
+    except Exception:
+        from .obs import note as _obs_note
+        _obs_note("quant_data_hub:session_calendar", None, severity="DEGRADED")
+        return None
 
 
 def _rows(intel: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
@@ -675,16 +696,35 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
     levels = _rows(intel, "dark_pool_levels")
     prints = _rows(intel, "equity_prints")
 
+    # Tri-estado de clasificación, necesario ANTES de decidir el estado del carril
+    # de prints: unas impresiones que llegan y no se pueden clasificar no son un
+    # carril sano, y tampoco son un mercado sin actividad fuera de bolsa.
+    _classified = sum(1 for r in prints if r.get("off_exchange") is not None)
+    _unclassified = sum(1 for r in prints if r.get("off_exchange") is None)
+    market_open = _market_is_open()
+
+    lanes: Dict[str, Dict[str, Any]] = {}
     for tool, metric in (("dark_flow", "QD_DARK_FLOW"),
                          ("dark_pool_levels", "QD_DARK_POOL_LEVELS"),
                          ("equity_prints", "QD_EQUITY_PRINTS")):
         block = _block(intel, tool)
         cls = classify(block, cadence="MEDIUM")
+        lane = dark_pool_state.lane_state(
+            block, cls, market_open=market_open,
+            unclassified=(_unclassified if tool == "equity_prints" else 0),
+            classified=(_classified if tool == "equity_prints" else 0))
+        lanes[tool] = lane
+        # Se registra el estado del CARRIL, no el genérico: un 400 y un 503 dejan el
+        # bloque igual de vacío y no se corrigen igual, y el Auditor existe
+        # precisamente para poder distinguirlos.
         LINEAGE.record(metric, sym,
-                       source_mode=(DIRECT_PROVIDER if cls["state"] == DATA_OK else UNAVAILABLE),
-                       state=cls["state"], endpoint=block.get("path"),
+                       source_mode=(DIRECT_PROVIDER
+                                    if lane["state"] == dark_pool_state.DIRECT_PROVIDER_OK
+                                    else UNAVAILABLE),
+                       state=lane["lineage_state"], endpoint=block.get("path"),
                        normalized_value=cls["rows"], final_value=cls["rows"],
-                       detail=cls["detail"], age_seconds=cls["age_seconds"], rows=cls["rows"])
+                       detail=(lane["detail"] or cls["detail"]),
+                       age_seconds=cls["age_seconds"], rows=cls["rows"])
 
     dark_vol = sum(_f(r.get("dark_volume"), 0.0) or 0.0 for r in flow)
     total_vol = sum(_f(r.get("total_volume"), 0.0) or 0.0 for r in flow)
@@ -736,6 +776,12 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
                   if unknown_prints else
                   "no llegaron impresiones en este ciclo" if not prints else
                   "todas las impresiones se ejecutaron en bolsa")),
+        # v1.46.0 · Los tres carriles, cada uno con su causa. La pantalla del
+        # analista sigue diciendo «SIN DATOS»; el Auditor conserva cuál de los ocho
+        # estados internos lo produjo y qué hay que hacer con él.
+        "lanes": lanes,
+        "lane_rows": dark_pool_state.lane_rows(lanes),
+        "diagnosis": dark_pool_state.section_state(lanes),
         "source": "QUANTDATA_DARK_POOL",
         "audit_channel": "ITM_QUANT_VENUE_CLASSIFICATION",
         "summary": {"levels": len(levels), "prints": len(dark_prints),

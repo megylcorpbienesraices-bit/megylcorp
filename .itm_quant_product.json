@@ -1,8 +1,8 @@
 {
   "product_id": "com.itmquant.multiasset",
   "product_name": "ITM QUANT MULTI ASSET",
-  "version": "1.45.0",
+  "version": "1.46.0",
   "persistence_schema": 2,
-  "release": "ITM_QUANT_v1.45.0_PRE_VPS",
+  "release": "ITM_QUANT_v1.46.0_PRE_VPS",
   "scope": "MULTI_ASSET"
 }

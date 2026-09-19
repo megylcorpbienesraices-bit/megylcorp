@@ -63,6 +63,17 @@ def _deep_find(obj: Any, *names: str, depth: int = 6) -> Any:
     return None
 
 
+def _qd_block(intel: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """El bloque completo del proveedor, no sólo sus filas.
+
+    Algunos campos oficiales viajan a nivel de respuesta y no por fila —el precio
+    de referencia del subyacente en `dark-pool-levels` es el caso claro—, así que
+    leer sólo `rows` los perdía.
+    """
+    block = intel.get(key) if isinstance(intel, dict) else None
+    return block if isinstance(block, dict) else {}
+
+
 def _qd_rows(intel: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
     block = intel.get(key) if isinstance(intel, dict) else None
     if not isinstance(block, dict) or not block.get("ready"):
@@ -1006,6 +1017,14 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
         "audit": audit,
         "candles": candles,
         "reason": reason,
+        # v1.46.0 · La pantalla del analista sigue diciendo SIN DATOS; aquí viaja
+        # CUÁL de los ocho estados internos lo produjo, por carril, para que el
+        # Auditor pueda decir si hay que corregir el payload, esperar al mercado o
+        # reintentar. `screen` es lo único que la terminal está autorizada a pintar.
+        "diagnosis": _hub_dp.get("diagnosis"),
+        "lanes": _hub_dp.get("lane_rows"),
+        "display_reason": ((_hub_dp.get("diagnosis") or {}).get("screen") or None) if not ready else None,
+        "latest_stock_price": (_qd_block(intel, "dark_pool_levels") or {}).get("latest_stock_price"),
         "sources": {
             "levels": levels_source,
             "prints": prints_source,
@@ -2145,6 +2164,19 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     asset = state.get("asset") or {}
     scanner = state.get("scanner") or {}
 
+    # La sección se calcula ANTES del sobre para que su diagnóstico por carril
+    # pueda viajar también al Auditor. La pantalla principal seguirá leyendo
+    # `dark_pool.display_reason`; la causa exacta vive en `auditor`.
+    dark_pool_section = _dark_pool(state, trace, intel)
+    auditor = _auditor(state)
+    auditor["dark_pool"] = {
+        "lanes": dark_pool_section.get("lanes") or [],
+        "diagnosis": dark_pool_section.get("diagnosis") or {},
+        "note": ("Tres carriles independientes. Que uno rechace el cuerpo no dice "
+                 "nada sobre los otros dos, y presentarlos juntos hacía parecer "
+                 "rota la sección entera teniendo dos de tres sanos."),
+    }
+
     return {
         "ready": bool(state.get("ready")),
         "symbol": state.get("active_symbol") or state.get("symbol"),
@@ -2165,7 +2197,7 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         "open_interest": _open_interest(trace, state, intel),
         "volatilidad": _volatilidad(state, intel),
         "estadisticas": _estadisticas(trace, state, intel),
-        "dark_pool": _dark_pool(state, trace, intel),
+        "dark_pool": dark_pool_section,
         "macro": _macro(state),
         "qflow": _qflow(state, intel),
         "net_drift": _net_drift(state, intel),
@@ -2193,6 +2225,6 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         # PROCEDENCIA · va en el bundle para el AUDITOR, no para la pantalla
         # principal. La terminal muestra análisis; los nombres de proveedor,
         # endpoint, estado y fallback se leen aquí y sólo aquí.
-        "auditor": _auditor(state),
+        "auditor": auditor,
         "contract": "ITMQ_TERMINAL_BUNDLE_V2",
     }

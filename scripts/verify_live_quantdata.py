@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VERIFICACIÓN LIVE DE QUANT DATA · ITM QUANT v1.44.0
+"""VERIFICACIÓN LIVE DE QUANT DATA · ITM QUANT v1.46.0
 
 PARA QUÉ SIRVE
 --------------
@@ -34,6 +34,21 @@ Un dataset pasa cuando:
 
 Que el endpoint conteste NO basta: un 200 con cero filas, o un valor que el
 normalizador transforma sin querer, siguen siendo fallos y se reportan como tales.
+
+MODO DARK POOL (v1.46.0)
+------------------------
+    python scripts/verify_live_quantdata.py --dark-pool
+
+Recorre los TRES carriles —Dark Flow, Dark Pool Levels, Equity Prints— sobre una
+cesta multi-activo (ETF de índice y equities líquidos, no sólo DIA) y, por cada
+uno, publica el código HTTP real y, si hubo 400, **qué campo nombró el
+proveedor**. Un 400 no se reintenta: se lee el campo rechazado, se corrige el
+cuerpo con `repair_body` y se vuelve a preguntar una sola vez, que es lo que
+distingue corregir de adivinar.
+
+Los tres carriles se miden por separado a propósito: que `dark-pool-levels`
+rechace el cuerpo no dice nada sobre `dark-flow`, y medirlos juntos fue lo que
+hacía parecer rota la sección entera.
 
 NO MODIFICA NADA. Sólo lee.
 """
@@ -75,11 +90,30 @@ DATASETS: Tuple[Tuple[str, str, str], ...] = (
     ("Max Pain", "max_pain", "open_interest"),
 )
 
+# Los tres carriles de DARK POOL. Se declaran aparte de DATASETS porque se
+# verifican de forma independiente: cada uno con su propio veredicto.
+DARK_POOL_LANES: Tuple[Tuple[str, str], ...] = (
+    ("Dark Flow", "dark_flow"),
+    ("Dark Pool Levels", "dark_pool_levels"),
+    ("Equity Prints", "equity_prints"),
+)
+
+# Cesta por defecto del modo dark pool. Tres ETF de índice de escalas distintas y
+# cuatro equities líquidos: si algo sólo funciona en uno de ellos, el problema es
+# el activo, no el proveedor. No hay ningún ticker escrito en el resto del
+# programa; ésta es una lista de PRUEBA, y se puede sustituir con --ticker.
+DARK_POOL_BASKET: Tuple[str, ...] = ("DIA", "SPY", "QQQ", "AAPL", "NVDA", "TSLA", "AMD")
+
+# Campos oficiales que el normalizador de niveles debe conservar si el proveedor
+# los manda. Se comprueba presencia, no valor: inventar un valor sería peor.
+LEVEL_FIELDS: Tuple[str, ...] = ("price", "notional", "shares", "prints")
+
 OK = "OK"
 NO_DATA = "SIN DATOS"
 NOT_DIRECT = "NO DIRECTO"
 MISMATCH = "DISCREPANCIA"
 ERROR = "ERROR"
+REJECTED = "CUERPO RECHAZADO"
 
 
 def _sample(rows: Any, limit: int = 3) -> List[Any]:
@@ -103,6 +137,155 @@ def _first_number(row: Any) -> Optional[float]:
         if isinstance(v, (int, float)):
             return float(v)
     return None
+
+
+def _failure_detail(exc: Any) -> Dict[str, Any]:
+    """El fallo COMPLETO, no su primera línea.
+
+    Un `400` cuyo cuerpo dice `errors[0].field = "lookBackPeriod"` y un `400` que
+    dice `filter.ticker` se arreglan de forma distinta, y truncar el mensaje a
+    180 caracteres borraba justo la parte accionable.
+    """
+    status = getattr(exc, "status_code", None)
+    fields = list(getattr(exc, "validation_fields", None) or [])
+    verdict = ERROR
+    if status == 400:
+        verdict = REJECTED
+    elif status == 422:
+        verdict = NO_DATA
+    return {
+        "verdict": verdict,
+        "http_status": status,
+        "rejected_fields": fields,
+        "detail": f"{type(exc).__name__}: {str(exc)[:400]}",
+        "body": getattr(exc, "body", None),
+    }
+
+
+async def probe_dark_pool(ticker: str, timeout: float) -> Dict[str, Any]:
+    """Los tres carriles de DARK POOL, cada uno con su propio veredicto.
+
+    Si el proveedor rechaza el cuerpo (400), se lee QUÉ campo nombró y se corrige
+    con `repair_body` una sola vez. No se prueban variantes al azar: o el
+    proveedor dice qué falta, o el veredicto es CUERPO RECHAZADO con el campo
+    escrito, que es información sobre la que se puede actuar.
+    """
+    from app.providers.quantdata.client import QuantDataClient, QuantDataError
+    from app.providers.quantdata.settings import load_settings
+    from app.providers.quantdata.tools import build_catalog, repair_body
+
+    settings = load_settings()
+    if not settings.configured:
+        return {"configured": False,
+                "detail": "QUANTDATA_API_KEY no está configurada"}
+
+    catalog = build_catalog()
+    client = QuantDataClient(settings)
+    await client.start()
+    lanes: Dict[str, Any] = {}
+    try:
+        for label, key in DARK_POOL_LANES:
+            tool = catalog.get(key)
+            if tool is None:
+                lanes[key] = {"label": label, "verdict": ERROR,
+                              "detail": f"la herramienta «{key}» no está en el catálogo"}
+                continue
+            path = tool.paths[0]
+            body = tool.request_body(ticker)
+            row: Dict[str, Any] = {"label": label, "endpoint": path,
+                                   "request_body": dict(body), "repairs": []}
+            raw = None
+            for _round in range(3):
+                try:
+                    response = await asyncio.wait_for(
+                        client.post(path, body), timeout=timeout)
+                    raw = response.payload
+                    break
+                except (QuantDataError, asyncio.TimeoutError) as exc:
+                    fail = _failure_detail(exc)
+                    row.update(fail)
+                    if fail["verdict"] != REJECTED:
+                        break
+                    nxt, note = repair_body(body, fail["rejected_fields"])
+                    if nxt is None:
+                        break
+                    row["repairs"].append(note)
+                    body = nxt
+                    row["request_body"] = dict(body)
+            if raw is None:
+                lanes[key] = row
+                continue
+            try:
+                normalized = tool.normalize(raw)
+            except Exception as exc:   # noqa: BLE001
+                row.update({"verdict": ERROR,
+                            "detail": f"el normalizador falló: {type(exc).__name__}: {exc}"})
+                lanes[key] = row
+                continue
+            rows = normalized.get("rows") or []
+            row.update({
+                "verdict": OK if normalized.get("ready") else NO_DATA,
+                "http_status": 200,
+                "normalized_rows": len(rows),
+                "normalized_sample": _sample(rows),
+                "raw_keys": sorted(list(raw)[:10]) if isinstance(raw, dict) else type(raw).__name__,
+                "detail": "" if normalized.get("ready") else
+                          "la petición fue aceptada y el proveedor no devolvió filas",
+            })
+            if key == "dark_pool_levels" and rows:
+                # Item 4 de la corrección: los campos oficiales tienen que
+                # SOBREVIVIR al normalizador, no sólo llegar a él.
+                first = rows[0] if isinstance(rows[0], dict) else {}
+                row["preserved_fields"] = [f for f in LEVEL_FIELDS if first.get(f) is not None]
+                row["dropped_fields"] = [f for f in LEVEL_FIELDS if first.get(f) is None]
+                row["latest_stock_price"] = normalized.get("latest_stock_price")
+                row["extra_fields"] = sorted((first.get("extra") or {}).keys())
+            lanes[key] = row
+    finally:
+        await client.close()
+    return {"configured": True, "ticker": ticker.upper(), "lanes": lanes}
+
+
+def render_dark_pool(results: Dict[str, Dict[str, Any]]) -> Tuple[str, bool]:
+    """Una fila por activo y carril. La independencia se VE, no se promete."""
+    lines = ["", "=" * 104, "DARK POOL · TRES CARRILES INDEPENDIENTES · MULTI-ACTIVO", "=" * 104,
+             f"{'ACTIVO':<8}{'CARRIL':<20}{'VEREDICTO':<18}{'HTTP':>5}{'FILAS':>7}  DETALLE"]
+    lines.append("-" * 104)
+    ok = True
+    for ticker, out in results.items():
+        lanes = out.get("lanes") or {}
+        for label, key in DARK_POOL_LANES:
+            r = lanes.get(key) or {}
+            verdict = str(r.get("verdict") or "—")
+            if verdict == REJECTED or verdict == ERROR:
+                ok = False
+            extra = ""
+            if r.get("rejected_fields"):
+                extra = "campos: " + " · ".join(str(f) for f in r["rejected_fields"][:4])
+            elif r.get("repairs"):
+                extra = "reparado: " + " · ".join(r["repairs"][:2])
+            elif r.get("dropped_fields"):
+                extra = "sin " + " · ".join(r["dropped_fields"])
+            elif r.get("detail"):
+                extra = str(r["detail"])[:56]
+            lines.append(f"{ticker:<8}{label:<20}{verdict:<18}"
+                         f"{str(r.get('http_status') or '—'):>5}"
+                         f"{str(r.get('normalized_rows') if r.get('normalized_rows') is not None else '—'):>7}  "
+                         f"{extra}")
+    lines.append("-" * 104)
+    # Un carril roto en UN activo y sano en otros seis es un problema de ese
+    # activo. Roto en los siete es un problema del cuerpo que enviamos.
+    for label, key in DARK_POOL_LANES:
+        verdicts = [(t, (o.get("lanes") or {}).get(key, {}).get("verdict"))
+                    for t, o in results.items()]
+        bad = [t for t, v in verdicts if v in (REJECTED, ERROR)]
+        if bad and len(bad) == len(verdicts):
+            lines.append(f"{label}: falla en los {len(bad)} activos → el defecto es del "
+                         f"cuerpo que enviamos, no del activo.")
+        elif bad:
+            lines.append(f"{label}: falla sólo en {', '.join(bad)} → el defecto es de "
+                         f"esos activos, no del carril.")
+    return "\n".join(lines), ok
 
 
 async def probe(ticker: str, timeout: float) -> Dict[str, Any]:
@@ -130,12 +313,15 @@ async def probe(ticker: str, timeout: float) -> Dict[str, Any]:
                 continue
             path = tool.paths[0]
             try:
+                # `request_body` y no `body`: es el cuerpo que el programa envía de
+                # verdad, ya sin los campos heredados de otras herramientas. Probar
+                # aquí uno distinto al de producción verificaría otra cosa.
                 response = await asyncio.wait_for(
-                    client.post(path, tool.body(ticker)), timeout=timeout)
+                    client.post(path, tool.request_body(ticker)), timeout=timeout)
                 raw = response.payload
             except (QuantDataError, asyncio.TimeoutError) as exc:
-                results[key] = {"label": label, "verdict": ERROR, "endpoint": path,
-                                "detail": f"{type(exc).__name__}: {str(exc)[:180]}"}
+                results[key] = {"label": label, "endpoint": path,
+                                **_failure_detail(exc)}
                 continue
 
             try:
@@ -270,7 +456,29 @@ def main() -> int:
                     help="ruta donde guardar el informe completo")
     ap.add_argument("--skip-bundle", action="store_true",
                     help="sólo proveedor y normalizador, sin comprobar la API interna")
+    ap.add_argument("--dark-pool", action="store_true",
+                    help=("verifica sólo los tres carriles de DARK POOL sobre una cesta "
+                          "multi-activo, con el código HTTP y el campo rechazado de cada 400"))
     args = ap.parse_args()
+
+    if args.dark_pool:
+        basket = args.ticker or list(DARK_POOL_BASKET)
+        results: Dict[str, Dict[str, Any]] = {}
+        for ticker in basket:
+            out = asyncio.run(probe_dark_pool(ticker, args.timeout))
+            if not out.get("configured"):
+                print(f"\n{out.get('detail')}")
+                return 2
+            results[ticker.upper()] = out
+        txt, ok = render_dark_pool(results)
+        print(txt)
+        if args.json_out:
+            Path(args.json_out).write_text(
+                json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(),
+                            "dark_pool": results}, indent=2, ensure_ascii=False, default=str),
+                encoding="utf-8")
+            print(f"\ninforme completo: {args.json_out}")
+        return 0 if ok else 1
 
     tickers = args.ticker or ["SPY"]
     report: Dict[str, Any] = {"generated_at": datetime.now(timezone.utc).isoformat(),

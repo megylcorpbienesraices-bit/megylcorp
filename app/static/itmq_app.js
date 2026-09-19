@@ -29,6 +29,15 @@
     PARSER_ERROR: 'datos no disponibles en este ciclo',
     FILTERED_ALL: 'ninguna observación superó la validación',
     STALE: 'el último dato es demasiado antiguo para operar con él',
+    // v1.46.0 · Los ocho estados internos de DARK POOL. Existen para el Auditor;
+    // si alguno alcanza la pantalla del analista, se lee como análisis y no como
+    // un código de error del proveedor. REQUEST_INVALID es un defecto NUESTRO:
+    // decirle al operador «petición inválida» sería informarle de nuestro bug.
+    DIRECT_PROVIDER_OK: '',
+    SIN_DATOS_REALES: 'sin actividad fuera de bolsa en esta ventana',
+    MARKET_CLOSED: 'mercado cerrado: no hay sesión que medir',
+    REQUEST_INVALID: 'datos no disponibles en este ciclo',
+    NO_CLASIFICABLE: 'las impresiones llegaron sin centro de ejecución utilizable',
   };
 
   function motivoVacio(reason, fallback) {
@@ -418,8 +427,8 @@
     set('kEvidence', Q.isNum(Q.num(r.evidence, NaN)) ? Q.num(r.evidence).toFixed(0) : '—');
     set('kConfluence', Q.isNum(Q.num(r.confluence, NaN)) ? `confluencia ${Q.num(r.confluence).toFixed(0)}` : '—');
 
-    set('kGex', Q.signedCompact(Q.num(r.net_gex), 2));
-    set('kDex', Q.signedCompact(Q.num(r.net_delta), 2));
+    set('kGex', Q.signedCompact(r.net_gex, 2));
+    set('kDex', Q.signedCompact(r.net_delta, 2));
     const flip = Q.num(r.zero_gamma, NaN), spot = Q.num(d.spot, NaN);
     set('kFlip', Q.isNum(flip) ? flip.toFixed(2) : '—');
     set('kFlipDist', (Q.isNum(flip) && Q.isNum(spot)) ? `${(flip - spot >= 0 ? '+' : '')}${(flip - spot).toFixed(2)} vs spot` : '—');
@@ -481,8 +490,8 @@
     fillTable('tblPrints', (r.prints || []).slice(0, 30), p => [
       Q.hhmm(Q.parseTime(p.t)),
       `${String(p.option_type || '').toUpperCase().slice(0, 1)} ${Q.isNum(Q.num(p.strike, NaN)) ? Q.num(p.strike).toFixed(2) : '—'}`,
-      cell(Q.money(Q.num(p.premium), 1), Q.num(p.direction, 0) >= 0 ? 'pos' : 'neg'),
-      Q.compact(Q.num(p.contracts), 0),
+      cell(Q.money(p.premium, 1), Q.num(p.direction, 0) >= 0 ? 'pos' : 'neg'),
+      Q.compact(p.contracts, 0),
       p.aggressor || '—',
     ], 'Sin prints de opciones observados en la sesión');
   }
@@ -506,14 +515,14 @@
     const dk = Q.num(ex.dominant_strike, NaN), dd = Q.num(ex.dominant_distance_pct, NaN);
     set('exDom', Q.isNum(dk) ? dk.toFixed(2) : '—');
     set('exDomDetail', Q.isNum(dd)
-      ? `${Q.signedCompact(Q.num(ex.dominant_gex), 2)} · ${dd >= 0 ? '+' : ''}${dd.toFixed(2)}% del precio`
+      ? `${Q.signedCompact(ex.dominant_gex, 2)} · ${dd >= 0 ? '+' : ''}${dd.toFixed(2)}% del precio`
       : 'mayor exposición absoluta');
 
     const bal = Q.num(ex.gex_balance_pct, NaN);
     set('exBalance', Q.isNum(bal) ? `${bal >= 0 ? '+' : ''}${bal.toFixed(0)}` : '—');
     // +100 = toda la gamma por encima del precio; −100 = toda por debajo.
     set('exBalanceDetail', Q.isNum(bal)
-      ? `${Q.signedCompact(Q.num(ex.gex_below), 1)} debajo · ${Q.signedCompact(Q.num(ex.gex_above), 1)} encima`
+      ? `${Q.signedCompact(ex.gex_below, 1)} debajo · ${Q.signedCompact(ex.gex_above, 1)} encima`
       : 'dónde pesa la cobertura');
 
     set('exCount', Q.isNum(Q.num(ex.strikes_counted, NaN)) ? Q.num(ex.strikes_counted).toFixed(0) : '—');
@@ -535,11 +544,11 @@
 
     fillTable('tblExposure', rowsK.slice().sort((a, b) => Math.abs(Q.num(b[field])) - Math.abs(Q.num(a[field]))).slice(0, 40), r => [
       Q.num(r.strike).toFixed(2),
-      cell(Q.signedCompact(Q.num(r.gex), 2), Q.num(r.gex) >= 0 ? 'pos' : 'neg'),
-      cell(Q.signedCompact(Q.num(r.dex), 2), Q.num(r.dex) >= 0 ? 'pos' : 'neg'),
-      Q.signedCompact(Q.num(r.vex), 2),
-      Q.signedCompact(Q.num(r.chex), 2),
-      Q.compact(Q.num(r.oi), 0),
+      cell(Q.signedCompact(r.gex, 2), Q.num(r.gex) >= 0 ? 'pos' : 'neg'),
+      cell(Q.signedCompact(r.dex, 2), Q.num(r.dex) >= 0 ? 'pos' : 'neg'),
+      Q.signedCompact(r.vex, 2),
+      Q.signedCompact(r.chex, 2),
+      Q.compact(r.oi, 0),
     ], 'Sin cadena de opciones cargada');
   }
 
@@ -548,9 +557,9 @@
     const mp = Q.num(oi.max_pain, NaN), spot = Q.num(oi.spot, NaN);
     set('oiMaxPain', Q.isNum(mp) ? mp.toFixed(2) : '—');
     set('oiMaxPainDist', (Q.isNum(mp) && Q.isNum(spot)) ? `${(mp - spot >= 0 ? '+' : '')}${(mp - spot).toFixed(2)} vs spot` : '—');
-    set('oiTotal', Q.compact(Q.num(oi.total_oi), 1));
-    set('oiCall', Q.compact(Q.num(oi.call_oi), 1));
-    set('oiPut', Q.compact(Q.num(oi.put_oi), 1));
+    set('oiTotal', Q.compact(oi.total_oi, 1));
+    set('oiCall', Q.compact(oi.call_oi, 1));
+    set('oiPut', Q.compact(oi.put_oi, 1));
     set('oiCallPct', Q.isNum(Q.num(oi.call_pct, NaN)) ? `${Q.num(oi.call_pct).toFixed(1)}% del total` : '—');
     set('oiPutPct', Q.isNum(Q.num(oi.put_pct, NaN)) ? `${Q.num(oi.put_pct).toFixed(1)}% del total` : '—');
 
@@ -567,10 +576,10 @@
 
     fillTable('tblOiChange', rows.slice().sort((a, b) => Q.num(b.oi) - Q.num(a.oi)).slice(0, 40), r => [
       Q.num(r.strike).toFixed(2),
-      Q.compact(Q.num(r.call_oi), 0),
-      Q.compact(Q.num(r.put_oi), 0),
-      cell(Q.signedCompact(Q.num(r.net_oi), 0), Q.num(r.net_oi) >= 0 ? 'pos' : 'neg'),
-      Q.compact(Q.num(r.volume), 0),
+      Q.compact(r.call_oi, 0),
+      Q.compact(r.put_oi, 0),
+      cell(Q.signedCompact(r.net_oi, 0), Q.num(r.net_oi) >= 0 ? 'pos' : 'neg'),
+      Q.compact(r.volume, 0),
       Q.isNum(Q.num(r.vol_oi, NaN)) ? Q.num(r.vol_oi).toFixed(2) : '—',
     ], 'Sin cadena de opciones cargada');
   }
@@ -629,16 +638,16 @@
 
   function renderEstadisticas(d) {
     const s = d.estadisticas || {};
-    set('stContracts', Q.compact(Q.num(s.contracts), 0));
+    set('stContracts', Q.compact(s.contracts, 0));
     // Un cero sin explicación se lee como "el mercado no negoció". Decir de dónde
     // sale la cifra distingue eso de "todavía no he visto ninguna impresión".
     set('stContractsDetail', s.volume_source === 'PRINTS_OBSERVADOS' ? `${s.print_count || 0} prints observados`
       : s.volume_source === 'CADENA_OFICIAL' ? 'volumen oficial de la cadena · sin cinta'
       : s.volume_source === 'AGREGADO_DEL_MOTOR' ? 'agregado del motor · sin desglose por strike'
       : (s.volume_reason || 'sesión observada'));
-    set('stPremium', Q.money(Q.num(s.premium), 1));
+    set('stPremium', Q.money(s.premium, 1));
     set('stPcr', Q.isNum(Q.num(s.put_call_volume_ratio, NaN)) ? Q.num(s.put_call_volume_ratio).toFixed(2) : '—');
-    set('stPcrDetail', `C ${Q.compact(Q.num(s.call_volume), 0)} · P ${Q.compact(Q.num(s.put_volume), 0)}`);
+    set('stPcrDetail', `C ${Q.compact(s.call_volume, 0)} · P ${Q.compact(s.put_volume, 0)}`);
     set('stAvgSize', Q.isNum(Q.num(s.avg_size, NaN)) ? Q.num(s.avg_size).toFixed(1) : '—');
 
     chart('chartTradeSide', () => P.bars(el('chartTradeSide'), { fmt: v => Q.money(v, 1), zeroCenter: false, empty: 'SIN PRINTS CLASIFICADOS' }))
@@ -657,8 +666,8 @@
     // cinta que clasificar. Se muestran con guion, nunca con un cero inventado.
     fillTable('tblContracts', s.contract_rows || [], r => [
       r.label,
-      r.premium == null ? '—' : Q.money(Q.num(r.premium), 1),
-      Q.compact(Q.num(r.contracts), 0),
+      r.premium == null ? '—' : Q.money(r.premium, 1),
+      Q.compact(r.contracts, 0),
       r.trades == null ? '—' : String(r.trades || 0),
       cell(Q.isNum(Q.num(r.bias, NaN)) ? `${Q.num(r.bias) >= 0 ? '+' : ''}${Q.num(r.bias).toFixed(0)}%` : '—',
         Q.num(r.bias, 0) >= 0 ? 'pos' : 'neg'),
@@ -676,7 +685,7 @@
     set('dpNotional', Q.isNum(not) ? Q.money(not, 1) : 'SIN DATOS');
     set('dpLevel', Q.isNum(Q.num(dp.dominant_level, NaN)) ? Q.num(dp.dominant_level).toFixed(2) : '—');
     set('dpLevelDetail', Q.isNum(Q.num(dp.dominant_notional, NaN))
-      ? Q.money(Q.num(dp.dominant_notional), 1)
+      ? Q.money(dp.dominant_notional, 1)
       : motivoVacio(dp.reason || dp.state, '—'));
 
     const candles = dp.candles || [];
@@ -698,7 +707,7 @@
       ? motivoVacio(dp.reason, 'sin volumen con el que comparar')
       : (src === 'QUANTDATA_DARK_FLOW'
         ? `${Q.compact(Q.num(dp.dark_volume, 0), 1)} de ${Q.compact(Q.num(dp.total_volume, 0), 1)} acc`
-        : `${Q.money(Q.num(dp.off_exchange_notional), 1)} de ${Q.money(Q.num(dp.large_print_notional), 1)} en prints grandes`));
+        : `${Q.money(dp.off_exchange_notional, 1)} de ${Q.money(dp.large_print_notional, 1)} en prints grandes`));
 
     // Auditoría: las dos medidas, una al lado de la otra. Dos vías independientes
     // que coinciden valen más que una sola; si no coinciden, eso es información.
@@ -736,7 +745,7 @@
         (when.length > 11 ? when.slice(11, 19) : when) || '—',
         Q.isNum(px) ? px.toFixed(2) : '—',
         Q.compact(Q.num(p.size, 0), 0),
-        Q.money(Q.num(p.notional), 1),
+        Q.money(p.notional, 1),
         esc(String(p.venue || p.exchange_name || p.exchange || '—')),
         cell(Q.isNum(rel) ? `${rel >= 0 ? '+' : ''}${rel.toFixed(2)}` : '—', Q.isNum(rel) ? (rel >= 0 ? 'pos' : 'neg') : 'dim'),
       ];
@@ -753,7 +762,7 @@
       return [
         Q.num(l.price).toFixed(2),
         (Q.isNum(lo) && Q.isNum(hi)) ? `${lo.toFixed(2)}–${hi.toFixed(2)}` : '—',
-        Q.money(Q.num(l.notional), 1),
+        Q.money(l.notional, 1),
         Q.isNum(sh) && sh > 0 ? Q.compact(sh, 0) : '—',
         String(l.prints || 0),
         esc(l.zone_type || '—'),
@@ -866,7 +875,7 @@
 
   function renderEscenarios(d) {
     const mc = d.montecarlo || {};
-    set('mcPaths', Q.isNum(Q.num(mc.path_count, NaN)) ? Q.compact(Q.num(mc.path_count), 0) : '—');
+    set('mcPaths', Q.isNum(Q.num(mc.path_count, NaN)) ? Q.compact(mc.path_count, 0) : '—');
     set('mcHorizon', Q.isNum(Q.num(mc.horizon_minutes, NaN)) ? `horizonte ${Q.num(mc.horizon_minutes).toFixed(0)} min` : '—');
     const by = {};
     for (const b of mc.quantiles || []) by[b.key] = b;
@@ -934,9 +943,9 @@
       esc(sc.label),
       Q.num(sc.price).toFixed(2),
       Q.isNum(Q.num(sc.delta_pct, NaN)) ? `${Q.num(sc.delta_pct) >= 0 ? '+' : ''}${Q.num(sc.delta_pct).toFixed(2)}%` : '—',
-      Q.signedCompact(Q.num(sc.gex_below), 2),
-      Q.signedCompact(Q.num(sc.gex_above), 2),
-      cell(Q.signedCompact(Q.num(sc.gex_net), 2), Q.num(sc.gex_net, 0) >= 0 ? 'pos' : 'neg'),
+      Q.signedCompact(sc.gex_below, 2),
+      Q.signedCompact(sc.gex_above, 2),
+      cell(Q.signedCompact(sc.gex_net, 2), Q.num(sc.gex_net, 0) >= 0 ? 'pos' : 'neg'),
       cell(esc(sc.regime), sc.regime === 'AMORTIGUA' ? 'pos' : sc.regime === 'AMPLIFICA' ? 'neg' : ''),
     ], ef.reason || 'Sin escenarios de exposición');
 
@@ -1174,8 +1183,8 @@
       ? `${Q.num(r.distance) >= 0 ? '+' : ''}${Q.num(r.distance).toFixed(2)} · ${dp >= 0 ? '+' : ''}${dp.toFixed(2)}% del precio`
       : '');
 
-    const sc = v => Q.signedCompact(Q.num(v), 2);
-    const cp = v => Q.compact(Q.num(v), 1);
+    const sc = v => Q.signedCompact(v, 2);
+    const cp = v => Q.compact(v, 1);
     const rows = [
       ['head', 'GEX · EXPOSICIÓN GAMMA'],
       ['r', 'Call', sc(r.gex_call), r.gex_call >= 0 ? 'pos' : 'neg'],
@@ -1194,7 +1203,7 @@
       ['r', 'Call', cp(r.call_oi), 'pos'],
       ['r', 'Put', cp(r.put_oi), 'neg'],
       ['r', 'Total', cp(r.oi), ''],
-      ['r', 'Neto', Q.signedCompact(Q.num(r.net_oi), 1), r.net_oi >= 0 ? 'pos' : 'neg'],
+      ['r', 'Neto', Q.signedCompact(r.net_oi, 1), r.net_oi >= 0 ? 'pos' : 'neg'],
       ['head', 'VOLUMEN'],
       ['r', 'Call', cp(r.call_volume), 'pos'],
       ['r', 'Put', cp(r.put_volume), 'neg'],
@@ -1203,7 +1212,7 @@
       ['r', 'Liquidez', Q.num(r.liquidity).toFixed(0), ''],
       ['r', 'Gravedad', Q.num(r.gravity).toFixed(0), ''],
       ['r', 'Γ+Δ', `${esc(r.state || '—')} · ${Q.num(r.joint).toFixed(0)}`, ''],
-      ['r', 'OPRA 5m', `${cp(r.opra_contracts_5m)} · ${Q.money(Q.num(r.opra_premium_5m), 1)}`, ''],
+      ['r', 'OPRA 5m', `${cp(r.opra_contracts_5m)} · ${Q.money(r.opra_premium_5m, 1)}`, ''],
     ];
     const host = el('skRows');
     if (host) {
@@ -1520,6 +1529,24 @@
       q.rate_limited ? `CUOTA AGOTADA · ${Q.num(q.rate_limited_for_seconds, 0).toFixed(0)}s`
         : (q.remaining === null || q.remaining === undefined ? 'cuota —'
           : `cuota ${q.remaining}${q.limit ? '/' + q.limit : ''}`));
+
+    // v1.46.0 · DARK POOL, carril por carril. Un 400 (hay que corregir el cuerpo),
+    // un 5xx (hay que esperar al proveedor) y un mercado cerrado (no hay nada que
+    // corregir) dejaban la sección igual de vacía y se veían igual. Aquí no.
+    const darkLanes = ((d.auditor || {}).dark_pool || {}).lanes || [];
+    fillTable('tblDarkLanes', darkLanes, l => [
+      esc(l.title || l.lane || '—'),
+      l.state === 'DIRECT_PROVIDER_OK'
+        ? '<span class="pos">DATO DIRECTO</span>'
+        : (l.is_failure ? `<span class="neg">${esc(l.state)}</span>`
+                        : `<span class="dim">${esc(l.state)}</span>`),
+      Q.isNum(Q.num(l.rows, NaN)) ? String(Q.num(l.rows)) : '—',
+      (l.rejected_fields || []).length
+        ? `<code class="mute">${esc((l.rejected_fields || []).join(' · '))}</code>`
+        : '<span class="dim">—</span>',
+      esc(l.detail || '—'),
+      esc(l.remedy || '—'),
+    ], 'Sin ciclo de dark pool todavía', true);
 
     fillTable('tblDiag', (state.diagnostics || {}).checks || [], c => [
       c.panel,

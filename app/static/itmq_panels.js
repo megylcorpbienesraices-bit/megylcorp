@@ -159,7 +159,15 @@
   function bars(host, opts) {
     const o = Object.assign({ fmt: v => Q.compact(v, 1), zeroCenter: true }, opts || {});
     const glide = new Q.Glide(150);
-    const maxG = new Q.GlideValue(280, 1);
+    // v1.46.0 · Sin valor inicial. `GlideValue` sin inicial adopta el PRIMER pico
+    // real de golpe y sólo anima los cambios posteriores; con un inicial de `1` el
+    // primer fotograma se dibujaba siempre contra una escala de un dólar, así que
+    // todas las barras salían saturadas hasta que la animación convergía. En un
+    // panel que alcanza a dibujar un solo fotograma —quince paneles compitiendo
+    // por el mismo bucle— esa escala falsa era lo único que se veía, y el efecto
+    // dependía del tamaño del activo: un `1` es invisible junto a 10⁷ y es TODA
+    // la escala junto a 10².
+    const maxG = new Q.GlideValue(280);
     let data = [];
 
     const panel = new Q.Panel(host, (ctx, env) => {
@@ -256,7 +264,15 @@
   function hbars(host, opts) {
     const o = Object.assign({ fmt: v => Q.signedCompact(v, 1) }, opts || {});
     const glide = new Q.Glide(150);
-    const maxG = new Q.GlideValue(280, 1);
+    // v1.46.0 · Sin valor inicial. `GlideValue` sin inicial adopta el PRIMER pico
+    // real de golpe y sólo anima los cambios posteriores; con un inicial de `1` el
+    // primer fotograma se dibujaba siempre contra una escala de un dólar, así que
+    // todas las barras salían saturadas hasta que la animación convergía. En un
+    // panel que alcanza a dibujar un solo fotograma —quince paneles compitiendo
+    // por el mismo bucle— esa escala falsa era lo único que se veía, y el efecto
+    // dependía del tamaño del activo: un `1` es invisible junto a 10⁷ y es TODA
+    // la escala junto a 10².
+    const maxG = new Q.GlideValue(280);
     let data = [];
 
     const panel = new Q.Panel(host, (ctx, env) => {
@@ -443,7 +459,15 @@
   function tbars(host, opts) {
     const o = Object.assign({ fmt: v => Q.compact(v, 1), bucketMs: 60_000 }, opts || {});
     let points = [];
-    const maxG = new Q.GlideValue(280, 1);
+    // v1.46.0 · Sin valor inicial. `GlideValue` sin inicial adopta el PRIMER pico
+    // real de golpe y sólo anima los cambios posteriores; con un inicial de `1` el
+    // primer fotograma se dibujaba siempre contra una escala de un dólar, así que
+    // todas las barras salían saturadas hasta que la animación convergía. En un
+    // panel que alcanza a dibujar un solo fotograma —quince paneles compitiendo
+    // por el mismo bucle— esa escala falsa era lo único que se veía, y el efecto
+    // dependía del tamaño del activo: un `1` es invisible junto a 10⁷ y es TODA
+    // la escala junto a 10².
+    const maxG = new Q.GlideValue(280);
 
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!points.length) { noData(ctx, env, o.empty); return false; }

@@ -1,4 +1,4 @@
-# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.45.0
+# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.46.0
 
 Dos comprobaciones distintas, y hacen falta las dos:
 
@@ -30,6 +30,41 @@ python scripts/verify_live_quantdata.py --ticker SPY --ticker XLF --ticker <una 
 
 Repetir con **al menos tres activos de comportamiento distinto**. Que funcione en
 uno no certifica nada.
+
+---
+
+## Paso 0-bis · DARK POOL, carril por carril y sobre una cesta (v1.46.0)
+
+Los tres carriles de dark pool son independientes y se verifican por separado.
+Medirlos juntos, o sobre un solo activo, es lo que hacía parecer rota la sección
+entera teniendo dos de tres sanos:
+
+```
+python scripts/verify_live_quantdata.py --dark-pool --json dark_pool.json
+```
+
+La cesta por defecto es `DIA SPY QQQ AAPL NVDA TSLA AMD`: tres ETF de escalas
+distintas y cuatro equities líquidos. Se puede sustituir con `--ticker`.
+
+- [ ] `Dark Flow`, `Dark Pool Levels` y `Equity Prints` salen **OK** o **SIN
+      DATOS**, nunca `CUERPO RECHAZADO`.
+- [ ] Si alguno sale `CUERPO RECHAZADO`, la columna DETALLE nombra **el campo
+      exacto** que el proveedor rechaza. Ese campo es lo que hay que corregir en
+      `_FIELD_DEFAULTS` o en el cuerpo mínimo de la herramienta: **no se reintenta
+      y no se prueban variantes**.
+- [ ] La última sección del informe dice si un carril falla en **todos** los
+      activos —entonces el defecto es del cuerpo que enviamos— o sólo en algunos
+      —entonces es de esos activos—. Esa distinción decide dónde mirar.
+- [ ] En `Dark Pool Levels` con datos, la línea reporta `preserved_fields` con
+      `price`, `notional`, `shares` y `prints`, y `latest_stock_price` con el
+      precio de referencia del subyacente.
+- [ ] En la terminal, AUDITOR · FUENTES → **DARK POOL · ESTADO POR CARRIL** muestra
+      las tres filas con su estado, su causa y qué hacer. La pantalla de DARK POOL
+      sigue diciendo sólo SIN DATOS: es correcto, la causa exacta vive en el
+      Auditor.
+- [ ] Un carril roto **no** apaga a los otros dos: con `dark-pool-levels` en
+      `REQUEST_INVALID`, la sección sigue publicando el nocional y la proporción
+      de `dark-flow`, y declara `degraded`.
 
 ---
 

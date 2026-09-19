@@ -258,7 +258,19 @@ def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
     `mode="LINEAR"` conserva el comportamiento anterior para quien necesite
     proporcionalidad estricta.
     """
-    rows = [list(r) if isinstance(r, (list, tuple)) else [] for r in (matrix or [])]
+    # `matrix or []` fallaba con un `ndarray`: NumPy no define el valor de verdad
+    # de un array de más de un elemento. Quien pase una matriz de NumPy —el arnés
+    # visual, una prueba, un carril futuro— recibía un ValueError en lugar de un
+    # mapa. Se normaliza la ENTRADA antes de normalizar los valores.
+    if matrix is None:
+        rows: List[List[Any]] = []
+    elif hasattr(matrix, "tolist"):
+        raw = matrix.tolist()
+        rows = [list(r) if isinstance(r, (list, tuple)) else [r] for r in raw]
+    else:
+        rows = [list(r) if isinstance(r, (list, tuple)) else
+                (list(r) if hasattr(r, "tolist") or hasattr(r, "__iter__") else [])
+                for r in matrix]
     flat: List[float] = []
     for r in rows:
         for v in r:

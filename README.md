@@ -1,5 +1,46 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.46.0 · Tres carriles, cinco códigos, ningún cero inventado
+
+Los defectos de esta release son variaciones de una sola idea equivocada:
+**tratar cosas distintas como si fueran la misma**.
+
+- **400 y 422 son opuestos.** Un 400 dice «tu petición está mal»; un 422 dice «tu
+  petición está bien y no tengo datos». Tratarlos igual hacía dos daños a la vez:
+  se «reparaba» un cuerpo correcto y se marcaba como averiada una herramienta
+  sana, y un 400 entraba en el ciclo de reintentos, que no lo arregla **nunca** —
+  ésa era la razón de que `dark-pool-levels` llevara ciclos en DEGRADADO.
+- **Reparar no es adivinar.** La corrección del cuerpo la **dicta el proveedor**:
+  se lee `errors[].field` y se corrige ese campo, como máximo tres veces por
+  ciclo. Si el campo no está en el catálogo de correcciones, se dice cuál es y se
+  para. No se prueban variantes.
+- **`dark-pool-levels` envía su propio contrato**, el mínimo, sin un solo campo
+  heredado de otra herramienta (`sessionDate`, `timeRange`, `snapshotTime`,
+  `filterExpression`, `pagination`, `projection`…), con lista de bloqueo para que
+  no vuelvan a colarse.
+- **Tres carriles, no una sección.** Dark Flow, Dark Pool Levels y Equity Prints
+  son canales separados con su timeout, su Last Known Good y su estado. Dos sanos
+  bastan para que la sección tenga dato; el roto se declara igual (`degraded`).
+- **Ocho estados con remedio.** `REQUEST_INVALID` (corregir el payload),
+  `PROVIDER_ERROR` (esperar), `PARSER_ERROR` (corregir el normalizador),
+  `MARKET_CLOSED`, `STALE`, `NO_CLASIFICABLE`, `SIN_DATOS_REALES`,
+  `DIRECT_PROVIDER_OK`. La pantalla del analista sigue diciendo SIN DATOS; el
+  Auditor conserva cuál fue y qué campo rechazó el proveedor.
+- **El normalizador de niveles conserva los campos oficiales**, incluido el precio
+  de referencia del subyacente —que viaja a nivel de respuesta— y los que todavía
+  no tienen nombre, bajo `extra`.
+- **La ventana de cadena depende del instrumento, no del ticker.** Una lista de
+  símbolos daba ±2.9 % a DIA, ±2.9 % a DJX, ±16.5 % a XLF y ±9.2 % a XLI. Ahora la
+  excepción es de clase —futuros, índices de volatilidad— y todo lo demás deriva
+  su banda del propio precio.
+- **Un hueco deja de formatearse como cero.** `Q.money(Q.num(x))` escribía `$0.0`
+  sin dato, en treinta y ocho sitios. El guardia va en el formateador: uno se
+  sostiene, treinta y ocho se desincronizan.
+- **La escala de los paneles ya no arranca en un dólar.** El `1` inicial de
+  `GlideValue` saturaba el primer fotograma, y el efecto dependía del tamaño del
+  activo. Encontrado **mirando**: el carril denso de un valor de 9,52 $ salía con
+  las 390 barras al tope mientras los ETF grandes se leían bien.
+
 ## v1.45.0 · Un dato ausente deja de ser una afirmación
 
 Cinco defectos, un mismo patrón: **cuando no había dato, se escribía el valor más

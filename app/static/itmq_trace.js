@@ -91,9 +91,9 @@
     spot: new Q.GlideValue(150),
     priceLo: new Q.GlideValue(220),
     priceHi: new Q.GlideValue(220),
-    left: { metric: 'DEX', glide: new Q.Glide(140), max: new Q.GlideValue(260, 1),
+    left: { metric: 'DEX', glide: new Q.Glide(140), max: new Q.GlideValue(260),
             call: new Q.Glide(140), put: new Q.Glide(140) },
-    right: { metric: 'GEX', glide: new Q.Glide(140), max: new Q.GlideValue(260, 1),
+    right: { metric: 'GEX', glide: new Q.Glide(140), max: new Q.GlideValue(260),
              call: new Q.Glide(140), put: new Q.Glide(140) },
     breakdown: false,        // NETO (false) · CALL+PUT (true)
     heatField: 'gamma',
@@ -308,8 +308,10 @@
         peak = Math.max(peak, Math.abs(Q.num(p.call)), Math.abs(Q.num(p.put)));
       }
     }
-    cfg.max.set(peak > 0 ? peak : 1);
-    const mx = Math.max(cfg.max.get(), 1e-9);
+    // v1.46.0 · El pico sin dato es 0, no 1: un dólar es una escala arbitraria
+    // que sólo pasa desapercibida en activos grandes.
+    cfg.max.set(peak > 0 ? peak : 0);
+    const mx = Math.max(Q.num(cfg.max.get(), 0), 1e-9);
 
     // El eje cero va al centro para métricas con signo y al borde interior si no.
     const zeroX = signed ? box.x + box.w * 0.5 : (side === 'left' ? box.x + box.w : box.x);
@@ -1134,14 +1136,22 @@
     const dec = d.decision || {};
     const ms = d.market_state || {};
     set('traceSpot', Q.isNum(liveSpot) ? liveSpot.toFixed(2) : '—');
-    set('traceGammaNet', Q.signedCompact(Q.num(prof.gamma_net_m) * 1e6, 2));
-    set('traceDeltaNet', Q.signedCompact(Q.num(prof.delta_net_m) * 1e6, 2));
+    // v1.46.0 · `Q.num(null)` devuelve 0, así que un perfil ausente se publicaba
+    // como «0.00» y «$0.0»: la especificación prohíbe exactamente eso. Un cero es
+    // una AFIRMACIÓN —hoy la exposición neta es nula— y un hueco no lo es.
+    const netM = (v) => {
+      const x = Q.num(v, NaN);
+      return Q.isNum(x) ? Q.signedCompact(x * 1e6, 2) : null;
+    };
+    set('traceGammaNet', netM(prof.gamma_net_m));
+    set('traceDeltaNet', netM(prof.delta_net_m));
     set('traceGammaCenter', Q.isNum(Q.num(prof.gamma_center, NaN)) ? Q.num(prof.gamma_center).toFixed(2) : '—');
     set('traceDeltaCenter', Q.isNum(Q.num(prof.delta_center, NaN)) ? Q.num(prof.delta_center).toFixed(2) : '—');
     set('traceDirection', dec.direction || '—');
     set('traceEdge', dec.edge_state || '—');
     set('tracePhase', ms.phase || '—');
-    set('traceFlow5m', Q.money(Q.num(prof.opra_directional_premium_5m), 1));
+    const flow5m = Q.num(prof.opra_directional_premium_5m, NaN);
+    set('traceFlow5m', Q.isNum(flow5m) ? Q.money(flow5m, 1) : null);
     const lv = {};
     for (const l of d.levels || []) lv[l.kind] = l.price;
     set('traceCallWall', fmtLevel(lv.call_wall));

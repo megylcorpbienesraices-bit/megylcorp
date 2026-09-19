@@ -3955,7 +3955,7 @@ class PlatformState:
                     self.trace_session_cache=dict(list(self.trace_session_cache.items())[-48:])
         return payload
 
-    def nextgen_trace_price_only(self, timeframe: str = "1m", tail_minutes: int = 60, visual_window: float = 12.0, reason: str = "QUANT_WARMING") -> Dict[str, Any]:
+    def nextgen_trace_price_only(self, timeframe: str = "1m", tail_minutes: int = 60, visual_window: float | None = None, reason: str = "QUANT_WARMING") -> Dict[str, Any]:
         """Fail-soft TRACE payload that keeps observed price/history visible while Quant hydrates.
 
         This path never fabricates Gamma/Delta/Scanner state. It publishes only same-instrument
@@ -3999,8 +3999,37 @@ class PlatformState:
         }
         return payload
 
-    def nextgen_trace(self, timeframe: str = "1m", tail_minutes: int = 60, visual_window: float = 12.0) -> Dict[str, Any]:
+    def _resolve_visual_window(self, requested: float | None) -> float:
+        """Banda de strikes del heatmap, PROPORCIONAL al precio del activo.
+
+        v1.46.0 · Los llamadores pasaban `visual_window=12.0` —doce dólares— para
+        cualquier símbolo. Sobre DIA (~534 $) eso es ±2.2 %, que es la banda con la
+        que se validó; sobre una acción de 9.5 $ es ±126 %, o sea la cadena entera,
+        y la estructura real quedaba comprimida en unos pocos píxeles. El heatmap
+        «pobre o vacío» en varios activos empezaba aquí.
+
+        Se resuelve desde el catálogo, que ya sabe derivar la ventana del precio.
+        Un `window` declarado a mano para un instrumento con escala propia —los
+        futuros— sigue mandando.
+        """
+        from .core.assets import chain_window_for
+        spot = _f(self.gamma_delta.get("spot")) if isinstance(self.gamma_delta, dict) else None
+        if spot is None:
+            spot = _f((self.snapshot or {}).get("spot") if isinstance(self.snapshot, dict) else None)
+        try:
+            resolved = float(chain_window_for(self.symbol, spot=spot).get("window") or 0.0)
+        except Exception as exc:
+            _obs_note("service:resolve_visual_window", exc, severity="DEGRADED")
+            resolved = 0.0
+        if resolved > 0:
+            return resolved
+        # Sin precio todavía no se puede derivar nada; se respeta lo pedido.
+        return float(requested) if requested and requested > 0 else 12.0
+
+    def nextgen_trace(self, timeframe: str = "1m", tail_minutes: int = 60,
+                      visual_window: float | None = None) -> Dict[str, Any]:
         """Structured payload for the framework-independent TRACE renderer."""
+        visual_window = self._resolve_visual_window(visual_window)
         with self.lock:
             if self.replay_context.is_replay:
                 b = self._build_replay_bundle()

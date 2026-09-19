@@ -57,10 +57,23 @@ def test_orderflow_scale_cannot_clip_current_directional_bars():
     src = text("app/static/itmq_orderflow.js")
     net = src[src.find("function drawNetFlow"):src.find("function drawTotal")]
     total = src[src.find("function drawTotal"):src.find("/* -------------------------------------------------------------- API")]
-    assert "actualPeak" in net
-    assert "Math.max(S._netMax.get(), actualPeak, 1)" in net
-    assert "actualPeak" in total
-    assert "Math.max(S._totMax.get(), actualPeak, 1)" in total
+    # La garantía es que el pico REAL de la ventana entra siempre en la escala:
+    # el valor suavizado no puede dejar una barra actual fuera del lienzo.
+    assert "actualPeak" in net and "actualPeak" in total
+    assert "Math.max(smoothed, actualPeak," in net
+    assert "actualPeak" in total and "S._totMax.get()" in total
+
+    # v1.46.0 · Lo que SÍ cambió: el suelo dejó de ser «1» —un dólar— porque un
+    # suelo absoluto no es multi-activo. En un subyacente de 10⁸ es invisible; en
+    # uno de 10² es la escala entera. El suelo es ahora el mínimo representable,
+    # que sólo evita la división por cero.
+    for lane in (net, total):
+        assert "actualPeak, 1)" not in lane, "suelo absoluto en dólares"
+        assert "Number.MIN_VALUE" in lane
+    # Y un `get()` que todavía no tiene valor no puede envenenar el Math.max:
+    # `Math.max(NaN, x)` es NaN, así que el valor se sanea antes de comparar.
+    assert "Q.num(S._netMax.get(), 0)" in net or "Q.num(S._netMax.get(), 0)" in src
+    assert "Q.num(S._totMax.get(), 0)" in total
 
 
 def test_live_spot_immediately_enforces_wall_side_in_trace_and_flow():

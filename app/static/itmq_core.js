@@ -43,7 +43,23 @@
     return Math.abs(next - target) < 1e-9 ? target : next;
   }
 
+  /** Lo que se escribe cuando NO hay dato. Nunca un cero. */
+  const NO_DATA = '—';
+
+  /**
+   * v1.46.0 · Un hueco deja de formatearse como cero.
+   *
+   * `num(null)` devuelve 0, así que `money(null)` escribía `$0.0` y
+   * `signedCompact(null)` escribía `0.00`. Eso convierte la AUSENCIA de un dato
+   * en la AFIRMACIÓN de que vale cero, que es precisamente lo que la
+   * especificación prohíbe: «hoy no hubo prima direccional» y «no pudimos
+   * medir la prima direccional» son dos cosas distintas y se veían igual.
+   *
+   * El guardia vive en el formateador, no en cada una de las treinta y tantas
+   * llamadas: una regla en un sitio se sostiene, treinta y tantas no.
+   */
   function compact(v, digits) {
+    if (!isNum(num(v, NaN))) return NO_DATA;
     const x = num(v, 0);
     const a = Math.abs(x);
     const d = digits === undefined ? 1 : digits;
@@ -55,11 +71,13 @@
   }
 
   function money(v, digits) {
+    if (!isNum(num(v, NaN))) return NO_DATA;
     const x = num(v, 0);
     return (x < 0 ? '-$' : '$') + compact(Math.abs(x), digits);
   }
 
   function signedCompact(v, digits) {
+    if (!isNum(num(v, NaN))) return NO_DATA;
     const x = num(v, 0);
     return (x > 0 ? '+' : x < 0 ? '−' : '') + compact(Math.abs(x), digits);
   }
@@ -529,6 +547,7 @@
     Panel, Glide, GlideValue, TimeLink,
     scale, niceTicks, clamp, lerp, approach, isNum, num,
     compact, money, signedCompact, fmtMinutes, hhmm, parseTime,
+    NO_DATA,
     token, alpha,
     LEVELS, FLOW_LEVEL_KINDS, levelStyle,
     roundRect, gridY, axisX, chip, levelLine, stackLabels,

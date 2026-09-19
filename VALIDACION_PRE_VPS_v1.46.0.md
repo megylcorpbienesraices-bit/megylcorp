@@ -1,14 +1,101 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.45.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.46.0
 
-Release: `ITM_QUANT_v1.45.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.46.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A9** es la de esta release.
+> Documento acumulativo. La sección **A10** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **1812 casos / 145 ficheros**
-- Particiones: 21 · `plan_sha256`: `c094d3be6c4e2cf70de4204d6d03b391c7a7f83f9267bb9cc8f57adbbab4533b`
+- Inventario nominal: **1840 casos / 146 ficheros**
+- Particiones: 21 · `plan_sha256`: `5afc7b5d062c017ff4f99c96ed8be2455813d74b168cf863c810b74dddee2bee`
 - Resultado: **PASS**
+
+---
+
+## A10 · v1.46.0 · Dark Pool por carriles y corrección global multi-activo
+
+### Qué se certifica
+
+`tests/test_v1460_dark_pool_lanes_and_multiasset.py` — 28 casos en diez bloques.
+
+**1 · El cuerpo sin herencias.** Que `dark-pool-levels` envíe exactamente
+`{"filter": {"ticker": …}}` y ninguno de los campos que el usuario señaló uno a
+uno: `sessionDate`, `timeRange`, `snapshotTime`, `aggregationPeriod`,
+`filterExpression`, `pagination`, `projection`. Y que la lista de bloqueo los
+quite aunque alguien los añada más tarde: la defensa es el código, no la
+disciplina de quien edita el catálogo.
+
+**2 · El 400, entero.** Que `errors[].field` y `errors[].message` sobrevivan, en
+las dos convenciones (`field`/`message` y `loc`/`msg`), sin truncar la parte
+accionable.
+
+**3 · Cinco códigos, cinco tratamientos.** 400 → `REQUEST_INVALID`, 422 →
+`NO_DATA`, 404 → `MISSING_TOOL`, 5xx → `PROVIDER_ERROR`, timeout → `TRANSIENT`.
+Que un 400 sin corrección conocida **pare en el primer intento** y deje escrito el
+campo. Que un 422 **no** marque la herramienta como averiada ni entre en el
+backoff. Que un 5xx sí programe reintento.
+
+**4 · El 200 conserva los campos.** Nivel de precio, nocional, acciones, número de
+operaciones (también cuando llega como `tradeCount`), volumen oscuro, volumen en
+bolsa, porcentaje, el precio de referencia del subyacente a nivel de respuesta y
+los campos sin nombrar bajo `extra`. Y la cadena entera —RAW → NORMALIZADOR → DATA
+HUB → FRONTEND— con `source_mode = DIRECT_PROVIDER` al final.
+
+**5 · Carriles independientes.** Que un `dark-pool-levels` rechazado **no** tumbe a
+`dark-flow` ni a `equity-prints`: la sección sigue lista, el nocional y la
+proporción siguen siendo los del proveedor, y la degradación se declara. Y que
+cada carril sea de verdad su propio canal en el runtime del Data Hub.
+
+**6 · Tri-estado fuera de bolsa.** Que un flag ausente siga siendo `None` y no
+`False`, que el print no se descarte, y que unas impresiones que llegan sin poder
+clasificarse **no** cuenten como carril sano.
+
+**7 · Ocho estados, una pantalla.** Que los ocho existan con remedio declarado,
+que la pantalla del analista nunca lea un código del proveedor, y que la tabla por
+carril viva en la vista de AUDITOR y no en la de análisis.
+
+**8 · Verificación multi-activo.** Que `verify_live_quantdata.py` mida los tres
+carriles sobre una cesta de siete activos —tres ETF de escalas distintas y cuatro
+equities líquidos—, que envíe **el mismo cuerpo que producción** y que conserve el
+campo rechazado, no la primera línea del mensaje.
+
+**9 · Multi-activo de verdad.** Que no haya un solo ticker escrito a mano en la
+ruta que produce la sección; que la ventana de cadena sea proporcional para SPY,
+QQQ, XLF y una acción de 9,52 $; que la escala del carril de órdenes no tenga
+suelo absoluto en dólares; y que el heatmap llene lo mismo con cuatro escalas
+separadas por seis órdenes de magnitud.
+
+**10 · Ningún cero fabricado.** Que un fallo técnico deje `None` en nocional,
+acciones, operaciones y proporción —nunca cero—, y que la causa exacta llegue al
+Auditor mientras la pantalla dice SIN DATOS.
+
+### Verificación visual
+
+Programa en ejecución, renderizado en Chromium sobre `tools/visual_harness.html`
+con los renderizadores reales y cinco activos de 10⁹ a 10⁴ (SPY, QQQ, DIA, XLF,
+SOFI), quince paneles simultáneos:
+
+- **Antes**: el carril denso de SOFI salía saturado —las 390 barras al tope, eje
+  ±1.0— mientras los otros cuatro se leían bien. El defecto no estaba en el
+  activo: estaba en que la escala inicial de cada panel era un dólar y sólo los
+  activos grandes salían de ella a tiempo.
+- **Después**, captura a 900 ms: los quince paneles muestran el perfil completo,
+  con su eje correcto desde el primer fotograma. Los cinco activos se leen igual
+  sin una sola constante por ticker.
+
+Terminal real (`/` sobre uvicorn, sin credenciales de proveedor, fin de semana):
+todas las secciones publican SIN DATOS / SIN ESTRUCTURA, que es el resultado
+correcto, y **ya no aparecen** el `0.00` de GEX/DEX NETO ni el `$0.0` de FLUJO 5M
+que la especificación prohíbe.
+
+### Lo que esta validación NO cubre
+
+- No hay un 200 real de `dark-pool-levels`: sin salida hacia `quantdata.us` desde
+  el entorno de construcción, el contrato del proveedor no se ha podido leer ni
+  confirmar.
+- La validación LIVE con API key —incluida `--dark-pool` sobre DIA, SPY, QQQ,
+  AAPL, NVDA, TSLA y AMD— queda pendiente de ejecutarse donde exista la clave.
+- La comparación contra una sesión de mercado real queda pendiente en el VPS.
 
 ---
 

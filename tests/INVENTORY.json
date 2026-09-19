@@ -2442,8 +2442,41 @@
     "test_the_venue_code_classifies_when_the_provider_does_not_declare",
     "test_the_visual_harness_covers_incomparable_scales"
    ]
+  },
+  "tests/test_v1460_dark_pool_lanes_and_multiasset.py": {
+   "casos": 28,
+   "tests": [
+    "test_a_422_is_not_a_fault_and_does_not_mark_the_tool_broken",
+    "test_a_5xx_backs_off_and_says_so",
+    "test_a_broken_levels_lane_does_not_take_down_dark_flow",
+    "test_a_missing_off_exchange_flag_is_unknown_not_false",
+    "test_a_technical_failure_never_becomes_a_zero",
+    "test_a_validation_error_keeps_every_named_field",
+    "test_alternative_field_names_still_map",
+    "test_an_unrepairable_400_stops_instead_of_looping",
+    "test_dark_pool_levels_sends_only_its_own_contract",
+    "test_each_lane_is_its_own_channel_in_the_hub_runtime",
+    "test_every_lane_carries_its_own_state_to_the_bundle",
+    "test_five_failure_classes_five_treatments",
+    "test_inherited_fields_are_stripped_even_if_someone_adds_them_later",
+    "test_no_ticker_is_written_into_the_dark_pool_path",
+    "test_prints_that_cannot_be_classified_are_not_a_healthy_lane",
+    "test_pydantic_shaped_errors_are_read_too",
+    "test_raw_to_normalizer_to_hub_to_frontend_stays_direct_provider",
+    "test_the_analyst_screen_never_reads_a_provider_error_code",
+    "test_the_chain_window_is_proportional_for_every_discovered_asset",
+    "test_the_eight_internal_states_exist_with_cause_and_remedy",
+    "test_the_exact_cause_reaches_the_auditor_and_not_the_main_screen",
+    "test_the_heatmap_normalization_is_rank_based_for_every_asset",
+    "test_the_live_script_checks_three_lanes_across_a_basket",
+    "test_the_live_script_keeps_the_rejected_field_not_the_first_line",
+    "test_the_live_script_sends_the_same_body_production_sends",
+    "test_the_normalizer_preserves_every_official_field",
+    "test_the_order_flow_scale_has_no_absolute_floor",
+    "test_the_terminal_publishes_the_cause_for_the_auditor_only"
+   ]
   }
  },
- "total_minimo": 1812,
+ "total_minimo": 1840,
  "version": "1.45.0"
 }

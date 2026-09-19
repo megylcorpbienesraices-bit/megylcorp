@@ -785,20 +785,70 @@ def norm_prints(payload: Dict[str, Any]) -> Dict[str, Any]:
                                     "que la operación fuera en bolsa.")}
 
 
+#: Campos que `norm_levels` ya expone con nombre propio. Lo que no esté aquí y
+#: venga en la respuesta se conserva en `extra`: un normalizador que descarta en
+#: silencio campos oficiales es indistinguible de un proveedor que no los manda.
+_LEVEL_MAPPED = {
+    "price", "level", "pricelevel", "notional", "value", "dollarvolume",
+    "shares", "size", "volume", "prints", "count", "trades", "tradecount",
+    "darkvolume", "litvolume", "percentofvolume", "pctofvolume",
+}
+
+
+def _level_extra(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Los campos oficiales que este normalizador todavía no nombra."""
+    out: Dict[str, Any] = {}
+    for k, v in row.items():
+        if str(k).lower().replace("_", "") in _LEVEL_MAPPED:
+            continue
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            out[str(k)] = v
+    return out
+
+
 def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Niveles de precio con volumen fuera de bolsa.
+
+    v1.46.0 · Antes se quedaban cuatro campos y el resto se perdía, incluido el
+    precio de referencia del subyacente que el proveedor publica a nivel de
+    respuesta. Ahora se preservan: nivel de precio, nocional, acciones, número de
+    operaciones, volumen oscuro y su porcentaje, y **todo campo escalar que el
+    proveedor mande y aquí no tenga nombre**, bajo `extra`. Quedarse sin un campo
+    porque el normalizador no lo conocía es indistinguible, desde la pantalla, de
+    que el proveedor no lo haya enviado.
+    """
     out = []
     for r in _rows(payload, "levels", "darkPoolLevels", "zones"):
+        if not isinstance(r, dict):
+            continue
         p = _f(_pick(r, "price", "level", "priceLevel"))
         if p is None:
             continue
-        out.append({
+        row = {
             "price": p,
             "notional": _f(_pick(r, "notional", "value", "dollarVolume"), 0.0) or 0.0,
             "shares": _f(_pick(r, "shares", "size", "volume"), 0.0) or 0.0,
-            "prints": int(_f(_pick(r, "prints", "count", "trades"), 0) or 0),
-        })
+            "prints": int(_f(_pick(r, "prints", "count", "trades", "tradeCount"), 0) or 0),
+            "dark_volume": _f(_pick(r, "darkVolume")),
+            "lit_volume": _f(_pick(r, "litVolume")),
+            "pct_of_volume": _f(_pick(r, "percentOfVolume", "pctOfVolume")),
+        }
+        extra = _level_extra(r)
+        if extra:
+            row["extra"] = extra
+        out.append(row)
     out.sort(key=lambda x: -x["notional"])
-    return {"ready": bool(out), "rows": out, "count": len(out)}
+    # Precio del subyacente publicado con la respuesta, no por nivel. Es lo que
+    # permite situar los niveles respecto al último precio SIN mezclar la fuente
+    # del subyacente con la del dark pool.
+    latest = None
+    if isinstance(payload, dict):
+        latest = _f(_pick(payload, "latestStockPrice", "stockPrice", "underlyingPrice",
+                          "lastPrice", "spot"))
+    block: Dict[str, Any] = {"ready": bool(out), "rows": out, "count": len(out)}
+    if latest is not None:
+        block["latest_stock_price"] = latest
+    return block
 
 
 def norm_stats(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -883,29 +933,53 @@ class QuantDataTool:
     # Variantes del cuerpo que se prueban si el proveedor rechaza la validación.
     # `None` = la herramienta no admite reparación y un 400 es definitivo.
     body_variants: Callable[[str], List[Dict[str, Any]]] | None = field(default=None)
-    # Índice de la variante que el proveedor ACEPTÓ. Se fija una vez y se reutiliza:
-    # descubrir el contrato en cada ciclo sería pagar la búsqueda una y otra vez.
     accepted_variant: int | None = field(default=None)
     validation_error: str | None = field(default=None)
     variants_tried: int = field(default=0)
+    # Correcciones DICTADAS por el proveedor en un 400 anterior, no adivinadas.
+    # Se conservan, así que el descubrimiento se paga una sola vez.
+    repair_added: Dict[str, Any] = field(default_factory=dict)
+    repair_removed: tuple = field(default=())
+    repair_log: List[str] = field(default_factory=list)
+    stripped_fields: List[str] = field(default_factory=list)
+    provider_status: str | None = field(default=None)
 
     def available(self, now: float | None = None) -> bool:
         return (now or time.time()) >= self.unavailable_until
 
-    def request_bodies(self, ticker: str) -> List[Dict[str, Any]]:
-        """Cuerpos a probar, en orden, para esta herramienta.
+    def request_body(self, ticker: str) -> Dict[str, Any]:
+        """Cuerpo vigente: el mínimo de la herramienta más lo que el proveedor dictó.
 
-        Si ya se descubrió cuál acepta el proveedor se devuelve SÓLO ése: volver a
-        recorrer la lista en cada ciclo gastaría cuota en peticiones que ya se sabe
-        que fallan.
+        No hay lista de formas candidatas. Se parte del cuerpo mínimo, se quitan los
+        campos que no pertenecen a esta herramienta, y se aplican las correcciones
+        aprendidas de errores anteriores del propio proveedor.
         """
-        base = self.body(ticker)
-        if self.body_variants is None:
-            return [base]
-        variants = [base] + [v for v in self.body_variants(ticker) if v != base]
-        if self.accepted_variant is not None and 0 <= self.accepted_variant < len(variants):
-            return [variants[self.accepted_variant]]
-        return variants
+        base = dict(self.body(ticker))
+        base, dropped = strip_inherited_fields(base)
+        if dropped:
+            self.stripped_fields = sorted(set(list(self.stripped_fields) + dropped))
+        for key in self.repair_removed:
+            base.pop(key, None)
+        base.update(self.repair_added)
+        return base
+
+    def request_bodies(self, ticker: str) -> List[Dict[str, Any]]:
+        """Compatibilidad con el carril antiguo: un solo cuerpo, el vigente."""
+        return [self.request_body(ticker)]
+
+    def learn_repair(self, before: Dict[str, Any], after: Dict[str, Any], note: str = "") -> None:
+        """Recuerda la corrección que el proveedor acaba de dictar."""
+        for key in before:
+            if key not in after:
+                self.repair_removed = tuple(sorted(set(self.repair_removed) | {key}))
+                self.repair_added.pop(key, None)
+        for key, value in after.items():
+            if before.get(key) != value:
+                self.repair_added[key] = value
+                self.repair_removed = tuple(k for k in self.repair_removed if k != key)
+        if note:
+            self.repair_log.append(note[:120])
+            del self.repair_log[:-8]
 
     def note_validation_failure(self, detail: str) -> None:
         self.validation_error = str(detail)[:400]
@@ -973,25 +1047,114 @@ def path_variants(paths: tuple[str, ...], limit: int = 12) -> tuple[str, ...]:
     return tuple(dict.fromkeys(p for p in paths if p))
 
 
-def _dark_pool_levels_variants(ticker: str) -> List[Dict[str, Any]]:
-    """Formas candidatas para `dark-pool-levels`, de la más probable a la menos.
+# Campos que NINGUNA herramienta debe heredar de otra. Si aparecen en un cuerpo
+# es porque se copiaron de un endpoint vecino, y el proveedor los rechaza.
+INHERITED_FIELD_BLOCKLIST = (
+    "sessionDate", "timeRange", "snapshotTime", "filterExpression",
+    "pagination", "projection", "sort", "orderBy", "cursor", "offset",
+)
 
-    El orden no es arbitrario: se prueban primero los campos que OTRAS
-    herramientas de equities ya tienen confirmados contra esta misma cuenta, y
-    después combinaciones. Cada variante añade un campo, de modo que el primer
-    éxito identifica el campo que faltaba en lugar de dejar una forma «que va».
+
+def _dark_pool_levels_body(ticker: str) -> Dict[str, Any]:
+    """Cuerpo MÍNIMO de `dark-pool-levels`: sólo el filtro de ticker.
+
+    v1.46.0 · Se parte del mínimo a propósito. Un cuerpo con campos de más es tan
+    inválido como uno con campos de menos, y `dark-pool-levels` no comparte
+    contrato con `dark-flow` (`aggregationPeriod`) ni con `equity-prints`
+    (`limit`): heredar sus parámetros es una de las dos formas de provocar el 400.
+
+    Si el proveedor pide algo más, lo dirá nombrando el campo, y la reparación
+    guiada por el error lo añadirá. No se adivina hacia arriba.
     """
-    tf = _tf(ticker)
-    return [
-        {"limit": 100, **tf},
-        {"aggregationPeriod": "1d", **tf},
-        {"lookBackPeriod": 1, **tf},
-        {"limit": 100, "lookBackPeriod": 1, **tf},
-        {"limit": 100, "aggregationPeriod": "1d", **tf},
-        # Sin envoltorio `filter`: algunas herramientas del proveedor toman el
-        # ticker en la raíz del cuerpo.
-        {"ticker": str(ticker or "").strip().upper(), "limit": 100},
-    ]
+    return _tf(ticker)
+
+
+def strip_inherited_fields(body: Dict[str, Any]) -> tuple[Dict[str, Any], List[str]]:
+    """Quita campos que no pertenecen a esta herramienta. Devuelve (cuerpo, quitados)."""
+    removed = [k for k in body if k in INHERITED_FIELD_BLOCKLIST]
+    if not removed:
+        return body, []
+    return {k: v for k, v in body.items() if k not in INHERITED_FIELD_BLOCKLIST}, removed
+
+
+# Valores por omisión para campos que el proveedor puede declarar obligatorios.
+# No se envían nunca por iniciativa propia: sólo cuando el 400 los NOMBRA.
+_FIELD_DEFAULTS: Dict[str, Any] = {
+    "limit": 100,
+    "aggregationPeriod": "1d",
+    "lookBackPeriod": 1,
+    "greekMode": "GAMMA",
+    "dataMode": "NET_PREMIUM",
+    "representationMode": "RAW",
+    "maturity": 30,
+}
+
+_MISSING_HINTS = ("field required", "is required", "missing", "required property",
+                  "required field", "must be provided")
+_UNKNOWN_HINTS = ("unknown field", "extra fields not permitted", "not permitted",
+                  "unexpected", "additional properties", "not allowed", "unrecognized")
+
+
+def classify_validation_errors(fields: List[str]) -> Dict[str, List[str]]:
+    """Qué pide y qué sobra, leído de lo que el proveedor dijo.
+
+    Cada entrada llega como `"body.lookBackPeriod: field required"`. Se separa el
+    nombre del campo del motivo, y el motivo decide la corrección:
+
+        falta   → añadir el campo con un valor por omisión conocido
+        sobra   → quitarlo del cuerpo
+        inválido→ probar otro valor conocido para ese campo
+
+    Esto es reparación GUIADA POR EL CONTRATO que el proveedor acaba de comunicar,
+    no una búsqueda a ciegas por el espacio de cuerpos posibles.
+    """
+    out: Dict[str, List[str]] = {"missing": [], "unknown": [], "invalid": []}
+    for raw in fields or []:
+        text = str(raw)
+        name, _, reason = text.partition(":")
+        # `body.lookBackPeriod` → `lookBackPeriod`; se ignoran los prefijos de ruta.
+        leaf = name.strip().split(".")[-1].strip().strip("'\"[]")
+        if not leaf:
+            continue
+        low = (reason or text).lower()
+        if any(h in low for h in _UNKNOWN_HINTS):
+            out["unknown"].append(leaf)
+        elif any(h in low for h in _MISSING_HINTS):
+            out["missing"].append(leaf)
+        else:
+            out["invalid"].append(leaf)
+    return out
+
+
+def repair_body(body: Dict[str, Any], fields: List[str]) -> tuple[Dict[str, Any] | None, str]:
+    """Siguiente cuerpo a probar, derivado del error. `None` si no hay corrección.
+
+    Devolver `None` es una respuesta legítima y necesaria: significa que el
+    proveedor rechaza algo que no sabemos corregir, y entonces lo que corresponde
+    es DECIRLO con el campo exacto, no seguir probando formas al azar.
+    """
+    buckets = classify_validation_errors(fields)
+    nxt = dict(body)
+    notes: List[str] = []
+
+    for name in buckets["unknown"]:
+        if name in nxt:
+            nxt.pop(name, None)
+            notes.append(f"−{name}")
+    for name in buckets["missing"]:
+        if name in _FIELD_DEFAULTS and name not in nxt:
+            nxt[name] = _FIELD_DEFAULTS[name]
+            notes.append(f"+{name}={_FIELD_DEFAULTS[name]!r}")
+    for name in buckets["invalid"]:
+        # Un valor inválido sólo se corrige si conocemos otro para ese campo;
+        # inventar valores es exactamente lo que no queremos hacer.
+        if name in _FIELD_DEFAULTS and nxt.get(name) != _FIELD_DEFAULTS[name]:
+            nxt[name] = _FIELD_DEFAULTS[name]
+            notes.append(f"~{name}={_FIELD_DEFAULTS[name]!r}")
+
+    if not notes or nxt == body:
+        return None, ""
+    return nxt, " ".join(notes)
 
 
 def build_catalog() -> Dict[str, QuantDataTool]:
@@ -1202,9 +1365,8 @@ def build_catalog() -> Dict[str, QuantDataTool]:
         QuantDataTool(
             "dark_pool_levels", "Dark Pool / Equities", "Niveles de dark pool",
             ("/v1/equities/tool/dark-pool-levels",),
-            lambda t: _tf(t),
-            norm_levels, "MEDIUM",
-            body_variants=_dark_pool_levels_variants),
+            _dark_pool_levels_body,
+            norm_levels, "MEDIUM"),
         QuantDataTool(
             "stock_price_over_time", "Dark Pool / Equities", "Precio / Tiempo",
             ("/v1/equities/tool/stock-price-over-time",),
@@ -1250,6 +1412,43 @@ def is_missing_tool_error(message: str) -> bool:
     return "not found" in m or "unknown tool" in m or "no such" in m
 
 
+# Estados de una herramienta frente al proveedor. Confundirlos fue lo que metió a
+# `dark-pool-levels` en un ciclo de reintentos de algo que nunca iba a cambiar.
+STATUS_REQUEST_INVALID = "REQUEST_INVALID"   # 400 · el cuerpo está mal → reparable
+STATUS_NO_DATA = "NO_DATA"                   # 422 · petición válida, sin datos
+STATUS_MISSING_TOOL = "MISSING_TOOL"         # 404 · la herramienta no existe aquí
+STATUS_PROVIDER_ERROR = "PROVIDER_ERROR"     # 5xx · fallo temporal del proveedor
+STATUS_TRANSIENT = "TRANSIENT"               # red, timeout, rate limit
+
+
+def classify_provider_failure(exc):
+    """Qué clase de fallo es, que decide qué hacer con él.
+
+    v1.46.0 · Antes un 400 y un 422 caían en el mismo cajón que un timeout, así que
+    una petición mal formada entraba en el ciclo de reintentos y se repetía
+    indefinidamente sin que nada cambiara. Un 400 no se arregla esperando: se
+    arregla corrigiendo el cuerpo, y si no se sabe corregir, diciéndolo.
+
+    Y un 422 no es un fallo: la petición era válida y el proveedor no tiene datos
+    para ella. Tratarlo como error hacía parecer rota una herramienta que funciona.
+    """
+    status = getattr(exc, "status_code", None)
+    text = str(exc or "").lower()
+    if status == 400 or "http 400" in text:
+        return STATUS_REQUEST_INVALID
+    if status == 422 or "http 422" in text:
+        return STATUS_NO_DATA
+    if status in (404, 405) or "http 404" in text or "http 405" in text:
+        return STATUS_MISSING_TOOL
+    if isinstance(status, int) and 500 <= status < 600:
+        return STATUS_PROVIDER_ERROR
+    if "http 50" in text or "http 51" in text:
+        return STATUS_PROVIDER_ERROR
+    if "validation failed" in text or "request validation" in text:
+        return STATUS_REQUEST_INVALID
+    return STATUS_TRANSIENT
+
+
 def is_validation_error(exc: Any) -> bool:
     """¿El proveedor rechaza el CUERPO, no la ruta?
 
@@ -1258,13 +1457,7 @@ def is_validation_error(exc: Any) -> bool:
     hacía— convertía un cuerpo corregible en una herramienta permanentemente
     DEGRADADA.
     """
-    status = getattr(exc, "status_code", None)
-    if status in (400, 422):
-        return True
-    m = str(exc or "").lower()
-    if "http 400" in m or "http 422" in m:
-        return True
-    return "validation failed" in m or "request validation" in m
+    return classify_provider_failure(exc) == STATUS_REQUEST_INVALID
 
 
 def _validation_detail(exc: Any) -> str:

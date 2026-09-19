@@ -1514,7 +1514,7 @@ async def api_freeze():
 
 
 @app.get("/api/nextgen/trace")
-async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, window: float = 12.0, expected_symbol: str | None = None, expected_epoch: int | None = None):
+async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, window: float | None = None, expected_symbol: str | None = None, expected_epoch: int | None = None):
     timeframe = str(timeframe or "1m").lower()
     if timeframe not in {"1m", "3m", "5m", "15m"}:
         timeframe = "1m"
@@ -1525,10 +1525,18 @@ async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, windo
         tail_minutes = 0 if raw_tail == 0 else max(15, min(raw_tail, 390))
     except Exception:
         tail_minutes = 60
-    try:
-        window = max(3.0, min(float(window), 30.0))
-    except Exception:
-        window = 12.0
+    # v1.46.0 · Sin `window` explícito, la banda la resuelve el ACTIVO a partir de
+    # su propio precio. El valor por omisión de 12 $ —y su recorte a [3, 30] $—
+    # eran razonables para un ETF de ~500 $ y absurdos para una acción de 9 $, que
+    # con el mínimo de 3 $ seguía recibiendo una banda del ±31 %.
+    # Un `window` pedido a mano sigue respetándose: es una anulación explícita.
+    if window is None:
+        window = None
+    else:
+        try:
+            window = max(0.05, min(float(window), 5000.0))
+        except (TypeError, ValueError):
+            window = None
     if expected_symbol and str(expected_symbol).upper()!=str(STATE.symbol).upper():
         return _stale_read("STALE_SYMBOL_REQUEST", expected_symbol=str(expected_symbol).upper(), active_symbol=STATE.symbol, symbol_epoch=STATE.symbol_epoch)
     if expected_epoch is not None and int(expected_epoch)!=int(STATE.symbol_epoch):
@@ -1540,7 +1548,8 @@ async def api_nextgen_trace(timeframe: str = "1m", tail_minutes: int = 60, windo
     # spot LIVE en cada construcción: basta con dejarla reconstruir a un ritmo
     # acorde al del panel. En replay no aplica: allí el reloj lo manda el usuario.
     _live_bucket = 0 if STATE.replay_context.is_replay else int(time.time() / TRACE_LIVE_REPRICE_SECONDS)
-    key=f"trace|{STATE.symbol}|{STATE.symbol_epoch}|{STATE.analytics_revision}|{timeframe}|{tail_minutes}|{window:.3f}|{STATE.replay_context.mode}|{_live_bucket}"
+    _wkey = "auto" if window is None else f"{window:.3f}"
+    key=f"trace|{STATE.symbol}|{STATE.symbol_epoch}|{STATE.analytics_revision}|{timeframe}|{tail_minutes}|{_wkey}|{STATE.replay_context.mode}|{_live_bucket}"
     try:
         payload=await asyncio.to_thread(CHART_DATA_CACHE.get_or_build,key,lambda: STATE.nextgen_trace(timeframe=timeframe,tail_minutes=tail_minutes,visual_window=window))
     except Exception as exc:
@@ -2416,7 +2425,7 @@ async def api_terminal_bundle(timeframe: str = "1m", tail_minutes: int = 390, in
     try:
         trace = await asyncio.to_thread(
             CHART_DATA_CACHE.get_or_build, key,
-            lambda: STATE.nextgen_trace(timeframe=timeframe, tail_minutes=tail_minutes, visual_window=12.0))
+            lambda: STATE.nextgen_trace(timeframe=timeframe, tail_minutes=tail_minutes, visual_window=None))
     except Exception as exc:
         _obs_note("main:terminal_bundle_trace", exc, severity="DEGRADED")
         trace = {"ready": False, "candles": [], "option_prints": [], "profiles": {}, "levels": []}
@@ -2444,7 +2453,7 @@ async def api_terminal_diagnostics(timeframe: str = "1m", tail_minutes: int = 39
     state = STATE.public_state()
     try:
         trace = await asyncio.to_thread(
-            STATE.nextgen_trace, timeframe=timeframe, tail_minutes=tail_minutes, visual_window=12.0)
+            STATE.nextgen_trace, timeframe=timeframe, tail_minutes=tail_minutes, visual_window=None)
     except Exception as exc:
         trace = {"ready": False, "upstream_error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     return JSONResponse(_jsonable(build_diagnostics(
