@@ -141,8 +141,14 @@ _POLICIES: Dict[str, MetricPolicy] = {p.metric: p for p in (
     MetricPolicy("net_drift", QUANTDATA, KIND_OBSERVED, (), FALLBACK_UNAVAILABLE,
                  note="Net Drift es una métrica propia de Quant Data (prima y volumen "
                       "call/put agregados por bucket). ITM no tiene un Net Drift."),
-    MetricPolicy("dark_pool_prints", ALPACA, KIND_OBSERVED, (QUANTDATA,), FALLBACK_UNAVAILABLE,
-                 note="Prints fuera de bolsa identificados por condición/exchange."),
+    # v1.45.0 · Los prints de dark pool los publica Quant Data directamente
+    # (`equity-prints`, con `off_exchange` ya resuelto). Identificarlos por
+    # condición/exchange desde la cinta de otro proveedor es la vía INDIRECTA que
+    # la especificación degradó a auditoría; dejarla como autoridad hacía que
+    # `metric_authority` y `data_lineage` se contradijeran sobre el mismo dato.
+    MetricPolicy("dark_pool_prints", QUANTDATA, KIND_OBSERVED, (ALPACA,), FALLBACK_DEGRADED,
+                 note="Prints fuera de bolsa del proveedor. La clasificación por "
+                      "condición/exchange de la cinta queda como auditoría."),
     MetricPolicy("flow_aggression", ITM, KIND_INFERRED, (QUANTDATA,), FALLBACK_DEGRADED,
                  note="Clasificación probabilística del agresor, no un hecho observado."),
     MetricPolicy("dealer_state", ITM, KIND_INFERRED, (QUANTDATA,), FALLBACK_DEGRADED,

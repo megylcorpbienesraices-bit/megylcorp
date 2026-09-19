@@ -20,7 +20,8 @@ from typing import Any, Dict
 from .client import QuantDataClient, QuantDataError
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
-from .tools import (build_catalog, is_missing_tool_error, CADENCE, PAGES, QuantDataTool,
+from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
+                    _validation_detail, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS
 from ...core.obs import note as _obs_note, expected as _obs_expected
@@ -240,88 +241,125 @@ class QuantDataIntelligence:
         }
 
     async def _fetch(self, tool: QuantDataTool) -> None:
+        """Descarga una herramienta, reparando el cuerpo si el proveedor lo rechaza.
+
+        Tres clases de fallo, tres tratamientos distintos, y confundirlas fue lo que
+        dejó `dark-pool-levels` en DEGRADADO durante toda una release:
+
+          * **404 / herramienta ausente** — la ruta es canónica, así que no se
+            adivinan alternativas: el plan no la incluye o el proveedor la renombró.
+          * **400 de validación** — la ruta existe y el cuerpo está mal. Si la
+            herramienta declara variantes, se prueban en orden y se RECUERDA la
+            aceptada; el descubrimiento se paga una vez, no cada ciclo.
+          * **transitorio** (timeout, red, rate limit) — se reintenta más tarde sin
+            descartar nada.
+        """
         assert self.client is not None
         ticker = self._symbol
         epoch = self._epoch
-        QUOTA.spend(1)
-        body = tool.body(ticker)
+        bodies = tool.request_bodies(ticker)
         last_err: str | None = None
 
         for path in tool.candidates():
-            try:
-                # v1.44.0 · La petición pasa por el runtime del Data Hub:
-                #   · deduplicación en vuelo — dos secciones que piden lo mismo a la
-                #     vez comparten UNA petición en lugar de gastar dos de cuota;
-                #   · aislamiento por canal — si esta herramienta tarda, el ciclo
-                #     sigue sin ella y las demás no se contagian;
-                #   · Last Known Good — lo que llegue tarde alimenta el respaldo.
-                # El precio no pasa por aquí: viaja por otro carril y no puede
-                # quedarse esperando a un endpoint de opciones.
-                _client = self.client
-                gate = await HUB_RUNTIME.fetch(
-                    tool.key, ticker,
-                    lambda: _client.post(path, body),
-                    timeout_s=self.settings.request_timeout_seconds + 1.0,
-                    accept_stale=False)
-                if not gate.get("ready"):
-                    detail = str(gate.get("detail") or "canal no disponible")
-                    tool.note_attempt(path, detail)
-                    tool.mark_transient(detail)
+            for index, body in enumerate(bodies):
+                QUOTA.spend(1)
+                outcome = await self._attempt(tool, path, body, ticker, epoch, index)
+                if outcome == "OK":
+                    return
+                if outcome == "ROUTE_INVALID":
+                    break                    # esta ruta no existe: siguiente ruta
+                if outcome == "RETRY_BODY":
+                    last_err = tool.validation_error
+                    continue                 # el cuerpo está mal: siguiente variante
+                if outcome == "STOP":
+                    return                   # transitorio o época caducada
+            else:
+                # Se agotaron las variantes sin que ninguna pasara la validación.
+                if tool.validation_error:
+                    tool.mark_unavailable(
+                        f"el proveedor rechaza todas las formas del cuerpo · "
+                        f"{tool.validation_error}")
                     self._fetched_at[tool.key] = time.time()
                     return
-                response = gate["payload"]
-            except QuantDataError as exc:
-                msg = str(exc)
-                last_err = msg
-                tool.note_attempt(path, msg)
-                if is_missing_tool_error(msg):
-                    # v1.42.1 · La ruta es canónica, así que un 404 aquí no significa
-                    # «probemos otra»: significa que esta cuenta no sirve la
-                    # herramienta o que el proveedor la renombró. Ambas cosas son
-                    # accionables; adivinar una URL alternativa no lo era.
-                    tool.route_state = ROUTE_INVALID
-                    continue
-                # Error transitorio (timeout, rate limit): se reintenta en el próximo ciclo
-                # sin descartar la ruta, que puede ser perfectamente válida.
-                tool.mark_transient(msg)
-                self._fetched_at[tool.key] = time.time()
-                return
-            except Exception as exc:
-                last_err = f"{type(exc).__name__}: {exc}"
-                tool.note_attempt(path, last_err)
-                tool.mark_transient(last_err)
-                self._fetched_at[tool.key] = time.time()
-                return
 
-            tool.note_attempt(path, None)
-            tool.route_state = ROUTE_OK
-            tool.resolved_path = path
-            tool.mark_success()
-            tool.last_success = time.time()
-            self._fetched_at[tool.key] = tool.last_success
-            try:
-                normalized = tool.normalize(response.payload)
-            except Exception as exc:
-                normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
-                _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")
-            if epoch != self._epoch:
-                # Llegó tarde: el usuario ya cambió de activo. El dato es válido
-                # para SU ticker, no para el que está en pantalla, así que no se
-                # publica. Mezclarlos sería el defecto más difícil de detectar de
-                # todos: números correctos bajo el símbolo equivocado.
-                _obs_expected("quantdata.intelligence.stale_symbol_write")
-                return
-            self._data[tool.key] = {
-                **normalized,
-                "symbol": ticker,
-                "path": path,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            }
-            return
-
-        # Ninguna ruta candidata existe en esta cuenta/plan.
         tool.mark_unavailable(last_err or "NO_CANDIDATE_PATH")
         self._fetched_at[tool.key] = time.time()
+
+    async def _attempt(self, tool: QuantDataTool, path: str, body: dict[str, Any],
+                       ticker: str, epoch: int, index: int) -> str:
+        """Un intento: una ruta y un cuerpo. Devuelve qué hacer a continuación."""
+        assert self.client is not None
+        try:
+            # La petición pasa por el runtime del Data Hub: deduplicación en vuelo,
+            # aislamiento por canal y Last Known Good. El precio no pasa por aquí.
+            _client = self.client
+            gate = await HUB_RUNTIME.fetch(
+                f"{tool.key}#{index}", ticker,
+                lambda: _client.post(path, body),
+                timeout_s=self.settings.request_timeout_seconds + 1.0,
+                accept_stale=False)
+            if not gate.get("ready"):
+                # El canal envuelve el fallo; la excepción original viaja dentro y
+                # es la que distingue un cuerpo reparable de una ruta inexistente.
+                inner = gate.get("exception")
+                if isinstance(inner, QuantDataError):
+                    raise inner
+                detail = str(gate.get("detail") or "canal no disponible")
+                tool.note_attempt(path, detail)
+                tool.mark_transient(detail)
+                self._fetched_at[tool.key] = time.time()
+                return "STOP"
+            response = gate["payload"]
+        except QuantDataError as exc:
+            msg = str(exc)
+            tool.note_attempt(path, msg)
+            if is_validation_error(exc):
+                # La ruta existe; lo que el proveedor rechaza es el cuerpo. Se
+                # guarda el campo concreto que nombró —es lo único accionable— y se
+                # prueba la siguiente forma, si la herramienta declara alguna.
+                tool.note_validation_failure(_validation_detail(exc))
+                tool.variants_tried += 1
+                _obs_expected(f"quantdata.{tool.key}.body_rejected")
+                return "RETRY_BODY"
+            if is_missing_tool_error(msg):
+                tool.route_state = ROUTE_INVALID
+                return "ROUTE_INVALID"
+            tool.mark_transient(msg)
+            self._fetched_at[tool.key] = time.time()
+            return "STOP"
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            tool.note_attempt(path, detail)
+            tool.mark_transient(detail)
+            self._fetched_at[tool.key] = time.time()
+            return "STOP"
+
+        tool.note_attempt(path, None)
+        tool.route_state = ROUTE_OK
+        tool.resolved_path = path
+        tool.note_variant_accepted(index)
+        tool.mark_success()
+        tool.last_success = time.time()
+        self._fetched_at[tool.key] = tool.last_success
+        try:
+            normalized = tool.normalize(response.payload)
+        except Exception as exc:
+            normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
+            _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")
+        if epoch != self._epoch:
+            # Llegó tarde: el usuario ya cambió de activo. El dato es válido para SU
+            # ticker, no para el que está en pantalla. Mezclarlos sería el defecto
+            # más difícil de detectar: números correctos bajo el símbolo equivocado.
+            _obs_expected("quantdata.intelligence.stale_symbol_write")
+            return "STOP"
+        self._data[tool.key] = {
+            **normalized,
+            "symbol": ticker,
+            "path": path,
+            "request_body": body,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return "OK"
 
     # ------------------------------------------------------------ lectura
 
@@ -371,6 +409,14 @@ class QuantDataIntelligence:
                 "rows": data.get("count"),
                 "error": tool.last_error,
                 "source": data.get("source") or "PAGES_LANE",
+                # Procedencia del DATO, distinta del carril que lo trajo. Si la
+                # herramienta respondió, el dato es del proveedor: que el motor lo
+                # consuma después para derivar inteligencia no lo convierte en
+                # cálculo propio.
+                "source_mode": ("DIRECT_PROVIDER" if data.get("ready")
+                                else "UNAVAILABLE"),
+                "data_provider": "QUANTDATA",
+                "request_body": data.get("request_body"),
                 "cadence_seconds": CADENCE.get(tool.cadence, 60.0),
                 "retry_in_seconds": (round(max(0.0, tool.unavailable_until - now), 1)
                                      if tool.transient_failures > 0 else None),

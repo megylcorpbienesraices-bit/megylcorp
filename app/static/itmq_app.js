@@ -1448,16 +1448,33 @@
     }
 
     fillTable('tblChannels', parity.channels || [], c => {
-      const isQd = c.provider === 'QUANTDATA' && c.scope === 'EXTERNAL_CORROBORATION';
+      // v1.45.0 · El rol se lee del ALCANCE que declara el backend, que a su vez lo
+      // deriva de la política de métricas. Antes la condición era
+      // `scope === 'EXTERNAL_CORROBORATION'` sobre un alcance fijado a mano, así
+      // que Quant Data salía como CONTRASTE ACTIVO en canales donde ya era la
+      // autoridad primaria. La etiqueta mentía, no el comportamiento.
+      const isAuthority = c.authority_is_quantdata === true || c.scope === 'PRIMARY_AUTHORITY';
+      const isCorroboration = c.provider === 'QUANTDATA' && !isAuthority;
       const liveN = Q.num(c.tools_live, 0), totalN = Q.num(c.tools_total, 0);
-      const role = isQd
-        ? (liveN > 0 ? '<span class="pos">CONTRASTE ACTIVO</span>' : '<span class="dim">SIN CONTRASTE</span>')
-        : (c.selected ? '<span class="pos">AUTORIDAD ACTIVA</span>' : '<span class="dim">PAR</span>');
+      let role;
+      if (isAuthority) {
+        role = liveN > 0
+          ? '<span class="pos">AUTORIDAD PRIMARIA</span>'
+          : `<span class="warn">AUTORIDAD SIN DATOS</span>`;
+      } else if (isCorroboration) {
+        role = liveN > 0 ? '<span class="pos">CONTRASTE ACTIVO</span>' : '<span class="dim">SIN CONTRASTE</span>';
+      } else {
+        role = c.selected ? '<span class="pos">AUTORIDAD ACTIVA</span>' : '<span class="dim">PAR</span>';
+      }
       let coverage;
-      if (isQd) {
+      if (isAuthority || isCorroboration) {
         coverage = liveN > 0
           ? `<span class="pos">QD ${liveN}/${totalN}</span>${Q.isNum(Q.num(c.quality, NaN)) ? ` · ${Q.num(c.quality).toFixed(1)}` : ''}`
-          : `<span class="dim">QD 0/${totalN} · núcleo ${esc(c.native_authority || 'ITM')} activo</span>`;
+          : (isAuthority
+            // Sin datos de la autoridad, lo que sostiene la vista es un RESPALDO
+            // declarado. Llamarlo «núcleo activo» sugería que era lo normal.
+            ? `<span class="warn">QD 0/${totalN} · respaldo ${esc(c.fallback_authority || 'ITM')}</span>`
+            : `<span class="dim">QD 0/${totalN} · núcleo ${esc(c.native_authority || 'ITM')} activo</span>`);
       } else {
         coverage = Q.isNum(Q.num(c.quality, NaN)) ? Q.num(c.quality).toFixed(1)
           : cell(esc(c.quality_state || 'N/A'), c.quality_state === 'MARKET_CLOSED' ? 'dim' : 'warn');
@@ -1477,8 +1494,20 @@
     fillTable('tblQdTools', cov.tools || [], t => [
       t.title, t.page,
       `<span class="pill ${t.state === 'LIVE' ? 'live' : t.state === 'DEGRADADO' ? 'warn' : t.state === 'NO_DISPONIBLE' ? 'down' : 'off'}">${esc(t.state)}</span>`,
-      // Compartida = el carril del motor ya la trajo; no gasta cuota propia.
-      t.source === 'ENGINE_LANE_SHARED' ? '<span class="pos">MOTOR</span>' : 'PÁGINAS',
+      // v1.45.0 · Dos columnas, porque son dos preguntas distintas y mezclarlas
+      // hacía que un dato del proveedor pareciera calculado por el motor:
+      //
+      //   PROCEDENCIA — QUIÉN produjo el dato. Si la herramienta responde, es del
+      //                 proveedor, y lo sigue siendo aunque el motor lo consuma
+      //                 después para derivar inteligencia.
+      //   CARRIL      — QUÉ lane hizo la petición. Es transporte y ahorro de
+      //                 cuota, no autoría. «MOTOR» a secas se leía como autoría.
+      t.state === 'LIVE'
+        ? '<span class="pos">DIRECT_PROVIDER · QUANTDATA</span>'
+        : `<span class="dim">${esc(t.source_mode || '—')}</span>`,
+      t.source === 'ENGINE_LANE_SHARED'
+        ? '<span class="dim" title="el carril del motor ya la trajo; no gasta cuota propia">compartido</span>'
+        : '<span class="dim">páginas</span>',
       Q.isNum(Q.num(t.age_seconds, NaN)) ? `${Q.num(t.age_seconds).toFixed(0)}s` : '—',
       // Ruta resuelta, o el diagnóstico de por qué no hay ninguna. «No disponible»
       // a secas no se puede accionar; saber qué ruta se probó y qué contestó, sí.

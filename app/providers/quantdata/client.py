@@ -10,7 +10,15 @@ from ...version import APP_VERSION
 
 
 class QuantDataError(RuntimeError):
-    pass
+    """Fallo del proveedor, con lo que dijo el proveedor intacto.
+
+    `validation_fields` lleva los campos concretos que rechazó, que es lo único
+    con lo que se puede corregir un 400 sin adivinar.
+    """
+
+    status_code: int | None = None
+    validation_fields: list[str] | None = None
+    body: Any = None
 
 
 @dataclass
@@ -20,6 +28,76 @@ class QuantDataResponse:
     remaining: int | None = None
     limit: int | None = None
     reset_seconds: float | None = None
+
+
+# Claves bajo las que los proveedores publican el detalle de una validación
+# fallida. No hay una sola convención, y fijar una era garantizar perderlo.
+_ERROR_KEYS = ("detail", "title", "message", "error", "description", "reason")
+_FIELD_KEYS = ("errors", "validationErrors", "validation_errors", "fields",
+               "invalidFields", "issues", "violations", "detail")
+
+
+def _safe_body(response: httpx.Response, limit: int = 2000) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        return response.text[:limit]
+
+
+def _field_errors(node: Any, depth: int = 0) -> list[str]:
+    """Errores por CAMPO, en la forma que los publique el proveedor.
+
+    Pydantic/FastAPI usan `{"loc": [...], "msg": ...}`; otros usan
+    `{"field": ..., "message": ...}`. Se reconocen las dos y se recorre en
+    profundidad, porque el detalle suele venir anidado bajo `detail` o `errors`.
+    """
+    out: list[str] = []
+    if depth > 4 or node is None:
+        return out
+    if isinstance(node, str):
+        return [node] if node.strip() else []
+    if isinstance(node, list):
+        for item in node[:20]:
+            out.extend(_field_errors(item, depth + 1))
+        return out
+    if not isinstance(node, dict):
+        return out
+    loc = node.get("loc") or node.get("field") or node.get("path") or node.get("name")
+    msg = next((node[k] for k in ("msg", "message", "error", "detail", "reason")
+                if isinstance(node.get(k), str)), None)
+    if loc is not None and msg:
+        where = ".".join(str(x) for x in loc) if isinstance(loc, (list, tuple)) else str(loc)
+        out.append(f"{where}: {msg}")
+        return out
+    for key in _FIELD_KEYS:
+        child = node.get(key)
+        # Una cadena suelta bajo `detail` ya es el titular; repetirla como si fuera
+        # un error de campo llenaría el diagnóstico de ruido y escondería el campo
+        # real, que es lo único que sirve para corregir la petición.
+        if isinstance(child, (list, dict)):
+            out.extend(_field_errors(child, depth + 1))
+    return out
+
+
+def _describe_error(response: httpx.Response) -> tuple[str, list[str]]:
+    """Mensaje accionable + lista de campos que el proveedor rechazó."""
+    body = _safe_body(response)
+    if isinstance(body, str):
+        return body[:300], []
+    if not isinstance(body, dict):
+        return str(body)[:300], []
+    headline = ""
+    for key in _ERROR_KEYS:
+        v = body.get(key)
+        if isinstance(v, str) and v.strip():
+            headline = v.strip()
+            break
+    fields = _field_errors(body)
+    # El titular sin los campos es lo que dejaba al operador sin nada que hacer.
+    if fields:
+        joined = " · ".join(fields[:6])
+        return (f"{headline} [{joined}]" if headline else joined)[:400], fields
+    return (headline or str(body)[:300])[:400], fields
 
 
 class QuantDataClient:
@@ -87,13 +165,21 @@ class QuantDataClient:
         if response.status_code in {401, 403}:
             raise QuantDataError(f"Quant Data authorization failed ({response.status_code})")
         if response.status_code >= 400:
-            detail = ""
-            try:
-                obj = response.json()
-                detail = str(obj.get("detail") or obj.get("title") or "")[:180]
-            except Exception:
-                detail = response.text[:180]
-            raise QuantDataError(f"Quant Data HTTP {response.status_code}: {detail}")
+            # v1.45.0 · El error de validación DICE qué campo falla. Antes se leía
+            # sólo `detail`/`title` y se recortaba a 180 caracteres, así que
+            #
+            #     {"detail": "Request validation failed",
+            #      "errors": [{"loc": ["body","lookBackPeriod"], "msg": "field required"}]}
+            #
+            # llegaba al operador como «Quant Data HTTP 400: Request validation
+            # failed» —cierto, inútil y sin el único dato accionable—. El campo que
+            # falta estaba en la respuesta y lo tirábamos nosotros.
+            detail, fields = _describe_error(response)
+            error = QuantDataError(f"Quant Data HTTP {response.status_code}: {detail}")
+            error.status_code = response.status_code
+            error.validation_fields = fields
+            error.body = _safe_body(response)
+            raise error
         try:
             payload = response.json()
         except Exception as exc:

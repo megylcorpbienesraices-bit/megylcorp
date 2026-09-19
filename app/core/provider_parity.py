@@ -105,14 +105,60 @@ _PAGE_CHANNEL: Dict[str, str] = {
 }
 
 
-_NATIVE_CHANNEL_AUTHORITY: Dict[str, str] = {
+# Qué métricas representa cada canal. El canal es la vista de la interfaz; la
+# métrica es donde vive la política. Con este mapa, la autoridad del canal se
+# DERIVA en vez de declararse por segunda vez.
+_CHANNEL_METRICS: Dict[str, tuple[str, ...]] = {
+    "EXPOSURE": ("gex", "dex", "vex", "chex"),
+    "OPEN_INTEREST": ("open_interest",),
+    "IMPLIED_VOLATILITY": ("iv_rank", "volatility_skew", "term_structure"),
+    "OPTION_FLOW": ("net_flow", "order_flow", "net_drift"),
+    "DARK_POOL": ("dark_flow", "dark_pool_levels"),
+    "EQUITY_PRINT": ("dark_pool_prints",),
+}
+
+
+def channel_authority(channel: str) -> str:
+    """Quién MANDA en este canal, leído de la política de métricas.
+
+    v1.45.0 · Antes esto era un segundo mapa escrito a mano:
+
+        "EXPOSURE": "ITM", "OPEN_INTEREST": "ALPACA", "DARK_POOL": "ALPACA", …
+
+    v1.43.0 pasó esas métricas a QUANTDATA en `metric_authority`, pero este mapa no
+    se movió. Resultado: la interfaz seguía anunciando a Quant Data como
+    «CONTRASTE ACTIVO» y al núcleo nativo como autoridad, cuando internamente ya
+    mandaba Quant Data. La etiqueta era falsa, no el comportamiento.
+
+    Tener la autoridad escrita en dos sitios garantiza que un día discrepen. Ahora
+    hay una sola fuente y ésta la consulta.
+    """
+    from .metric_authority import policy as _metric_policy
+    metrics = _CHANNEL_METRICS.get(str(channel or "").upper(), ())
+    if not metrics:
+        return "ITM"
+    authorities: list[str] = []
+    for m in metrics:
+        a = str(_metric_policy(m).authority).upper()
+        if a not in authorities:
+            authorities.append(a)
+    return " / ".join(authorities) if authorities else "ITM"
+
+
+# Quién sostiene el canal cuando la autoridad no está disponible. Es un RESPALDO
+# declarado, no una autoridad: lo que publique va etiquetado como tal.
+_NATIVE_FALLBACK: Dict[str, str] = {
     "EXPOSURE": "ITM",
-    "OPEN_INTEREST": "ALPACA",
+    "OPEN_INTEREST": "ALPACA / ITM",
     "IMPLIED_VOLATILITY": "ITM",
     "OPTION_FLOW": "ALPACA / ITM",
     "DARK_POOL": "ALPACA",
     "EQUITY_PRINT": "ALPACA",
 }
+
+
+def _qd_is_authority(channel: str) -> bool:
+    return "QUANTDATA" in channel_authority(channel).upper()
 
 
 def parity_policy() -> Dict[str, Any]:
@@ -491,11 +537,19 @@ def parity_report(*, alpaca_configured: bool, tastytrade_status: Dict[str, Any] 
                 "stale": None if age is None else age > 900.0,
                 "tools_live": len(live),
                 "tools_total": len(tools),
-                "scope": "EXTERNAL_CORROBORATION",
-                "native_authority": _NATIVE_CHANNEL_AUTHORITY.get(ch, "ITM"),
-                # `selected` aquí sólo significa que QD tiene observación externa
-                # utilizable. Nunca sustituye la autoridad nativa de la métrica.
+                # El alcance ya no se declara a mano: se deriva de quién es la
+                # autoridad de las métricas de este canal. Cuando Quant Data lo es
+                # —que es el caso de exposición, OI, volatilidad, flujo y dark
+                # pool desde v1.43.0— este canal es autoridad primaria, no
+                # corroboración externa, y la interfaz debe decirlo.
+                "scope": ("PRIMARY_AUTHORITY" if _qd_is_authority(ch)
+                          else "EXTERNAL_CORROBORATION"),
+                "authority": channel_authority(ch),
+                "native_authority": channel_authority(ch),
+                "authority_is_quantdata": _qd_is_authority(ch),
+                # `selected` significa que el canal tiene observación utilizable.
                 "selected": bool(live),
+                "fallback_authority": _NATIVE_FALLBACK.get(ch, "ITM"),
             })
 
     channel_view.sort(key=lambda r: (str(r["channel"]), -(_f(r.get("quality")) or 0.0)))

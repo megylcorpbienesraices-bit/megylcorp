@@ -416,8 +416,15 @@ class ChannelIsolator:
         except Exception as exc:   # noqa: BLE001 — se clasifica, no se traga
             self.note_failure(channel, f"{type(exc).__name__}: {exc}")
             _obs_note(f"data_hub:{channel}", exc, severity="DEGRADED")
+            # La EXCEPCIÓN viaja en el resultado, no sólo su texto.
+            #
+            # Sin esto el llamador sólo sabía «falló», y perdía la diferencia entre
+            # un 404 (la herramienta no existe), un 400 de validación (el cuerpo es
+            # reparable) y un timeout. Esa diferencia es justo la que decide si hay
+            # algo que arreglar o no, y aplanarla a una cadena la destruía.
             return {"ok": False, "channel": channel, "payload": None,
-                    "reason": "ERROR", "detail": f"{type(exc).__name__}: {str(exc)[:160]}"}
+                    "reason": "ERROR", "exception": exc,
+                    "detail": f"{type(exc).__name__}: {str(exc)[:160]}"}
         latency = time.monotonic() - started
         self.note_success(channel, latency)
         return {"ok": True, "channel": channel, "payload": payload,
@@ -506,9 +513,11 @@ class DataHubRuntime:
         if not accept_stale:
             return {"ready": False, "payload": None, "freshness": MISSING,
                     "dataset": dataset, "symbol": sym, "source": "NONE",
+                    "exception": res.get("exception"),
                     "detail": res.get("detail") or res.get("reason")}
         lkg = self.lkg.read(dataset, sym, accept=(FRESH, DEGRADED, STALE))
         return {
+            "exception": res.get("exception"),
             "ready": bool(lkg["ready"] and lkg["payload"] is not None),
             "payload": lkg.get("payload"),
             "freshness": lkg["freshness"],

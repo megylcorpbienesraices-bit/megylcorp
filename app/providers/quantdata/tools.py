@@ -820,9 +820,39 @@ class QuantDataTool:
     route_state: str = field(default=ROUTE_UNKNOWN)
     attempts: List[Dict[str, Any]] = field(default_factory=list)
     transient_failures: int = field(default=0)
+    # Variantes del cuerpo que se prueban si el proveedor rechaza la validación.
+    # `None` = la herramienta no admite reparación y un 400 es definitivo.
+    body_variants: Callable[[str], List[Dict[str, Any]]] | None = field(default=None)
+    # Índice de la variante que el proveedor ACEPTÓ. Se fija una vez y se reutiliza:
+    # descubrir el contrato en cada ciclo sería pagar la búsqueda una y otra vez.
+    accepted_variant: int | None = field(default=None)
+    validation_error: str | None = field(default=None)
+    variants_tried: int = field(default=0)
 
     def available(self, now: float | None = None) -> bool:
         return (now or time.time()) >= self.unavailable_until
+
+    def request_bodies(self, ticker: str) -> List[Dict[str, Any]]:
+        """Cuerpos a probar, en orden, para esta herramienta.
+
+        Si ya se descubrió cuál acepta el proveedor se devuelve SÓLO ése: volver a
+        recorrer la lista en cada ciclo gastaría cuota en peticiones que ya se sabe
+        que fallan.
+        """
+        base = self.body(ticker)
+        if self.body_variants is None:
+            return [base]
+        variants = [base] + [v for v in self.body_variants(ticker) if v != base]
+        if self.accepted_variant is not None and 0 <= self.accepted_variant < len(variants):
+            return [variants[self.accepted_variant]]
+        return variants
+
+    def note_validation_failure(self, detail: str) -> None:
+        self.validation_error = str(detail)[:400]
+
+    def note_variant_accepted(self, index: int) -> None:
+        self.accepted_variant = int(index)
+        self.validation_error = None
 
     def mark_unavailable(self, reason: str, now: float | None = None) -> None:
         self.unavailable_until = (now or time.time()) + UNAVAILABLE_COOLDOWN_S
@@ -881,6 +911,27 @@ def path_variants(paths: tuple[str, ...], limit: int = 12) -> tuple[str, ...]:
     Devuelve las rutas tal cual, sin derivar.
     """
     return tuple(dict.fromkeys(p for p in paths if p))
+
+
+def _dark_pool_levels_variants(ticker: str) -> List[Dict[str, Any]]:
+    """Formas candidatas para `dark-pool-levels`, de la más probable a la menos.
+
+    El orden no es arbitrario: se prueban primero los campos que OTRAS
+    herramientas de equities ya tienen confirmados contra esta misma cuenta, y
+    después combinaciones. Cada variante añade un campo, de modo que el primer
+    éxito identifica el campo que faltaba en lugar de dejar una forma «que va».
+    """
+    tf = _tf(ticker)
+    return [
+        {"limit": 100, **tf},
+        {"aggregationPeriod": "1d", **tf},
+        {"lookBackPeriod": 1, **tf},
+        {"limit": 100, "lookBackPeriod": 1, **tf},
+        {"limit": 100, "aggregationPeriod": "1d", **tf},
+        # Sin envoltorio `filter`: algunas herramientas del proveedor toman el
+        # ticker en la raíz del cuerpo.
+        {"ticker": str(ticker or "").strip().upper(), "limit": 100},
+    ]
 
 
 def build_catalog() -> Dict[str, QuantDataTool]:
@@ -1077,11 +1128,23 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             ("/v1/equities/tool/dark-flow",),
             lambda t: {"aggregationPeriod": "1m", **_tf(t)},
             norm_dark_flow, "MEDIUM"),
+        # v1.45.0 · `dark-pool-levels` devolvía HTTP 400 «Request validation failed»
+        # con el cuerpo mínimo `{"filter": {"ticker": …}}`, que es el que aceptan
+        # otras herramientas. El proveedor exige algo más en ESTA, y su documentación
+        # no es accesible desde el entorno de desarrollo.
+        #
+        # En vez de adivinar una forma y dejarla fija —que es como se llegó al 400—,
+        # la herramienta prueba en orden las formas que sus HERMANAS de la misma
+        # familia ya tienen aceptadas (`equity-prints` usa `limit`, `dark-flow` usa
+        # `aggregationPeriod`), se queda con la primera que el proveedor acepta y la
+        # recuerda. El diagnóstico publica qué campo rechazó y qué forma funcionó,
+        # así que si ninguna encaja, el Auditor dice exactamente qué pide.
         QuantDataTool(
             "dark_pool_levels", "Dark Pool / Equities", "Niveles de dark pool",
             ("/v1/equities/tool/dark-pool-levels",),
             lambda t: _tf(t),
-            norm_levels, "MEDIUM"),
+            norm_levels, "MEDIUM",
+            body_variants=_dark_pool_levels_variants),
         QuantDataTool(
             "stock_price_over_time", "Dark Pool / Equities", "Precio / Tiempo",
             ("/v1/equities/tool/stock-price-over-time",),
@@ -1127,12 +1190,48 @@ def is_missing_tool_error(message: str) -> bool:
     return "not found" in m or "unknown tool" in m or "no such" in m
 
 
+def is_validation_error(exc: Any) -> bool:
+    """¿El proveedor rechaza el CUERPO, no la ruta?
+
+    Un 400/422 de validación dice «la herramienta existe, tu petición no vale», que
+    es reparable. Un 404 dice «no existe», que no lo es. Tratarlos igual —como se
+    hacía— convertía un cuerpo corregible en una herramienta permanentemente
+    DEGRADADA.
+    """
+    status = getattr(exc, "status_code", None)
+    if status in (400, 422):
+        return True
+    m = str(exc or "").lower()
+    if "http 400" in m or "http 422" in m:
+        return True
+    return "validation failed" in m or "request validation" in m
+
+
+def _validation_detail(exc: Any) -> str:
+    """Los campos que el proveedor nombró, o el mensaje si no nombró ninguno."""
+    fields = getattr(exc, "validation_fields", None)
+    if fields:
+        return " · ".join(str(f) for f in fields[:6])[:400]
+    return str(exc or "")[:400]
+
+
 def route_diagnostic(tool: "QuantDataTool") -> Dict[str, Any]:
     """Qué le pasa a esta herramienta, en términos sobre los que se puede actuar."""
     canonical = tool.paths[0] if tool.paths else "—"
     if tool.route_state == ROUTE_OK or tool.last_success:
+        detail = "ruta canónica confirmada por el proveedor"
+        if tool.accepted_variant:
+            detail += (f" · cuerpo reparado: se aceptó la variante "
+                       f"#{tool.accepted_variant}")
         return {"state": ROUTE_OK, "route": tool.resolved_path or canonical,
-                "detail": "ruta canónica confirmada por el proveedor"}
+                "detail": detail, "accepted_variant": tool.accepted_variant}
+    if tool.validation_error and tool.accepted_variant is None:
+        return {"state": "BODY_REJECTED", "route": canonical,
+                "detail": (f"La ruta existe pero el proveedor rechaza el cuerpo: "
+                           f"{tool.validation_error}. Se probaron "
+                           f"{tool.variants_tried} formas."),
+                "validation_error": tool.validation_error,
+                "variants_tried": tool.variants_tried}
     if tool.route_state == ROUTE_INVALID:
         return {"state": ROUTE_INVALID, "route": canonical,
                 "detail": (f"El proveedor rechaza {canonical}. O su plan no incluye esta "

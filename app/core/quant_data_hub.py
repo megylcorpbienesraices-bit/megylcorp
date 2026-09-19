@@ -729,6 +729,45 @@ def statistics(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
                      payload=payload)
 
 
+# ═══════════════════════════════════════════════════════ FLUJO
+
+def flow(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
+    """Net Flow · Net Drift · Order Flow, con su procedencia registrada.
+
+    v1.45.0 · Estos tres datasets se consumían desde `terminal_api` sin pasar por
+    el Hub, así que **no dejaban registro de procedencia**: el Auditor no podía
+    decir si el Net Flow en pantalla venía del proveedor o de un respaldo, que es
+    justo la pregunta para la que existe el registro. Los valores eran correctos;
+    lo que faltaba era la trazabilidad.
+    """
+    sym = str(symbol or "").upper()
+    out: Dict[str, Any] = {}
+    for tool, metric, name, cadence in (
+            ("net_flow", "QD_NET_FLOW", "net_flow", "FAST"),
+            ("net_drift", "QD_NET_DRIFT", "net_drift", "FAST"),
+            ("options_order_flow", "QD_ORDER_FLOW_CONSOLIDATED", "order_flow_consolidated", "FAST"),
+            ("options_order_flow_raw", "QD_ORDER_FLOW_UNCONSOLIDATED", "order_flow_unconsolidated", "FAST")):
+        block = _block(intel, tool)
+        cls = classify(block, cadence=cadence)
+        rows = _rows(intel, tool)
+        LINEAGE.record(metric, sym,
+                       source_mode=(DIRECT_PROVIDER if rows else UNAVAILABLE),
+                       state=cls["state"], endpoint=block.get("path"),
+                       raw_value={"tool": tool}, normalized_value=len(rows),
+                       final_value=len(rows), detail=cls["detail"],
+                       age_seconds=cls["age_seconds"], rows=len(rows))
+        out[name] = {"ready": bool(rows), "rows": rows, "count": len(rows),
+                     "state": cls["state"], "tool": tool,
+                     "source_mode": (DIRECT_PROVIDER if rows else UNAVAILABLE)}
+    payload = {"ready": any(v["ready"] for v in out.values()), **out,
+               "source": "QUANTDATA_FLOW",
+               "summary": {k: v["count"] for k, v in out.items()}}
+    return _envelope("QD_NET_FLOW", sym, tool="net_flow",
+                     block=_block(intel, "net_flow"), cadence="FAST",
+                     source_mode=(DIRECT_PROVIDER if payload["ready"] else UNAVAILABLE),
+                     payload=payload)
+
+
 # ═══════════════════════════════════════════════════════ GREEKS POR CONTRATO
 
 def contract_greeks(symbol: str, intel: Dict[str, Any], *, limit: int = 400) -> Dict[str, Any]:
@@ -812,13 +851,14 @@ def hub_snapshot(symbol: str, intel: Dict[str, Any], *,
         "dark_pool": dark_pool(sym, intel),
         "statistics": statistics(sym, intel),
         "contract_greeks": contract_greeks(sym, intel),
+        "flow": flow(sym, intel),
         "route": "QUANT_DATA -> DATA_HUB -> INTERFACE",
         "engine_route": "QUANT_DATA -> DATA_HUB -> ENGINE (paralelo, no en serie)",
         "contract": "ITMQ_QUANT_DATA_HUB_V1",
     }
 
 
-__all__ = ["capabilities", "provider_healthy_for", "classify", "interval_map",
+__all__ = ["capabilities", "provider_healthy_for", "classify", "interval_map", "flow",
            "exposure_by_strike", "exposure_by_expiration", "open_interest",
            "volatility", "dark_pool", "statistics", "contract_greeks",
            "hub_snapshot", "INTERVAL_GREEKS", "TOOL_METRIC", "STALE_AFTER_SECONDS"]

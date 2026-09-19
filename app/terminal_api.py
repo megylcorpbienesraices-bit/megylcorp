@@ -1152,7 +1152,12 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
     Net Drift viene del endpoint OFICIAL. No se reconstruye desde GEX, DEX, Net
     Flow ni de ninguna fórmula antigua: si el proveedor no entrega, dice SIN DATOS.
     """
+    from .core import quant_data_hub as HUB
+
     symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    # El Hub registra la procedencia de los cuatro datasets de flujo. Antes se
+    # consumían directos desde aquí y no dejaban rastro en el Auditor.
+    HUB.flow(symbol, intel)
     qflow = _qflow(state, intel)
     drift = _net_drift(state, intel)
     net_flow_block = intel.get("net_flow") if isinstance(intel, dict) else None
