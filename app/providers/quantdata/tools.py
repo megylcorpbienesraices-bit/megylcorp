@@ -455,9 +455,19 @@ def norm_interval_map(payload: Dict[str, Any], greek: str = "GAMMA") -> Dict[str
                     _add(strike_raw, t_iso, call, put)
 
     if not cells:
+        # El envoltorio del proveedor cambia entre cuentas y versiones. La forma
+        # canónica es el mapa {instante: {vencimiento: {strike: {CALL, PUT}}}}, pero
+        # hay cuentas que publican ejes paralelos con la matriz aparte, y otras una
+        # lista plana de celdas o una serie colgando de cada strike. Reconocer las
+        # tres formas evita que una herramienta viva se lea como NO DISPONIBLE con
+        # el dato delante; inventarse una ruta única fue lo que dejó el mapa vacío.
+        alt = _interval_alt_shapes(payload)
+        if alt is not None:
+            return {**alt, "greek": key, "source": "QUANTDATA_INTERVAL_MAP"}
         return {"ready": False, "greek": key, "strikes": [], "times": [], "matrix": [],
                 "call_matrix": [], "put_matrix": [], "cells": 0,
                 "reason": "PAYLOAD DE INTERVAL MAP SIN CELDAS RECONOCIBLES",
+                "payload_keys": _payload_shape(payload),
                 "source": "QUANTDATA_INTERVAL_MAP"}
 
     strikes = sorted(cells)
@@ -485,6 +495,105 @@ def norm_interval_map(payload: Dict[str, Any], greek: str = "GAMMA") -> Dict[str
         "expiration_aggregation": "SUM_ACROSS_EXPIRATIONS",
         "source": "QUANTDATA_INTERVAL_MAP",
     }
+
+
+
+def _interval_alt_shapes(raw: Any) -> Dict[str, Any] | None:
+    """Ejes paralelos, celdas sueltas o series por strike."""
+    axes = _interval_axes(raw)
+    if axes:
+        return {**axes, "ready": True, "call_matrix": [], "put_matrix": [],
+                "times_ms": [], "orientation": "MATRIX_STRIKE_BY_TIME"}
+    flat: Dict[float, Dict[str, float]] = {}
+    _interval_collect(raw, flat)
+    if not flat:
+        return None
+    strikes = sorted(flat)
+    times = sorted({t for row in flat.values() for t in row})
+    return {
+        "ready": True, "strikes": strikes, "times": times, "times_ms": [],
+        "matrix": [[flat.get(k, {}).get(t, 0.0) for t in times] for k in strikes],
+        "call_matrix": [], "put_matrix": [],
+        "cells": sum(len(r) for r in flat.values()),
+        "rows": len(strikes), "columns": len(times),
+        "count": len(strikes) * len(times),
+        "strike_low": strikes[0], "strike_high": strikes[-1],
+        "orientation": "MATRIX_STRIKE_BY_TIME",
+    }
+
+
+def _interval_axes(raw: Any, depth: int = 0) -> Dict[str, Any] | None:
+    """Payload con `strikes`, `times` y una matriz en paralelo."""
+    if depth > 5 or not isinstance(raw, dict):
+        if isinstance(raw, list) and depth <= 5:
+            for item in raw[:12]:
+                hit = _interval_axes(item, depth + 1)
+                if hit:
+                    return hit
+        return None
+    ks = next((raw[k] for k in ("strikes", "strikePrices", "y", "rows") if isinstance(raw.get(k), list)), None)
+    ts = next((raw[k] for k in ("times", "timestamps", "intervals", "x", "columns") if isinstance(raw.get(k), list)), None)
+    mx = next((raw[k] for k in ("matrix", "values", "data", "z", "grid") if isinstance(raw.get(k), list)), None)
+    if ks and ts and mx and isinstance(mx[0], list):
+        strikes = [_f(k) for k in ks if _f(k) is not None]
+        times = [str(t) for t in ts if t is not None]
+        matrix = []
+        for row in mx[:len(strikes)]:
+            vals = [_f(v, 0.0) or 0.0 for v in (row if isinstance(row, list) else [])][:len(times)]
+            vals += [0.0] * (len(times) - len(vals))
+            matrix.append(vals)
+        if strikes and times and matrix:
+            return {"strikes": strikes, "times": times, "matrix": matrix,
+                    "cells": len(strikes) * len(times),
+                    "rows": len(strikes), "columns": len(times),
+                    "count": len(strikes) * len(times),
+                    "strike_low": min(strikes), "strike_high": max(strikes)}
+    for child in raw.values():
+        if isinstance(child, (dict, list)):
+            hit = _interval_axes(child, depth + 1)
+            if hit:
+                return hit
+    return None
+
+
+def _interval_collect(node: Any, cells: Dict[float, Dict[str, float]],
+                      strike: Any = None, depth: int = 0) -> None:
+    """Celdas sueltas, con los nombres que el proveedor usa en cada variante."""
+    if depth > 7 or node is None:
+        return
+    if isinstance(node, list):
+        for item in node[:6000]:
+            _interval_collect(item, cells, strike, depth + 1)
+        return
+    if not isinstance(node, dict):
+        return
+    k = _f(_pick(node, "strike", "strikePrice", "strike_price", "y", "price"))
+    if k is None:
+        k = _f(strike)
+    t = _pick(node, "time", "timestamp", "t", "interval", "x", "bucket", "date")
+    v = _f(_pick(node, "gamma", "value", "gex", "netGamma", "exposure", "z", "v",
+                 "delta", "charm", "vanna"))
+    if k is not None and t is not None and v is not None:
+        cells.setdefault(k, {})[str(t)] = v
+        return
+    for child in node.values():
+        if isinstance(child, (list, dict)):
+            _interval_collect(child, cells, k if k is not None else strike, depth + 1)
+
+
+def _payload_shape(raw: Any, depth: int = 0) -> Any:
+    """Esqueleto del payload: claves y tipos, sin volcar los datos.
+
+    Es lo que convierte un «no se entiende la respuesta» en algo accionable: se ve
+    qué publicó esta cuenta y se corrige el normalizador sin tener que adivinarlo.
+    """
+    if depth > 3:
+        return "…"
+    if isinstance(raw, dict):
+        return {k: _payload_shape(v, depth + 1) for k, v in list(raw.items())[:12]}
+    if isinstance(raw, list):
+        return [f"lista[{len(raw)}]", _payload_shape(raw[0], depth + 1)] if raw else "lista[0]"
+    return type(raw).__name__
 
 
 def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:

@@ -149,20 +149,26 @@ def _native(**over):
     return base
 
 
-def test_the_engine_reading_wins_when_it_has_enough_history():
+def test_the_provider_reading_is_the_authority_of_iv_rank():
+    """v1.43.0 · IV Rank es una métrica que Quant Data entrega directamente.
+
+    Antes mandaba la lectura propia «cuando tiene historia suficiente». La lectura
+    propia no se pierde —viaja en `iv_rank_native` y su divergencia se publica—,
+    pero el número que se muestra es el del proveedor.
+    """
     from app.terminal_api import _volatilidad
     v = _volatilidad({"volatility": {"atm_iv": 19.7}, "iv_rank_native": _native()},
                      {"iv_rank": {"raw": {"ivRank": 44.0}}})
-    assert v["iv_rank"] == 62.5 and v["iv_rank_source"] == "ITM_QUANT"
-    assert v["iv_rank_provider"] == 44.0          # la lectura del proveedor no se pierde
-
-
-def test_the_provider_covers_the_engine_while_it_has_no_history():
-    from app.terminal_api import _volatilidad
-    v = _volatilidad({"volatility": {"atm_iv": 19.7},
-                      "iv_rank_native": {"ready": False, "reason": "HISTORIA INSUFICIENTE · 4/30 observaciones"}},
-                     {"iv_rank": {"raw": {"ivRank": 44.0}}})
     assert v["iv_rank"] == 44.0 and v["iv_rank_source"] == "QUANTDATA"
+    assert v["iv_rank_source_mode"] == "DIRECT_PROVIDER"
+    assert v["iv_rank_native"] == 62.5           # la lectura propia no se pierde
+
+
+def test_the_engine_covers_the_provider_as_a_declared_fallback():
+    from app.terminal_api import _volatilidad
+    v = _volatilidad({"volatility": {"atm_iv": 19.7}, "iv_rank_native": _native()}, {})
+    assert v["iv_rank"] == 62.5 and v["iv_rank_source"] == "ITM_QUANT"
+    assert v["iv_rank_source_mode"] == "FALLBACK"
 
 
 def test_without_either_source_the_reason_travels_instead_of_a_number():
@@ -179,7 +185,8 @@ def test_the_two_readings_are_compared_never_averaged():
     from app.terminal_api import _volatilidad
     v = _volatilidad({"volatility": {"atm_iv": 19.7}, "iv_rank_native": _native(rank=80.0)},
                      {"iv_rank": {"raw": {"ivRank": 30.0}}})
-    assert v["iv_rank"] == 80.0                    # no 55.0
+    assert v["iv_rank"] == 30.0                    # el del proveedor, no 55.0
+    assert v["iv_rank_native"] == 80.0             # y el propio sigue publicado
     assert v["iv_rank_divergence"] == 50.0
 
 

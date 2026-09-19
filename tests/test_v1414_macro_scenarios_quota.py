@@ -589,9 +589,9 @@ def test_interval_map_is_trimmed_to_what_fits_on_screen():
 
 def test_interval_map_reports_an_unreadable_payload():
     from app.terminal_api import _interval_map
-    assert "SIN HISTORIA" in _interval_map({})["reason"]
+    assert "SIN INTERVAL MAP" in _interval_map({})["reason"]
     im = _interval_map({"options_heat_map": {"ready": True, "raw": {"message": "ok"}}})
-    assert im["ready"] is False and "CELDAS" in im["reason"]
+    assert im["ready"] is False and "SIN INTERVAL MAP" in im["reason"]
     # La forma del payload viaja para poder corregir el normalizador sin adivinar.
     assert im["payload_keys"] == {"message": "str"}
 

@@ -258,7 +258,7 @@ def test_bundle_exposes_every_terminal_section():
     b = _bundle()
     for key in ("resumen", "exposicion", "open_interest", "volatilidad", "estadisticas", "dark_pool", "fuentes"):
         assert key in b, key
-    assert b["contract"] == "ITMQ_TERMINAL_BUNDLE_V1"
+    assert b["contract"] == "ITMQ_TERMINAL_BUNDLE_V2"
     assert b["symbol"] == "DIA"
 
 

@@ -109,6 +109,13 @@ def _resumen(state: Dict[str, Any], trace: Dict[str, Any],
     prints.sort(key=lambda r: -abs(r["premium"] or 0.0))
 
     flow = state.get("flow") or {}
+
+    # v1.43.0 · RESUMEN no es otro Dashboard: es el destilado de las secciones que
+    # ya existen. Antes vivía sólo del Scanner y del posicionamiento, así que el
+    # operador tenía que recorrer cinco secciones para reconstruir a mano lo que
+    # esta pantalla ya podía decirle en una línea.
+    _sum = _resumen_sections(state, trace, intel or {})
+
     return {
         "direction": scanner.get("direction"),
         "edge_state": scanner.get("edge_state"),
@@ -138,19 +145,105 @@ def _resumen(state: Dict[str, Any], trace: Dict[str, Any],
             for r in _qd_rows(intel or {}, "gainers_losers")[:12]
         ],
         "context_source": "QUANTDATA_DASHBOARD",
+        # Destilado de las demás secciones. Cada entrada lleva su estado para que un
+        # hueco nunca se lea como un cero.
+        "sections": _sum,
+    }
+
+
+def _resumen_sections(state: Dict[str, Any], trace: Dict[str, Any],
+                      intel: Dict[str, Any]) -> Dict[str, Any]:
+    """Lo principal de Net Flow, Net Drift, QFLOW, exposición, OI, Dark Pool y volatilidad.
+
+    Se leen los MISMOS bloques que dibujan esas secciones, no una segunda ruta de
+    cálculo: si RESUMEN dijera un número distinto del de EXPOSICIÓN, uno de los dos
+    estaría mintiendo y no habría forma de saber cuál.
+    """
+    from .core import quant_data_hub as HUB
+
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    qflow = _qflow(state, intel)
+    drift = _net_drift(state, intel)
+    exposure = HUB.exposure_by_strike(symbol, intel)
+    oi = HUB.open_interest(symbol, intel)
+    dark = HUB.dark_pool(symbol, intel)
+    vol = HUB.volatility(symbol, intel)
+    net_flow_rows = _qd_rows(intel, "net_flow")
+
+    def _card(name: str, ready: Any, state_code: Any, **rest: Any) -> Dict[str, Any]:
+        out = {"name": name, "ready": bool(ready), "state": state_code,
+               "display": None if ready else "SIN DATOS"}
+        out.update(rest)
+        return out
+
+    events = qflow.get("events") or []
+    top_event = events[0] if events else None
+    return {
+        "net_flow": _card("NET FLOW", bool(net_flow_rows),
+                          "DATA_OK" if net_flow_rows else "NO_PROVIDER_DATA",
+                          buckets=len(net_flow_rows)),
+        "net_drift": _card("NET DRIFT", drift.get("ready"), drift.get("state"),
+                           net_premium=drift.get("net_premium"),
+                           buckets=drift.get("buckets")),
+        "qflow": _card("QFLOW", qflow.get("ready"), qflow.get("state"),
+                       level=(qflow.get("level") or {}).get("price") if qflow.get("level") else None,
+                       net_premium=qflow.get("net_premium"),
+                       concentrations=len(events),
+                       top_concentration=top_event),
+        "exposicion": _card("EXPOSICIÓN", exposure.get("ready"), exposure.get("state"),
+                            strikes=len(exposure.get("rows") or []),
+                            source_mode=exposure.get("source_mode")),
+        "open_interest": _card("INTERÉS ABIERTO", oi.get("ready"), oi.get("state"),
+                               max_pain=oi.get("max_pain"),
+                               strikes=len(oi.get("by_strike") or [])),
+        "dark_pool": _card("DARK POOL", dark.get("ready"), dark.get("state"),
+                           notional=dark.get("notional"),
+                           share_pct=dark.get("dark_share_pct"),
+                           levels=dark.get("level_count")),
+        "volatilidad": _card("VOLATILIDAD", vol.get("ready"), vol.get("state"),
+                             skew_points=len(vol.get("skew") or []),
+                             term_points=len(vol.get("term_structure") or [])),
+        "events": [
+            {"t": e.get("t"), "kind": "QFLOW_CONCENTRATION", "side": e.get("side"),
+             "premium": e.get("premium"), "price": e.get("price")}
+            for e in events[:6]
+        ],
     }
 
 
 # ─────────────────────────────────────────────────────────────── exposición
 
 def _exposicion(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
+    """EXPOSICIÓN con Quant Data como fuente PRIMARIA.
+
+    v1.43.0 invierte la prioridad. Hasta v1.42.7 el perfil del motor ganaba siempre
+    y el del proveedor entraba «sólo cuando no hay perfil nativo»; además la
+    sustitución era muda, así que nadie —ni el operador ni el Auditor— podía saber
+    cuál de los dos estaba viendo.
+
+    Ahora:
+
+        Exposure by Strike / by Expiration de Quant Data  →  DIRECT_PROVIDER
+        perfil del motor                                  →  FALLBACK declarado
+                                                              y canal de auditoría
+
+    El cálculo propio NO se borra: sigue publicándose en `audit` para poder
+    contrastar las dos construcciones, que es donde está la señal cuando difieren.
+    Lo que deja de poder hacer es taparlo sin decirlo.
+    """
+    from .core import quant_data_hub as HUB
+    from .core import data_lineage as DL
+
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+
+    # ── perfil propio del motor (auditoría y respaldo) ───────────────────────
     rows = _d(trace, "profiles", "rows", default=[]) or []
-    by_strike = []
+    engine_rows = []
     for r in rows:
         k = _f(r.get("strike"))
         if k is None:
             continue
-        by_strike.append({
+        engine_rows.append({
             "strike": k,
             "gex": (_f(r.get("gamma_m"), 0.0) or 0.0) * 1e6,
             "dex": (_f(r.get("delta_m"), 0.0) or 0.0) * 1e6,
@@ -161,68 +254,85 @@ def _exposicion(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str, A
             "net_oi": _f(r.get("net_oi"), 0.0),
             "volume": _f(r.get("volume_snapshot"), 0.0),
             "net_volume": _f(r.get("net_volume"), 0.0),
-        })
-
-    # v1.42.7 · Respaldo por strike de la página Exposure del proveedor.
-    # Las cuatro herramientas `*_by_strike` se pedían cada ciclo —gastando cuota— y
-    # NADIE las consumía: si el motor propio no tenía perfil, la sección quedaba
-    # vacía teniendo el dato del proveedor ya descargado. El motor sigue mandando;
-    # el proveedor entra sólo cuando no hay perfil nativo, y va declarado como tal
-    # para que nunca se confunda una fuente con la otra.
-    exposure_source = "ITM_QUANT" if by_strike else None
-    if not by_strike:
-        merged_k: Dict[float, Dict[str, Any]] = {}
-        for key, field in (("gex_by_strike", "gex"), ("dex_by_strike", "dex"),
-                           ("vex_by_strike", "vex"), ("chex_by_strike", "chex")):
-            for r in _qd_rows(intel, key):
-                k = _f(r.get("strike"))
-                if k is None:
-                    continue
-                slot = merged_k.setdefault(k, {"strike": k, "source": "QUANTDATA"})
-                slot[field] = _f(r.get("value"), 0.0)
-        by_strike = sorted(merged_k.values(), key=lambda x: x["strike"])
-        if by_strike:
-            exposure_source = "QUANTDATA"
-            for row in by_strike:
-                # El interés abierto y el volumen no los publica exposure-by-strike.
-                # Se dejan vacíos en vez de a cero: un 0 aquí diría "no hay OI".
-                for absent in ("oi", "call_oi", "put_oi", "net_oi", "volume", "net_volume"):
-                    row.setdefault(absent, None)
-
-    # Por vencimiento: primero el desglose propio del motor; el del proveedor
-    # entra sólo para lo que el motor no expone por vencimiento.
-    by_exp = []
-    for e in _d(state, "expiry_intelligence", "per_expiration", default=[]) or []:
-        if not isinstance(e, dict):
-            continue
-        exp = e.get("expiration") or e.get("expiration_date")
-        if not exp:
-            continue
-        by_exp.append({
-            "expiration": str(exp),
-            "gex": _f(e.get("gamma"), 0.0), "dex": _f(e.get("delta"), 0.0),
-            "vex": _f(e.get("vanna"), 0.0), "chex": _f(e.get("charm"), 0.0),
-            "oi": _f(e.get("oi"), 0.0), "volume": _f(e.get("volume"), 0.0),
             "source": "ITM_QUANT",
         })
+
+    provider = HUB.exposure_by_strike(symbol, intel)
+    provider_rows = list(provider.get("rows") or [])
+
+    if provider_rows:
+        by_strike = provider_rows
+        exposure_source = "QUANTDATA"
+        source_mode = DL.DIRECT_PROVIDER
+        # El OI y el volumen no los publica exposure-by-strike. Se completan con el
+        # perfil del motor CUANDO existe, marcando de dónde sale cada cosa; lo que
+        # no haya queda en None, nunca en 0: un 0 aquí diría «no hay OI».
+        engine_by_k = {r["strike"]: r for r in engine_rows}
+        for row in by_strike:
+            peer = engine_by_k.get(row["strike"]) or {}
+            for absent in ("oi", "call_oi", "put_oi", "net_oi", "volume", "net_volume"):
+                row.setdefault(absent, peer.get(absent))
+    else:
+        healthy = HUB.provider_healthy_for(intel, "gex_by_strike", "dex_by_strike",
+                                           "vex_by_strike", "chex_by_strike")
+        DL.guard_primary_source("QD_GEX", symbol, publishing_mode=DL.FALLBACK,
+                                provider_healthy=healthy, strict=False,
+                                detail="perfil por strike del motor")
+        by_strike = engine_rows
+        exposure_source = "ITM_QUANT" if engine_rows else None
+        source_mode = DL.FALLBACK if engine_rows else DL.UNAVAILABLE
+        if engine_rows:
+            DL.LINEAGE.record("QD_GEX", symbol, source_mode=DL.FALLBACK,
+                              state=provider.get("state") or DL.NO_PROVIDER_DATA,
+                              fallback_used=True,
+                              derivation="perfil por strike del motor ITM QUANT",
+                              rows=len(engine_rows),
+                              detail="Quant Data no sirvió exposure-by-strike en este ciclo")
+
+    # ── por vencimiento: mismo orden de autoridad ────────────────────────────
+    provider_exp = HUB.exposure_by_expiration(symbol, intel)
+    by_exp = list(provider_exp.get("rows") or [])
+    expiry_source = "QUANTDATA" if by_exp else None
     if not by_exp:
-        merged: Dict[str, Dict[str, Any]] = {}
-        for key, field in (("gex_by_expiration", "gex"), ("dex_by_expiration", "dex"),
-                           ("vex_by_expiration", "vex"), ("chex_by_expiration", "chex")):
-            for r in _qd_rows(intel, key):
-                exp = str(r.get("expiration") or "")
-                if not exp:
-                    continue
-                slot = merged.setdefault(exp, {"expiration": exp, "source": "QUANTDATA"})
-                slot[field] = _f(r.get("value"), 0.0)
-        by_exp = sorted(merged.values(), key=lambda x: x["expiration"])
+        for e in _d(state, "expiry_intelligence", "per_expiration", default=[]) or []:
+            if not isinstance(e, dict):
+                continue
+            exp = e.get("expiration") or e.get("expiration_date")
+            if not exp:
+                continue
+            by_exp.append({
+                "expiration": str(exp),
+                "gex": _f(e.get("gamma"), 0.0), "dex": _f(e.get("delta"), 0.0),
+                "vex": _f(e.get("vanna"), 0.0), "chex": _f(e.get("charm"), 0.0),
+                "oi": _f(e.get("oi"), 0.0), "volume": _f(e.get("volume"), 0.0),
+                "source": "ITM_QUANT",
+            })
+        if by_exp:
+            expiry_source = "ITM_QUANT"
 
     spot = _f(_d(trace, "profiles", "spot")) or _f(state.get("spot"))
-    return {"by_strike": by_strike, "by_expiration": by_exp,
-            "spot": spot,
-            "by_strike_source": exposure_source,
-            **_exposure_shape(by_strike, spot),
-            "ready": bool(by_strike or by_exp)}
+    return {
+        "by_strike": by_strike, "by_expiration": by_exp,
+        "spot": spot,
+        "by_strike_source": exposure_source,
+        "by_expiration_source": expiry_source,
+        "source_mode": source_mode,
+        "state": provider.get("state"),
+        "fallback_used": source_mode == DL.FALLBACK,
+        # El cálculo propio no desaparece: queda para contrastar las dos
+        # construcciones, que es donde está la señal cuando no coinciden.
+        "audit": {
+            "engine_rows": len(engine_rows),
+            "provider_rows": len(provider_rows),
+            "engine_by_strike": engine_rows if provider_rows else [],
+            "note": ("GEX/DEX del proveedor y del motor son construcciones distintas "
+                     "(otro universo de vencimientos, otra hipótesis de dealer). No se "
+                     "promedian: se publican y se contrastan."),
+        },
+        "lineage": provider.get("lineage"),
+        **_exposure_shape(by_strike, spot),
+        "ready": bool(by_strike or by_exp),
+    }
 
 
 def _exposure_shape(by_strike: List[Dict[str, Any]], spot: float | None) -> Dict[str, Any]:
@@ -290,25 +400,49 @@ def _open_interest(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str
             "vol_oi": round(vol / oi, 3) if oi > 0 else None,
         })
 
-    # Mismo criterio que EXPOSICIÓN: manda el motor, el proveedor respalda.
-    oi_source = "ITM_QUANT" if by_strike else None
-    if not by_strike:
-        change = {_f(r.get("strike")): _f(r.get("value")) for r in _qd_rows(intel, "oi_change")}
-        for r in _qd_rows(intel, "oi_by_strike"):
-            k = _f(r.get("strike"))
-            if k is None:
-                continue
-            by_strike.append({
-                "strike": k,
-                "call_oi": _f(r.get("call")), "put_oi": _f(r.get("put")),
-                "net_oi": None, "oi": _f(r.get("value"), 0.0) or 0.0,
-                # El volumen no viene con open-interest-by-strike; vacío, no cero.
-                "volume": None, "vol_oi": None,
-                "oi_change": change.get(k),
-                "source": "QUANTDATA",
-            })
+    # v1.43.0 · Mismo criterio que EXPOSICIÓN, con la prioridad ya invertida:
+    # manda `open-interest-by-strike` del proveedor, y el snapshot de cadena del
+    # motor queda como respaldo declarado. El OI NUNCA se reconstruye con volumen:
+    # el volumen dice cuántos contratos cambiaron de manos, no cuántos quedaron
+    # abiertos, y confundirlos fabrica muros que no existen.
+    engine_oi = list(by_strike)
+    change = {_f(r.get("strike")): _f(r.get("value")) for r in _qd_rows(intel, "oi_change")}
+    provider_oi = []
+    for r in _qd_rows(intel, "oi_by_strike"):
+        k = _f(r.get("strike"))
+        if k is None:
+            continue
+        peer = next((x for x in engine_oi if x["strike"] == k), {})
+        provider_oi.append({
+            "strike": k,
+            "call_oi": _f(r.get("call")), "put_oi": _f(r.get("put")),
+            "net_oi": None, "oi": _f(r.get("value"), 0.0) or 0.0,
+            # El volumen no viene con open-interest-by-strike. Se toma del snapshot
+            # propio cuando existe; si no, queda vacío, nunca en cero.
+            "volume": peer.get("volume"), "vol_oi": peer.get("vol_oi"),
+            "oi_change": change.get(k),
+            "source": "QUANTDATA",
+        })
+    if provider_oi:
+        by_strike = provider_oi
+        oi_source = "QUANTDATA"
+        oi_source_mode = "DIRECT_PROVIDER"
+    else:
+        oi_source = "ITM_QUANT" if by_strike else None
+        oi_source_mode = "FALLBACK" if by_strike else "UNAVAILABLE"
         if by_strike:
-            oi_source = "QUANTDATA"
+            from .core import data_lineage as _DL
+            from .core import quant_data_hub as _HUB
+            _sym = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+            _DL.guard_primary_source(
+                "QD_OPEN_INTEREST_BY_STRIKE", _sym, publishing_mode=_DL.FALLBACK,
+                provider_healthy=_HUB.provider_healthy_for(intel, "oi_by_strike"),
+                strict=False, detail="snapshot de cadena del motor")
+            _DL.LINEAGE.record("QD_OPEN_INTEREST_BY_STRIKE", _sym,
+                               source_mode=_DL.FALLBACK, state=_DL.NO_PROVIDER_DATA,
+                               fallback_used=True, rows=len(by_strike),
+                               derivation="snapshot de cadena de ITM QUANT",
+                               detail="Quant Data no sirvió open-interest-by-strike")
 
     by_exp = [
         {"expiration": str(e.get("expiration") or e.get("expiration_date") or ""), "oi": _f(e.get("oi"), 0.0)}
@@ -359,6 +493,11 @@ def _open_interest(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str
         "top_put_strike": _f(pos.get("top_put_oi_strike")),
         "by_strike": by_strike, "by_expiration": by_exp,
         "by_strike_source": oi_source,
+        "by_strike_source_mode": oi_source_mode,
+        "reconstruction": "NEVER_FROM_VOLUME",
+        "oi_change": [{"strike": k, "change": v} for k, v in sorted(change.items())
+                      if k is not None],
+        "oi_change_source": "QUANTDATA_OPEN_INTEREST_CHANGE" if change else None,
         "oi_history": oi_history,
         "oi_history_source": "QUANTDATA_OI_OVER_TIME" if oi_history else None,
         "max_pain_over_time": max_pain_time,
@@ -372,29 +511,39 @@ def _volatilidad(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]
     vol = state.get("volatility") or {}
 
     # Skew: el motor lo publica por vencimiento; se dibuja contra DTE.
-    skew_curve = []
+    # v1.43.0 · Volatility Skew y Term Structure son del proveedor. El modelo propio
+    # (SVI/SSVI sobre la cadena) no desaparece: viaja en `skew_curve_engine` y
+    # `term_structure_engine` para poder contrastar las dos lecturas, y sostiene la
+    # vista como respaldo declarado cuando el proveedor no sirve la herramienta.
+    engine_skew = []
     for r in vol.get("skew_by_expiry") or []:
         dte = _f(r.get("dte"))
         sk = _f(r.get("skew_25d"))
         if dte is None or sk is None:
             continue
-        skew_curve.append({"x": dte, "y": sk, "label": str(r.get("expiration_date") or ""),
-                           "call_iv": _f(r.get("call25_iv")), "put_iv": _f(r.get("put25_iv"))})
-    if not skew_curve:
-        skew_curve = [{"x": r.get("x"), "y": r.get("y"), "label": r.get("label")}
-                      for r in _qd_rows(intel, "volatility_skew")]
+        engine_skew.append({"x": dte, "y": sk, "label": str(r.get("expiration_date") or ""),
+                            "call_iv": _f(r.get("call25_iv")), "put_iv": _f(r.get("put25_iv")),
+                            "source": "ITM_QUANT"})
+    provider_skew = [{"x": r.get("x"), "y": r.get("y"), "label": r.get("label"),
+                      "source": "QUANTDATA"}
+                     for r in _qd_rows(intel, "volatility_skew")]
+    skew_curve = provider_skew or engine_skew
+    skew_source = "QUANTDATA" if provider_skew else ("ITM_QUANT" if engine_skew else None)
 
-    term = []
+    engine_term = []
     for r in vol.get("term_structure") or []:
         dte = _f(r.get("dte"))
         iv = _f(r.get("iv"))
         if dte is None or iv is None:
             continue
         # El motor publica IV en fracción; la interfaz muestra puntos porcentuales.
-        term.append({"x": dte, "y": iv * 100.0 if iv < 3 else iv, "label": str(r.get("expiration_date") or "")})
-    if not term:
-        term = [{"x": r.get("x"), "y": r.get("y"), "label": r.get("label")}
-                for r in _qd_rows(intel, "term_structure")]
+        engine_term.append({"x": dte, "y": iv * 100.0 if iv < 3 else iv,
+                            "label": str(r.get("expiration_date") or ""), "source": "ITM_QUANT"})
+    provider_term = [{"x": r.get("x"), "y": r.get("y"), "label": r.get("label"),
+                      "source": "QUANTDATA"}
+                     for r in _qd_rows(intel, "term_structure")]
+    term = provider_term or engine_term
+    term_source = "QUANTDATA" if provider_term else ("ITM_QUANT" if engine_term else None)
 
     drift = [{"t": r.get("t"), "value": _f(r.get("value"))} for r in _qd_rows(intel, "volatility_drift")]
 
@@ -411,14 +560,16 @@ def _volatilidad(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]
         provider_rank = _f(_deep_find(raw, "ivRank", "iv_rank", "rank", "ivPercentile"))
 
     native_rank = _f(native.get("rank")) if native.get("ready") else None
-    # El motor manda cuando tiene historia suficiente: es su propia observación del
-    # mismo instrumento. El proveedor entra cuando el motor todavía no la tiene.
-    if native_rank is not None:
-        rank_value, rank_source = native_rank, "ITM_QUANT"
-    elif provider_rank is not None:
-        rank_value, rank_source = provider_rank, "QUANTDATA"
+    # v1.43.0 · IV Rank es una métrica que Quant Data entrega directamente, así que
+    # manda el proveedor. La lectura propia no se pierde —viaja en
+    # `iv_rank_native` y su divergencia se publica—, y sostiene el número como
+    # respaldo declarado cuando el proveedor no responde.
+    if provider_rank is not None:
+        rank_value, rank_source, rank_mode = provider_rank, "QUANTDATA", "DIRECT_PROVIDER"
+    elif native_rank is not None:
+        rank_value, rank_source, rank_mode = native_rank, "ITM_QUANT", "FALLBACK"
     else:
-        rank_value, rank_source = None, None
+        rank_value, rank_source, rank_mode = None, None, "UNAVAILABLE"
 
     rank_reason = None
     if rank_value is None:
@@ -452,7 +603,13 @@ def _volatilidad(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]
         "iv_low": _f(native.get("low")), "iv_high": _f(native.get("high")),
         "iv_median": _f(native.get("median")),
         "iv_rank_note": native.get("note"),
+        "iv_rank_source_mode": rank_mode,
         "skew_curve": skew_curve, "term_structure": term, "drift": drift,
+        "skew_source": skew_source, "term_structure_source": term_source,
+        "drift_source": "QUANTDATA_VOLATILITY_DRIFT" if drift else None,
+        # Las dos lecturas conviven para poder contrastarlas; no se promedian.
+        "skew_curve_engine": engine_skew,
+        "term_structure_engine": engine_term,
     }
 
 
@@ -778,6 +935,11 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
 
     ready = bool(merged_levels or marks or flow)
     # Sin dato NO se publica un cero: se dice cuál de las tres vías falló.
+    from .core import quant_data_hub as _HUB
+    from .core import data_lineage as _DL
+    _sym = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    _hub_dp = _HUB.dark_pool(_sym, intel)
+    data_state = _hub_dp.get("state")
     if ready:
         reason = None
     elif not (flow_rows or qd_prints or _qd_rows(intel, "dark_pool_levels")):
@@ -787,17 +949,30 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
     else:
         reason = "SIN_OFF_EXCHANGE_CONFIRMADO"
 
+    # v1.43.0 · Un fallo de datos NO puede salir en pantalla como 0. El notional y
+    # el recuento sólo llevan número cuando de verdad hubo datos válidos; en
+    # cualquier otro caso van en None y la interfaz muestra SIN DATOS. Un cero aquí
+    # afirmaba «hoy no hubo dark pool», que es una conclusión, no un hueco.
+    _marks_notional = sum(m.get("notional") or 0.0 for m in marks) if marks else None
+    _notional = (_marks_notional if _marks_notional is not None
+                 else (_hub_dp.get("notional")
+                       if _hub_dp.get("notional") is not None
+                       else (own_notional if (own_notional and data_state == _DL.DATA_OK) else None)))
+    _count = (len(marks) or int(_f(lp.get("off_exchange_count"), 0) or 0)) or None
+
     return {
         "ready": ready,
+        "state": data_state,
+        "data_state_detail": _hub_dp.get("detail") or None,
+        "source_mode": _hub_dp.get("source_mode"),
+        "display": None if ready else _DL.NO_DATA_LABEL,
         "vwap": vwap,
         "coverage": cov,
         "candle_source": candle_source,
-        "count": len(marks) or int(_f(lp.get("off_exchange_count"), 0) or 0),
-        "notional": (sum(m.get("notional") or 0.0 for m in marks)
-                     if marks else own_notional),
-        "off_exchange_count": len(marks) or int(_f(lp.get("off_exchange_count"), 0) or 0),
-        "off_exchange_notional": (sum(m.get("notional") or 0.0 for m in marks)
-                                  if marks else own_notional),
+        "count": _count,
+        "notional": _notional,
+        "off_exchange_count": _count,
+        "off_exchange_notional": _notional,
         "large_print_count": int(_f(lp.get("count"), 0) or 0),
         "large_print_notional": own_total or None,
         # La proporción del proveedor manda cuando existe: mide sobre el volumen
@@ -808,6 +983,8 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
         "off_exchange_largest": largest,
         "off_exchange_top": marks[:25],
         "dark_volume": dark_vol if flow else None,
+        "trades": _hub_dp.get("trades"),
+        "lineage": _hub_dp.get("lineage"),
         "total_volume": total_vol if total_vol > 0 else None,
         "flow": flow,
         "dominant_level": merged_levels[0]["price"] if merged_levels else None,
@@ -901,33 +1078,117 @@ def _net_drift_order_flow(intel: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _qflow(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
-    """Capa QFLOW sobre el `net-flow` de Quant Data del símbolo ACTIVO.
+    """QFLOW: serie sobre `net-flow` + concentraciones ATRIBUIDAS con `order-flow`.
 
-    El ticker sale siempre del estado, nunca de una constante: cualquier activo que
-    el proveedor sirva tiene que llegar aquí igual que DIA. Si el bloque del
-    proveedor no está listo, se distingue POR QUÉ en vez de publicar un cero.
+    v1.43.0 · QFLOW ya no se queda en Net Flow. Net Flow sigue dando la serie base
+    —es la prima neta por intervalo, con su `stockPrice`—, pero una concentración
+    sin atribuir es un pico anónimo: no dice si fueron calls o puts, ni comprados o
+    vendidos, ni en qué strike, ni a qué vencimiento, ni si fue un BLOCK negociado
+    o un SWEEP barriendo bolsas. Eso está en `order-flow/consolidated` y
+    `order-flow/unconsolidated`, y es lo que se cruza aquí.
+
+    El umbral de «concentración importante» se mide sobre el PROPIO activo. No hay
+    ningún límite fijo en dólares, así que la misma regla vale para un ETF enorme y
+    para una acción mediana.
+
+    El ticker sale siempre del estado, nunca de una constante.
     """
     from .core.qflow import build_qflow, NO_PROVIDER_DATA
 
     symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
     block = intel.get("net_flow") if isinstance(intel, dict) else None
 
+    # La cinta viaja SIEMPRE, también cuando no hay serie: que falte Net Flow no
+    # implica que falte el Order Flow, y publicar la clave sólo en el camino feliz
+    # obliga al consumidor a distinguir «no hubo» de «no vino».
+    of = _net_drift_order_flow(intel)
+    of_rows = of.get("rows") or []
+    of_tool = of.get("tool") or ""
+
     if not isinstance(block, dict):
         return {**build_qflow(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "Quant Data no publicó el bloque net_flow en este ciclo"}
+                "detail": "Quant Data no publicó el bloque net_flow en este ciclo",
+                "order_flow": of}
     if not block.get("ready"):
         err = block.get("error") or block.get("reason") or block.get("detail")
         if err:
-            return build_qflow(None, symbol=symbol, provider_error=str(err))
+            return {**build_qflow(None, symbol=symbol, provider_error=str(err)),
+                    "order_flow": of}
         return {**build_qflow(None, symbol=symbol), "state": NO_PROVIDER_DATA,
-                "detail": "el bloque net_flow existe pero no está listo"}
+                "detail": "el bloque net_flow existe pero no está listo",
+                "order_flow": of}
 
-    rows = block.get("rows")
-    out = build_qflow(rows, symbol=symbol)
+    out = build_qflow(block.get("rows"), symbol=symbol,
+                      order_flow=of_rows, order_flow_tool=of_tool)
     out["provider"] = "QUANT_DATA"
     out["tool"] = "net_flow"
     out["route"] = block.get("route")
+    out["order_flow"] = of
     return out
+
+
+def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
+                   trace: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """FLUJO DE ÓRDENES: la sección que ya existe, con todo lo que le faltaba dentro.
+
+    No es una sección nueva. Es la misma, reuniendo las seis piezas que la
+    especificación pide que convivan:
+
+        Net Flow · Net Drift · Order Flow consolidado · Order Flow sin consolidar
+        · QFLOW · concentración QFLOW
+
+    Net Drift viene del endpoint OFICIAL. No se reconstruye desde GEX, DEX, Net
+    Flow ni de ninguna fórmula antigua: si el proveedor no entrega, dice SIN DATOS.
+    """
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    qflow = _qflow(state, intel)
+    drift = _net_drift(state, intel)
+    net_flow_block = intel.get("net_flow") if isinstance(intel, dict) else None
+    net_flow_rows = (net_flow_block or {}).get("rows") if isinstance(net_flow_block, dict) else None
+
+    return {
+        "symbol": symbol,
+        "net_flow": {
+            "ready": bool(net_flow_rows),
+            "rows": list(net_flow_rows or []),
+            "source_mode": ("DIRECT_PROVIDER" if net_flow_rows else "UNAVAILABLE"),
+            "tool": "net_flow",
+            "display": None if net_flow_rows else "SIN DATOS",
+        },
+        "net_drift": drift,
+        "order_flow_consolidated": _order_flow_block(intel, "options_order_flow"),
+        "order_flow_unconsolidated": _order_flow_block(intel, "options_order_flow_raw"),
+        "qflow": qflow,
+        "qflow_concentration": {
+            "events": qflow.get("events") or [],
+            "markers": qflow.get("markers") or [],
+            "attribution": qflow.get("attribution") or {"ready": False},
+            "threshold": qflow.get("threshold"),
+            "normalization": "ASSET_RELATIVE_TRIPLE_GATE",
+            "source_mode": "DERIVED",
+        },
+        "qflow_level": qflow.get("level"),
+        "ready": bool(qflow.get("ready") or drift.get("ready") or net_flow_rows),
+        "section": "FLUJO_DE_ORDENES",
+        "note": ("Una sola sección de flujo. Net Drift es del endpoint oficial; QFLOW "
+                 "es cálculo propio de ITM QUANT sobre datos del proveedor."),
+    }
+
+
+def _order_flow_block(intel: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """La cinta de opciones tal y como la publica el proveedor, con su estado."""
+    from .core import quant_data_hub as HUB
+
+    block = intel.get(key) if isinstance(intel, dict) else None
+    cls = HUB.classify(block if isinstance(block, dict) else None, cadence="FAST")
+    rows = _qd_rows(intel, key)
+    return {
+        "ready": bool(rows), "rows": rows[:1500], "count": len(rows),
+        "tool": key, "consolidated": key == "options_order_flow",
+        "state": cls["state"], "detail": cls["detail"],
+        "source_mode": ("DIRECT_PROVIDER" if rows else "UNAVAILABLE"),
+        "display": None if rows else "SIN DATOS",
+    }
 
 
 def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
@@ -1437,52 +1698,61 @@ def _exposure_forecast(trace: Dict[str, Any], state: Dict[str, Any]) -> Dict[str
 # ────────────────────────────────────────────────────────── interval map
 
 # Griegas que el motor publica como matriz strike × tiempo en heatmap_history.
+# Griegas que el motor publica como matriz strike × tiempo en heatmap_history. El
+# motor NO tiene matriz de VANNA: el Interval Map del proveedor sí, y por eso la
+# griega existe en la interfaz aunque el respaldo propio no pueda cubrirla.
 _INTERVAL_FIELDS = {
     "GAMMA": ("gamma_m", 1e6, "GEX"),
     "DELTA": ("delta_m", 1e6, "DEX"),
+    "VANNA": (None, 1e6, "VEX"),
     "CHARM": ("charm_m", 1e6, "CHEX"),
 }
+
+INTERVAL_GREEKS = ("GAMMA", "DELTA", "VANNA", "CHARM")
 
 
 def _interval_map(intel: Dict[str, Any], trace: Dict[str, Any] | None = None,
                   greek: str = "GAMMA") -> Dict[str, Any]:
-    """Exposición por strike y por intervalo de tiempo.
+    """MAPA DE INTERVALOS: eje X tiempo · eje Y strike · intensidad exposición.
 
-    Procedencia, en este orden:
-      1. `heatmap_history` del motor, que YA es exactamente esta matriz: el mismo
-         cálculo que alimenta el heatmap de TRACE, sin volver a derivar nada.
-      2. La herramienta del proveedor, si el motor todavía no tiene historia.
+    v1.43.0 invierte la procedencia. Antes la vía 1 era `heatmap_history` del motor
+    y el proveedor entraba «si el motor todavía no tiene historia»; el resultado es
+    que el fondo de TRACE era el cálculo propio incluso con el Interval Map del
+    proveedor descargado y sano.
 
-    Antes sólo existía la vía 2, así que el panel quedaba vacío en cuanto esa
-    herramienta no respondía, con el dato ya calculado dentro del programa.
+    Ahora:
+
+        1. `interval-map` de Quant Data, con una matriz por griega
+           (GAMMA · DELTA · VANNA · CHARM) que la interfaz alterna.
+        2. `heatmap_history` del motor, como FALLBACK declarado, para el activo o el
+           momento en que el proveedor no sirva la herramienta.
+
+    El precio viaja con el mapa sobre el MISMO eje temporal: un mapa de exposición
+    sin el precio encima dice dónde estaba la exposición, no por qué zonas pasó el
+    mercado.
     """
+    from .core import quant_data_hub as HUB
+
+    tr = trace or {}
     key = str(greek or "GAMMA").upper()
-    field, scale, label = _INTERVAL_FIELDS.get(key, _INTERVAL_FIELDS["GAMMA"])
+    if key not in _INTERVAL_FIELDS:
+        key = "GAMMA"
+    symbol = str(tr.get("symbol") or "").upper()
 
-    hh = _d(trace or {}, "heatmap_history", default={}) or {}
-    strikes = [k for k in (hh.get("strikes") or []) if _f(k) is not None]
-    times = [str(t) for t in (hh.get("times") or []) if t]
-    grid = hh.get(field)
-    if hh.get("ready") and strikes and times and isinstance(grid, list) and grid:
-        matrix = []
-        for row in grid[:len(strikes)]:
-            if not isinstance(row, list):
-                row = []
-            vals = [(_f(v, 0.0) or 0.0) * scale for v in row[:len(times)]]
-            vals += [0.0] * (len(times) - len(vals))
-            matrix.append(vals)
-        while len(matrix) < len(strikes):
-            matrix.append([0.0] * len(times))
-        return {
-            "ready": True, "source": "ITM_QUANT", "greek": key, "label": label,
-            "strikes": [_f(k) for k in strikes], "times": times, "matrix": matrix,
-            "cells": len(strikes) * len(times),
-            "price": _interval_price(trace or {}, times),
-            "note": ("Matriz de exposición por strike e intervalo calculada por el motor, "
-                     "la misma que alimenta el heatmap de TRACE."),
-        }
+    times_hint = [str(t) for t in ((tr.get("heatmap_history") or {}).get("times") or []) if t]
+    out = HUB.interval_map(symbol, intel or {}, key,
+                           engine_heatmap=(tr.get("heatmap_history") or {}),
+                           price=_interval_price(tr, times_hint))
 
-    return _interval_map_provider(intel, key, label)
+    if not out.get("ready"):
+        # Se conserva el vocabulario que ya consumen la interfaz y las pruebas:
+        # `reason` explica por qué está vacío en vez de publicar una matriz de ceros.
+        out.setdefault("reason", "SIN INTERVAL MAP DEL PROVEEDOR NI HISTORIA DEL MOTOR")
+        if not out.get("strikes") and not out.get("times"):
+            out.setdefault("payload_keys", _payload_shape(
+                (_d(intel or {}, "interval_map_" + key.lower(), "raw", default=None)
+                 or _d(intel or {}, "options_heat_map", "raw", default=None))))
+    return out
 
 
 def _interval_price(trace: Dict[str, Any], times: List[str]) -> List[Dict[str, Any]]:
@@ -1499,51 +1769,6 @@ def _interval_price(trace: Dict[str, Any], times: List[str]) -> List[Dict[str, A
             continue
         out.append({"t": str(t), "v": v})
     return out
-
-
-def _interval_map_provider(intel: Dict[str, Any], greek: str, label: str) -> Dict[str, Any]:
-    """La misma matriz, tomada de la herramienta del proveedor.
-
-    El envoltorio cambia entre cuentas y versiones, así que se reconocen las formas
-    que puede tomar en lugar de fijar una: celdas sueltas, series colgando de cada
-    strike, o ejes paralelos con la matriz aparte.
-    """
-    block = intel.get("options_heat_map") if isinstance(intel, dict) else None
-    if not isinstance(block, dict) or not block.get("ready"):
-        return {"ready": False, "reason": "SIN HISTORIA DEL MOTOR NI HERRAMIENTA DEL PROVEEDOR",
-                "greek": greek, "label": label, "strikes": [], "times": [], "matrix": [], "price": []}
-    raw = block.get("raw")
-
-    # ── forma A · ejes paralelos + matriz
-    axes = _interval_axes(raw)
-    if axes:
-        return {**axes, "ready": True, "source": "QUANTDATA", "greek": greek, "label": label, "price": []}
-
-    # ── forma B · celdas sueltas o series por strike
-    cells: Dict[float, Dict[str, float]] = {}
-    _interval_collect(raw, cells)
-    if not cells:
-        return {"ready": False,
-                "reason": "PAYLOAD DEL PROVEEDOR SIN CELDAS RECONOCIBLES",
-                "greek": greek, "label": label, "strikes": [], "times": [], "matrix": [], "price": [],
-                # Las claves del payload viajan para poder corregir el normalizador
-                # sin tener que adivinar qué devuelve esta cuenta.
-                "payload_keys": _payload_shape(raw)}
-
-    strikes = sorted(cells)
-    times = sorted({t for row in cells.values() for t in row})
-    if len(strikes) > 90:
-        mid = len(strikes) // 2
-        strikes = strikes[max(0, mid - 45):mid + 45]
-    if len(times) > 160:
-        times = times[-160:]
-    return {
-        "ready": True, "source": "QUANTDATA", "greek": greek, "label": label,
-        "strikes": strikes, "times": times,
-        "matrix": [[cells.get(k, {}).get(t, 0.0) for t in times] for k in strikes],
-        "cells": sum(len(r) for r in cells.values()),
-        "age_seconds": _f(block.get("age_seconds")), "price": [],
-    }
 
 
 def _interval_axes(raw: Any, depth: int = 0) -> Dict[str, Any] | None:
@@ -1801,6 +2026,45 @@ def _arquitectura(state: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any
     }
 
 
+def _greeks(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
+    """Greeks POR CONTRATO del proveedor.
+
+    Quant Data es la fuente primaria de Delta, Gamma, Theta, Vega, Rho y de los de
+    orden superior. ITM QUANT los usa como entrada de sus modelos; no los vuelve a
+    calcular cuando el proveedor ya los entrega válidos, porque dos Deltas
+    distintos del mismo contrato en la misma pantalla es peor que ninguno.
+    """
+    from .core import quant_data_hub as HUB
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    return HUB.contract_greeks(symbol, intel)
+
+
+def _capacidades(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
+    """Qué sirve el proveedor PARA ESTE activo.
+
+    El mismo pipeline recorre cualquier símbolo:
+        ticker → capability check → Quant Data → normalización → motor → frontend
+    Saber de antemano qué herramientas responden es lo que distingue «esta sección
+    no aplica a este activo» de «esta sección está rota».
+    """
+    from .core import quant_data_hub as HUB
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    return HUB.capabilities(symbol, intel)
+
+
+def _auditor(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Procedencia completa, SÓLO para el Auditor.
+
+    La pantalla principal no muestra nombres de proveedor, endpoints, errores ni
+    diagnósticos: muestra análisis. Todo eso vive aquí.
+    """
+    from .core.data_lineage import LINEAGE
+    symbol = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    report = LINEAGE.audit(symbol or None)
+    report["visibility"] = "AUDITOR_ONLY_NEVER_MAIN_SCREEN"
+    return report
+
+
 def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
                           intelligence: Dict[str, Any] | None = None,
                           parity: Dict[str, Any] | None = None,
@@ -1834,6 +2098,12 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         "macro": _macro(state),
         "qflow": _qflow(state, intel),
         "net_drift": _net_drift(state, intel),
+        # La sección de FLUJO DE ÓRDENES que ya existía, con Net Flow, Net Drift,
+        # Order Flow consolidado y sin consolidar, QFLOW y su concentración dentro.
+        # No es una sección nueva: es la misma, completa.
+        "flujo_ordenes": _flujo_ordenes(state, intel, trace),
+        "greeks": _greeks(state, intel),
+        "capacidades": _capacidades(state, intel),
         "montecarlo": _montecarlo(state),
         "exposure_forecast": _exposure_forecast(trace, state),
         "interval_map": _interval_map(intel, trace, interval_greek),
@@ -1844,5 +2114,9 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
             "quantdata_coverage": coverage or {},
             "provider_consensus": state.get("provider_consensus") or {},
         },
-        "contract": "ITMQ_TERMINAL_BUNDLE_V1",
+        # PROCEDENCIA · va en el bundle para el AUDITOR, no para la pantalla
+        # principal. La terminal muestra análisis; los nombres de proveedor,
+        # endpoint, estado y fallback se leen aquí y sólo aquí.
+        "auditor": _auditor(state),
+        "contract": "ITMQ_TERMINAL_BUNDLE_V2",
     }

@@ -46,6 +46,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
+from .obs import expected as _obs_expected
+
 # Cuantil a partir del cual un intervalo es «alto» para su propia sesión.
 DEFAULT_QUANTILE = 0.97
 # Fracción mínima del mayor intervalo del día. Evita que una sesión plana marque
@@ -66,6 +68,9 @@ def _finite(values: Iterable[Any]) -> np.ndarray:
         try:
             x = float(v)
         except (TypeError, ValueError):
+            # Una fila sin magnitud numérica es un hueco del proveedor, no un
+            # fallo: se descarta del cálculo de escala y se deja constancia.
+            _obs_expected("asset_normalization.non_numeric_sample")
             continue
         if math.isfinite(x):
             out.append(x)

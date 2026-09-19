@@ -667,12 +667,34 @@ def test_the_exposure_page_backs_the_section_when_the_engine_has_no_profile():
     assert row["oi"] is None and row["volume"] is None
 
 
-def test_the_engine_profile_still_wins_over_the_provider():
+def test_the_provider_profile_now_wins_over_the_engine():
+    """v1.43.0 invierte la autoridad de EXPOSICIÓN.
+
+    Hasta v1.42.7 el perfil del motor ganaba siempre y el del proveedor entraba
+    sólo si el motor no tenía nada, SIN dejar rastro de cuál se estaba viendo.
+    Quant Data es ahora la fuente primaria de GEX/DEX/VEX/CHEX; el cálculo propio
+    no se borra —viaja en `audit` para contrastar las dos construcciones— pero ya
+    no puede taparlo en silencio.
+    """
     from app.terminal_api import _exposicion
     trace = {"profiles": {"rows": [{"strike": 600.0, "gamma_m": 2.0, "oi": 1234}]}}
     intel = {"gex_by_strike": {"ready": True, "rows": [{"strike": 999.0, "value": 9.9e9}]}}
     out = _exposicion(trace, {"spot": 601.0}, intel)
+    assert out["by_strike_source"] == "QUANTDATA"
+    assert out["source_mode"] == "DIRECT_PROVIDER"
+    assert [r["strike"] for r in out["by_strike"]] == [999.0]
+    # El cálculo propio sigue ahí, para auditoría, nunca promediado con el otro.
+    assert out["audit"]["engine_rows"] == 1
+    assert [r["strike"] for r in out["audit"]["engine_by_strike"]] == [600.0]
+
+
+def test_the_engine_profile_is_a_declared_fallback_not_a_silent_one():
+    """Sin proveedor, el motor sostiene la vista, pero va etiquetado FALLBACK."""
+    from app.terminal_api import _exposicion
+    trace = {"profiles": {"rows": [{"strike": 600.0, "gamma_m": 2.0, "oi": 1234}]}}
+    out = _exposicion(trace, {"spot": 601.0}, {})
     assert out["by_strike_source"] == "ITM_QUANT"
+    assert out["source_mode"] == "FALLBACK" and out["fallback_used"] is True
     assert [r["strike"] for r in out["by_strike"]] == [600.0]
 
 
@@ -685,10 +707,13 @@ def test_open_interest_falls_back_to_the_provider_by_strike():
     }
     out = _open_interest({"profiles": {"rows": []}}, {"spot": 601.0}, intel)
     assert out["by_strike_source"] == "QUANTDATA"
+    assert out["by_strike_source_mode"] == "DIRECT_PROVIDER"
     row = out["by_strike"][0]
     assert row["oi"] == 12_000.0 and row["call_oi"] == 8_000.0
     assert row["oi_change"] == -900.0
     assert row["volume"] is None, "open-interest-by-strike no publica volumen"
+    # El OI jamás se reconstruye con volumen.
+    assert out["reconstruction"] == "NEVER_FROM_VOLUME"
 
 
 def test_statistics_uses_the_providers_contract_and_side_tables_when_there_is_no_tape():
@@ -719,6 +744,7 @@ def test_every_catalogued_tool_has_a_consumer():
     from app.providers.quantdata.tools import build_catalog
     consumers = "\n".join(text(f) for f in
                           ("app/terminal_api.py", "app/service.py", "app/main.py",
+                           "app/core/quant_data_hub.py",
                            "app/providers/quantdata/shared.py"))
     missing = [k for k in build_catalog()
                if f'"{k}"' not in consumers and f"'{k}'" not in consumers]

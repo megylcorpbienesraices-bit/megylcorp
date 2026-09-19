@@ -308,6 +308,20 @@ def interval_map(symbol: str, intel: Dict[str, Any], greek: str = "GAMMA", *,
         tool = "options_heat_map"
     cls = classify(block, cadence="MEDIUM")
 
+    # Un bloque puede llegar con el payload crudo y sin ejes normalizados: es lo que
+    # ocurre con las cuentas que todavía publican la clave antigua, y con cualquier
+    # consumidor que guarde la respuesta antes de pasarla por el normalizador. Se
+    # normaliza aquí en vez de declarar SIN DATOS con el dato delante.
+    if block and not block.get("strikes") and isinstance(block.get("raw"), (dict, list)):
+        from ..providers.quantdata.tools import norm_interval_map
+        try:
+            block = {**block, **norm_interval_map(block["raw"], key)}
+        except Exception as exc:  # payload con una forma que el normalizador no cubre
+            from .obs import note as _obs_note
+            _obs_note("quant_data_hub:interval_map_normalize", exc, severity="DEGRADED")
+            block = {**block, "ready": False, "reason": f"{type(exc).__name__}"}
+        cls = classify(block, cadence="MEDIUM")
+
     if cls["state"] == DATA_OK and block.get("strikes") and block.get("times"):
         strikes = [float(k) for k in block["strikes"] if _f(k) is not None]
         times = [str(t) for t in block["times"] if t]
@@ -320,7 +334,8 @@ def interval_map(symbol: str, intel: Dict[str, Any], greek: str = "GAMMA", *,
         norm = normalize_matrix(matrix, symbol=sym)
         payload = {
             "ready": bool(strikes and times),
-            "greek": key, "label": label, "source": "QUANTDATA_INTERVAL_MAP",
+            "greek": key, "label": label, "source": "QUANTDATA",
+            "source_detail": "QUANTDATA_INTERVAL_MAP",
             "strikes": strikes, "times": times,
             "times_ms": _trim_times_ms(block.get("times_ms"), block.get("times"), times),
             "matrix": matrix, "call_matrix": call_m, "put_matrix": put_m,
@@ -353,7 +368,11 @@ def interval_map(symbol: str, intel: Dict[str, Any], greek: str = "GAMMA", *,
         "ready": False, "greek": key, "label": label, "strikes": [], "times": [],
         "matrix": [], "call_matrix": [], "put_matrix": [], "intensity": [],
         "price": list(price or []), "available_greeks": list(INTERVAL_GREEKS),
-        "reason": cls["detail"] or "SIN INTERVAL MAP DEL PROVEEDOR NI HISTORIA DEL MOTOR",
+        # El motivo canónico es lo que consume la interfaz; el detalle del
+        # proveedor viaja aparte para no perderlo.
+        "reason": "SIN INTERVAL MAP DEL PROVEEDOR NI HISTORIA DEL MOTOR",
+        "provider_detail": cls["detail"] or None,
+        "payload_keys": block.get("payload_keys"),
         "summary": None,
     }
     return _envelope(metric, sym, tool=tool, block=block, cadence="MEDIUM",
@@ -390,7 +409,8 @@ def _engine_interval_map(symbol: str, hh: Dict[str, Any], greek: str, label: str
         intensity = normalize_matrix(matrix, symbol=symbol).get("matrix") or []
     return {
         "ready": True, "greek": greek, "label": label,
-        "source": "ITM_QUANT_ENGINE_HEATMAP", "strikes": strikes, "times": times,
+        "source": "ITM_QUANT", "source_detail": "ITM_QUANT_ENGINE_HEATMAP",
+        "strikes": strikes, "times": times,
         "times_ms": [], "matrix": matrix, "call_matrix": [], "put_matrix": [],
         "intensity": intensity, "price": price,
         "available_greeks": list(INTERVAL_GREEKS),

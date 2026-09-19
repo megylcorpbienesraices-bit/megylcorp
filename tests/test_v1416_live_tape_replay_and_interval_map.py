@@ -202,14 +202,47 @@ def _hh(**over):
     return base
 
 
-def test_the_engine_is_the_first_source_of_the_interval_map():
-    """El motor ya calculaba esta matriz para el heatmap de TRACE. El panel quedaba
-    vacío en cuanto la herramienta del proveedor fallaba, con el dato ya dentro."""
+def test_the_provider_interval_map_is_the_first_source():
+    """v1.43.0 · El fondo dinámico de TRACE es el Interval Map del PROVEEDOR.
+
+    Hasta v1.42.7 la vía 1 era `heatmap_history` del motor y el proveedor entraba
+    sólo «si el motor todavía no tiene historia», así que el fondo de TRACE era el
+    cálculo propio incluso con el Interval Map descargado y sano.
+    """
+    from app.terminal_api import _interval_map
+    from app.providers.quantdata.tools import norm_interval_map
+    qd = {"data": {"1758205800000": {"2026-09-19": {"530": {"CALL": 10.0, "PUT": -4.0}}},
+                   "1758206100000": {"2026-09-19": {"530": {"CALL": 12.0, "PUT": -6.0}}}}}
+    im = _interval_map({"interval_map_gamma": norm_interval_map(qd, "GAMMA")},
+                       {"heatmap_history": _hh()})
+    assert im["ready"] and im["source"] == "QUANTDATA"
+    assert im["source_mode"] == "DIRECT_PROVIDER"
+    assert im["strikes"] == [530.0] and len(im["times"]) == 2
+    # La exposición call/put llega firmada: el neto es la SUMA, no la resta.
+    assert im["matrix"][0] == [6.0, 6.0]
+
+
+def test_the_engine_matrix_is_a_declared_fallback():
+    """Sin Interval Map del proveedor, el motor sostiene el fondo, etiquetado."""
     from app.terminal_api import _interval_map
     im = _interval_map({}, {"heatmap_history": _hh()})
     assert im["ready"] and im["source"] == "ITM_QUANT"
+    assert im["source_mode"] == "FALLBACK" and im["fallback_used"] is True
     assert im["strikes"] == [530.0, 531.0, 532.0] and im["times"] == ["09:30", "09:35"]
     assert im["matrix"][0] == [1e6, 2e6]
+
+
+def test_the_four_greeks_are_selectable_in_trace():
+    """GAMMA · DELTA · VANNA · CHARM, cada una con su propia matriz del proveedor."""
+    from app.terminal_api import _interval_map, INTERVAL_GREEKS
+    from app.providers.quantdata.tools import norm_interval_map
+    qd = {"data": {"1758205800000": {"E": {"530": {"CALL": 3.0, "PUT": -1.0}}}}}
+    assert INTERVAL_GREEKS == ("GAMMA", "DELTA", "VANNA", "CHARM")
+    for greek in INTERVAL_GREEKS:
+        intel = {f"interval_map_{greek.lower()}": norm_interval_map(qd, greek)}
+        im = _interval_map(intel, {"heatmap_history": _hh()}, greek)
+        assert im["ready"] and im["greek"] == greek
+        assert im["source"] == "QUANTDATA", greek
 
 
 @pytest.mark.parametrize("greek,label,first", [
