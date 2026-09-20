@@ -382,12 +382,8 @@
          */
         // `null` = lado agresor DESCONOCIDO. Se dibuja arriba, como una
         // compra, pero con rombo neutro: la posición no afirma nada, la forma sí.
-        const up = flowSide(ev);
-        const above = up !== false;
-        const r = flowHalo(ctx, x, y, evStrength(ev, qPeak));
-        const col = flowArrow(ctx, x, above ? y - r : y + r, up);
-        const label = markerLabel(ev);
-        if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
+        // UNA sola implementación, la misma que TRACE y que Net Drift.
+        Q.flowMark(ctx, x, y, ev, qPeak, { label: markerLabel(ev) });
       }
       ctx.restore();
     }
@@ -758,92 +754,12 @@
    * se devuelve null y la marca se dibuja neutra. Una flecha inventada sobre un
    * gráfico de operativa puede costar dinero; un rombo que dice «no sé» no.
    */
-  function flowSide(ev) {
-    const agg = String((ev && ev.aggressor) || '').toUpperCase();
-    if (agg === 'BUY') return true;
-    if (agg === 'SELL') return false;
-    return null;   // MIXED, UNKNOWN o ausente → sin lado
-  }
-
-
-  function evStrength(ev, peak) {
-    const v = Math.abs(Q.num(ev && ev.premium, NaN));
-    if (!Q.isNum(v) || !(peak > 0)) return 0.35;
-    return Q.clamp(Math.pow(v / peak, 0.5), 0.12, 1);
-  }
-
-  /* Círculo dorado + flecha + cifra. Tres piezas, tres trabajos: el sitio, el
-   * sentido y la cantidad. */
-  function flowHalo(ctx, x, y, strength) {
-    const gold = Q.token('--gold', '#d9a441');
-    const k = Q.clamp(Number(strength) || 0, 0, 1);
-    const r = 7 + 11 * k;
-    ctx.save();
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1);
-    g.addColorStop(0, Q.alpha(gold, 0.45));
-    g.addColorStop(0.55, Q.alpha(gold, 0.16));
-    g.addColorStop(1, Q.alpha(gold, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(x, y, r * 2.1, 0, Math.PI * 2); ctx.fill();
-    ctx.lineWidth = 1.5; ctx.strokeStyle = Q.alpha(gold, 0.95);
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
-    ctx.lineWidth = 1; ctx.strokeStyle = Q.alpha(gold, 0.55);
-    ctx.beginPath(); ctx.arc(x, y, r * 0.58, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = Q.alpha(gold, 0.92);
-    ctx.beginPath(); ctx.arc(x, y, Math.max(2, r * 0.26), 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    return r;
-  }
-
-  function flowArrow(ctx, x, y, up) {
-    /* v1.52.0 · `up === null` significa que NO se conoce el lado agresor.
-     *
-     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
-     * evento sin lado salía pintado como compra o como venta según un valor por
-     * defecto. Ahora un lado desconocido se dibuja como ROMBO neutro. Quien mire
-     * el gráfico ve que ahí hubo una concentración y que su dirección no está
-     * confirmada, en vez de leer una dirección que nadie midió. */
-    if (up === null || up === undefined) {
-      const mute = Q.token('--text-dim', '#8494ad');
-      ctx.save();
-      ctx.fillStyle = mute;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
-      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
-      ctx.closePath(); ctx.fill();
-      ctx.restore();
-      return mute;
-    }
-    const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
-    const t = up ? -1 : 1;
-    ctx.save();
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    // El VÉRTICE va en el extremo: hacia arriba en compra, hacia abajo en
-    // venta. Ponerlo del lado de la base dibujaba la flecha invertida, que es
-    // peor que no dibujarla: dice justo lo contrario.
-    ctx.moveTo(x, y + t * 13);
-    ctx.lineTo(x - 5.5, y + t * 6);
-    ctx.lineTo(x + 5.5, y + t * 6);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
-    return col;
-  }
-
-  function flowAmount(ctx, x, y, text, col) {
-    ctx.save();
-    ctx.font = '700 10px ui-monospace, monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const w = ctx.measureText(text).width + 12;
-    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.94);
-    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.fill();
-    ctx.strokeStyle = Q.alpha(Q.token('--gold', '#d9a441'), 0.8);
-    ctx.lineWidth = 1;
-    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.stroke();
-    ctx.fillStyle = col;
-    ctx.fillText(text, x, y);
-    ctx.restore();
-  }
+  /* v1.56.0 · Autoridad ÚNICA de la marca, en `itmq_core`. Ver allí por qué
+   * no puede haber dos copias de esto. */
+  const flowSide = Q.flowSide;
+  const flowArrow = Q.flowArrow;
+  const flowAmount = Q.flowAmount;
+  const evStrength = Q.flowStrength;
 
   function markerLabel(ev) {
     if (!ev) return '';
@@ -1233,14 +1149,10 @@
           if (x < box.x || x > box.x + box.w) continue;
           const y = psy(pr);
           if (y < box.y - 6 || y > box.y + box.h + 6) continue;
-          const up = flowSide(ev);
-          const above = up !== false;
-          flowHalo(ctx, x, y, evStrength(ev, peak));
-          const acol = flowArrow(ctx, x, y, up);
-          if (!used.some(u => Math.abs(u - x) < 58)) {
-            used.push(x);
-            flowAmount(ctx, x, y + (above ? -22 : 22), markerLabel(ev), acol);
-          }
+          // La MISMA marca que dibuja TRACE, con la misma implementación.
+          const conCifra = !used.some(u => Math.abs(u - x) < 58);
+          if (conCifra) used.push(x);
+          Q.flowMark(ctx, x, y, ev, peak, { label: conCifra ? markerLabel(ev) : '' });
         }
       }
       ctx.restore();

@@ -656,11 +656,31 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
         # y por eso `AT_BID` —el vendedor cruzando el spread— se clasificaba como
         # COMPRA: empieza por «A». Esa inversión sale directamente en una flecha
         # verde sobre el gráfico de operativa.
-        from ...core.aggressor import from_row as _agg_from_row
-        verdict, agg_field = _agg_from_row(r)
+        # v1.56.0 · Veredicto FORENSE. Devuelve el lado, de qué campo salió, la
+        # procedencia y —cuando no hay lado— el motivo exacto, todo junto. Sin
+        # esto, «esta marca dice compra» no se puede contrastar con nada.
+        from ...core.aggressor import classify_trade as _agg_classify
+        veredicto = _agg_classify(r)
+        verdict = veredicto["aggressor"]
+        # `aggressor_field` responde «¿QUÉ se leyó?»: el nombre del campo cuando
+        # lo hubo, y `NBBO` cuando el lado salió de medir el precio contra
+        # bid/ask. Dejarlo en None ahí perdía la mitad de la respuesta.
+        agg_field = veredicto["side_field"] or (
+            "NBBO" if veredicto["classification_source"] == "NBBO" else None)
         side = str(_pick(r, "side", "aggressor", "direction", "tradeSide") or "UNKNOWN").upper()
         out.append({
             "t": t,
+            # ── LOS CAMPOS QUE PERMITEN AUDITAR EL LADO ─────────────────────
+            # No son metadatos: son la prueba. Una tabla de evidencia con
+            # tradeSideCode, bid, ask y optionPrice al lado del veredicto es lo
+            # único que demuestra que la flecha verde no está invertida.
+            "trade_id": (lambda v: None if v is None else str(v))(
+                _pick(r, "id", "tradeId", "trade_id", "executionId")),
+            "option_symbol": (lambda v: None if v is None else str(v))(
+                _pick(r, "osi", "optionSymbol", "option_symbol", "contract", "symbol")),
+            "trade_side_code": veredicto["trade_side_code"],
+            "classification_source": veredicto["classification_source"],
+            "classification_reason": veredicto["why"],
             "ticker": str(_pick(r, "ticker", "underlying", "symbol") or "").upper(),
             "option_type": str(_pick(r, "optionType", "type", "right", "putCall") or "").upper()[:4],
             "strike": _f(_pick(r, "strike", "strikePrice")),
@@ -677,6 +697,14 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             # sin él, «esta marca dice compra» no se puede contrastar con nada.
             "bid": _f(_pick(r, "bid", "bidPrice", "nbboBid", "bestBid")),
             "ask": _f(_pick(r, "ask", "askPrice", "nbboAsk", "bestAsk")),
+            # Los nombres del contrato publicado, tal cual, junto a los internos.
+            # La tabla de evidencia se lee contra la respuesta del proveedor, y
+            # traducir los nombres por el camino obliga a un mapeo mental que es
+            # justo donde se cuelan los errores.
+            "bidPrice": _f(_pick(r, "bidPrice", "bid", "nbboBid", "bestBid")),
+            "askPrice": _f(_pick(r, "askPrice", "ask", "nbboAsk", "bestAsk")),
+            "optionPrice": price,
+            "tradeTime": t,
             # +1 comprador en ask, −1 vendedor en bid, 0 sin clasificar. Es el
             # mismo convenio en todo el programa, resuelto en un solo sitio.
             "direction": 1 if verdict == "BUY" else -1 if verdict == "SELL" else 0,
@@ -715,6 +743,23 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
     for r in out:
         key = r.get("aggressor_field") or "NINGUNO"
         by_field[key] = by_field.get(key, 0) + 1
+
+    # v1.56.0 · CONTADORES POR PROCEDENCIA Y POR MOTIVO.
+    #
+    # «68 % con lado» no dice si el otro 32 % son ejecuciones al medio —una cinta
+    # sana— o filas a las que les falta el campo —una cinta rota—. Son dos
+    # averías distintas con arreglos distintos, y hasta ahora se contaban juntas.
+    from ...core.aggressor import (SRC_FIELD, SRC_NBBO, SRC_NONE, SRC_PRIMARY,
+                                   WHY_MID, WHY_NBBO_MISSING, WHY_NO_SIDE_FIELD)
+    por_fuente: Dict[str, int] = {}
+    por_motivo: Dict[str, int] = {}
+    for r in out:
+        f = str(r.get("classification_source") or SRC_NONE)
+        por_fuente[f] = por_fuente.get(f, 0) + 1
+        w = str(r.get("classification_reason") or "")
+        if w:
+            por_motivo[w] = por_motivo.get(w, 0) + 1
+    con_lado = [r for r in out if r["aggressor"] in ("BUY", "SELL")]
     return {"ready": bool(out), "rows": out, "count": len(out),
             "source": "QUANTDATA_OPTIONS_ORDER_FLOW",
             "aggressor_coverage": {
@@ -722,6 +767,21 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "total": len(out),
                 "pct": round(100.0 * sided / len(out), 1) if out else None,
                 "by_field": by_field,
+                # Los contadores que exige la auditoría, con estos nombres.
+                "tape_rows": len(out),
+                "explicit_side_rows": sum(1 for r in con_lado
+                                          if r.get("classification_source") in (SRC_PRIMARY, SRC_FIELD)),
+                "primary_field_rows": por_fuente.get(SRC_PRIMARY, 0),
+                "nbbo_classified_rows": sum(1 for r in con_lado
+                                            if r.get("classification_source") == SRC_NBBO),
+                "unknown_rows": len(out) - sided,
+                "mid_trade_rows": por_motivo.get(WHY_MID, 0),
+                "nbbo_missing_rows": por_motivo.get(WHY_NBBO_MISSING, 0),
+                "without_side_field_rows": por_motivo.get(WHY_NO_SIDE_FIELD, 0),
+                "buy_rows": sum(1 for r in out if r["aggressor"] == "BUY"),
+                "sell_rows": sum(1 for r in out if r["aggressor"] == "SELL"),
+                "by_source": por_fuente,
+                "by_reason": por_motivo,
             }}
 
 

@@ -160,20 +160,27 @@ def test_the_marker_arrow_follows_the_aggressor_not_the_contract():
 
 
 def test_the_frontend_draws_no_arrow_without_a_known_side():
-    """Una flecha inventada sobre un gráfico de operativa puede costar dinero."""
+    """Una flecha inventada sobre un gráfico de operativa puede costar dinero.
+
+    v1.56.0 · La decisión vive en UN sitio, `itmq_core.flowSide`. Las pantallas
+    la usan; ninguna la reimplementa.
+    """
+    core = _read("app/static/itmq_core.js")
+    body = core[core.index("function flowSide("):]
+    body = body[:body.index("\n  }") + 4]
+    # Sólo el agresor decide. Ni el tipo de contrato ni el signo de la prima.
+    assert "ev.aggressor" in body
+    assert "'CALL'" not in body and "'PUT'" not in body
+    assert "premium" not in body
+    assert "return null;" in body
+    # Y el rombo neutro existe en el dibujo.
+    assert "up === null || up === undefined" in core
+
     for rel in ("app/static/itmq_trace.js", "app/static/itmq_orderflow.js"):
         js = _read(rel)
-        assert "function flowSide(" in js, rel
         assert "function flowIsBuy(" not in js, rel
-        body = js[js.index("function flowSide("):]
-        body = body[:body.index("\n  }") + 4]
-        # Sólo el agresor decide. Ni el tipo de contrato ni el signo de la prima.
-        assert "ev.aggressor" in body, rel
-        assert "'CALL'" not in body and "'PUT'" not in body, rel
-        assert "premium" not in body, rel
-        assert "return null;" in body, rel
-        # Y el rombo neutro existe en el dibujo.
-        assert "up === null || up === undefined" in js, rel
+        assert "function flowSide(" not in js, f"{rel} reimplementa la decisión"
+        assert "Q.flowSide" in js or "Q.flowMark(" in js, rel
 
 
 # ════════════════════════════════════════════════════════════════════════════

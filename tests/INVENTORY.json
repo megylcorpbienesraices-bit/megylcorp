@@ -2826,8 +2826,57 @@
     "test_net_drift_tiene_exactamente_un_eje_de_precio",
     "test_trace_mide_su_propia_alineacion_en_marcha"
    ]
+  },
+  "tests/test_v1560_gate1_aggressor_forensic.py": {
+   "casos": 31,
+   "tests": [
+    "test_at_bid_es_venta_y_no_compra",
+    "test_cada_print_conserva_todo_lo_que_hace_falta_para_auditarlo",
+    "test_el_codigo_oficial_gana_a_cualquier_otro_campo",
+    "test_el_codigo_oficial_se_traduce_segun_el_contrato",
+    "test_el_diagnostico_publica_los_contadores_con_los_nombres_exigidos",
+    "test_el_nbbo_del_instante_viaja_con_la_fila",
+    "test_el_tipo_de_contrato_nunca_decide_el_lado",
+    "test_la_cobertura_separa_lo_declarado_de_lo_medido_y_de_lo_ausente",
+    "test_la_columna_esperada_no_llama_al_clasificador",
+    "test_la_holgura_es_relativa_al_spread_no_en_dolares",
+    "test_la_put_comprada_aparece_como_compra_en_la_tabla",
+    "test_la_tabla_de_evidencia_cuadra_en_toda_la_cadena",
+    "test_mid_market_no_cae_al_nbbo_aunque_el_precio_toque_el_ask",
+    "test_mid_trade_y_nbbo_missing_son_averias_distintas",
+    "test_no_queda_ningun_mapeo_de_tipo_de_contrato_a_direccion",
+    "test_sin_codigo_se_mide_contra_el_nbbo",
+    "test_sin_nbbo_utilizable_se_dice_por_que",
+    "test_un_mercado_cruzado_no_produce_lado",
+    "test_una_call_vendida_es_una_venta",
+    "test_una_inversion_en_cualquier_etapa_hace_FALLAR_la_tabla",
+    "test_una_marca_que_contradice_a_su_operacion_hace_FALLAR_la_tabla",
+    "test_una_marca_sin_dominancia_no_cuenta_como_contradiccion",
+    "test_una_put_comprada_es_una_compra"
+   ]
+  },
+  "tests/test_v1560_gate2_marks.py": {
+   "casos": 16,
+   "tests": [
+    "test_compra_es_flecha_verde_hacia_arriba",
+    "test_el_dorado_marca_concentracion_no_direccion",
+    "test_el_hover_escribe_los_porcentajes_y_la_fuente",
+    "test_el_hover_lleva_los_tres_porcentajes",
+    "test_el_lado_sale_del_agresor_y_de_nada_mas",
+    "test_la_flecha_del_motor_coincide_con_el_agresor_dominante",
+    "test_la_fuente_dominante_se_pondera_por_prima_no_por_numero",
+    "test_la_marca_declara_de_que_campo_salio_la_mayoria_de_los_lados",
+    "test_la_marca_se_dibuja_en_un_solo_sitio",
+    "test_las_tres_pantallas_llaman_a_la_misma_funcion",
+    "test_los_porcentajes_son_sobre_toda_la_prima_no_sobre_lo_clasificado",
+    "test_ninguna_pantalla_tiene_su_propia_copia",
+    "test_sin_dominancia_no_hay_flecha",
+    "test_sin_lado_demostrable_es_rombo_neutro_no_flecha",
+    "test_una_ventana_entera_al_medio_no_produce_flecha",
+    "test_venta_es_flecha_roja_hacia_abajo"
+   ]
   }
  },
- "total_minimo": 2320,
- "version": "1.54.0"
+ "total_minimo": 2367,
+ "version": "1.55.0"
 }

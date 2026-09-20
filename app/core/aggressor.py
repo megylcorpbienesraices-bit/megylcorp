@@ -69,14 +69,45 @@ _CONTRACT_WORDS = ("CALL", "PUT", "C", "P")
 #: observación real, distinta de «no lo sabemos».
 _MID_WORDS = ("MID", "MIDPOINT", "BETWEEN", "NBBO_MID")
 
+#: v1.56.0 · `tradeSideCode` es el campo OFICIAL de Quant Data para el lado
+#: agresor y manda sobre todos los demás. Va solo y primero a propósito: si
+#: viene, la decisión está tomada y no se consulta nada más — ni el NBBO, ni un
+#: alias, ni el tipo de contrato. Mezclarlo en una lista de once alias lo
+#: convertía en «uno más», y un campo oficial que compite con diez heurísticas
+#: acaba perdiendo el día que una heurística responde antes.
+PRIMARY_SIDE_FIELD = "tradeSideCode"
+
+#: Alias del mismo campo en respuestas antiguas o en filas ya normalizadas.
+PRIMARY_SIDE_ALIASES: Tuple[str, ...] = (
+    "tradeSideCode", "trade_side_code", "tradeSideCd", "sideCode",
+)
+
 #: Campos donde los proveedores publican el lado agresor, en orden de confianza.
 #: `aggressor` y `tradeSide` son inequívocos; `side` es ambiguo —en algunas
 #: respuestas es el tipo de contrato— y por eso va el último.
 AGGRESSOR_FIELDS: Tuple[str, ...] = (
+    *PRIMARY_SIDE_ALIASES,
     "aggressor", "aggressorSide", "tradeSide", "trade_side",
     "executionSide", "execution_side", "sentiment", "direction",
     "tradeDirection", "flowSide", "side",
 )
+
+# ── Procedencia de la clasificación ──────────────────────────────────────
+#: De dónde salió el veredicto. Viaja con CADA operación porque «esta marca
+#: dice compra» no se puede contrastar con nada sin saber qué se leyó.
+SRC_PRIMARY = "PROVIDER_TRADE_SIDE_CODE"   # el campo oficial del proveedor
+SRC_FIELD = "PROVIDER_FIELD"               # otro campo declarado de lado
+SRC_NBBO = "NBBO"                          # deducido del precio contra bid/ask
+SRC_NONE = "NONE"                          # no se pudo determinar
+
+# ── Por qué una operación quedó sin lado ─────────────────────────────────
+#: Un `UNKNOWN` sin motivo obliga a recapturar la respuesta entera para
+#: averiguar qué falló. Estos códigos lo dicen en el sitio.
+WHY_OK = "DATA_OK"
+WHY_MID = "MID_TRADE"                      # ejecutada en el medio: no hubo agresor
+WHY_NBBO_MISSING = "NBBO_MISSING"          # ni campo de lado ni bid/ask utilizables
+WHY_NO_SIDE_FIELD = "TAPE_WITHOUT_SIDE"    # hay fila, pero ningún campo de lado
+WHY_NOT_A_ROW = "TAPE_MISSING"             # no hay fila que clasificar
 
 #: Precios del NBBO en el instante de la operación, con sus alias.
 _ASK_FIELDS: Tuple[str, ...] = ("ask", "askPrice", "nbboAsk", "askAtTrade", "bestAsk")
@@ -207,6 +238,34 @@ def from_nbbo(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
     return UNKNOWN, "NBBO"
 
 
+def is_mid(raw: Any) -> bool:
+    """¿El valor dice explícitamente que se ejecutó en el MEDIO?
+
+    `MID_MARKET` no es «no lo sabemos»: es una observación real —nadie cruzó el
+    spread— y por eso tiene su propio estado. Confundir las dos cosas hace que
+    una cinta sana, con muchas ejecuciones al punto medio, parezca una cinta
+    rota a la que le falta el campo de lado.
+    """
+    if raw is None or isinstance(raw, (bool, int, float)):
+        return False
+    text = str(raw).strip().upper()
+    if not text:
+        return False
+    if "ASK" in text or "OFFER" in text or "BID" in text:
+        return False
+    if "BOUGHT" in text or "BUY" in text or "SOLD" in text or "SELL" in text:
+        return False
+    return any(w in text for w in _MID_WORDS)
+
+
+def _primary_value(row: Dict[str, Any]) -> Tuple[Optional[str], Any]:
+    """El campo OFICIAL de lado y su valor, si la fila lo trae."""
+    for key in PRIMARY_SIDE_ALIASES:
+        if key in row and row.get(key) not in (None, ""):
+            return key, row.get(key)
+    return None, None
+
+
 def from_row(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
     """Lado agresor de una fila del proveedor, y de QUÉ CAMPO salió.
 
@@ -214,14 +273,29 @@ def from_row(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
     convenio, lo que se necesita saber es qué clave se estaba leyendo, y sin
     eso hay que volver a adivinar desde cero.
 
-    Orden: primero el campo DECLARADO por el proveedor; si ninguno resuelve, el
-    NBBO, que es medición y no heurística. Si tampoco, UNKNOWN con la clave que
-    sí existía, para poder diagnosticar sin recapturar la respuesta entera.
+    v1.56.0 · ORDEN DE AUTORIDAD, sin excepciones:
+
+        1. `tradeSideCode`  el campo OFICIAL. Si viene, decide y se acabó.
+        2. otro campo de lado declarado por el proveedor
+        3. NBBO             medición, no heurística
+        4. UNKNOWN          con la clave que sí existía, para diagnosticar
+
+    El paso 1 va aparte del 2 a propósito. Si `tradeSideCode` dice `MID_MARKET`,
+    la respuesta es UNKNOWN y **no se cae al NBBO**: el proveedor ya ha dicho
+    que nadie cruzó el spread, y volver a preguntárselo al precio es discutirle
+    el dato oficial hasta que conteste lo que queremos oír.
     """
     if not isinstance(row, dict):
         return UNKNOWN, None
+
+    key, value = _primary_value(row)
+    if key is not None:
+        verdict = classify(value)
+        if verdict != UNKNOWN or is_mid(value):
+            return verdict, key
+
     for key in AGGRESSOR_FIELDS:
-        if key not in row:
+        if key in PRIMARY_SIDE_ALIASES or key not in row:
             continue
         verdict = classify(row.get(key))
         if verdict != UNKNOWN:
@@ -231,3 +305,73 @@ def from_row(row: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         return verdict, how
     seen = next((k for k in AGGRESSOR_FIELDS if k in row), None)
     return UNKNOWN, seen or how
+
+
+def classify_trade(row: Dict[str, Any]) -> Dict[str, Any]:
+    """El veredicto de UNA operación, con todo lo que hace falta para auditarlo.
+
+    Esto es lo que convierte «esta flecha dice compra» en algo contrastable:
+    viaja el valor crudo que se leyó, el NBBO del instante, el campo usado, la
+    procedencia y —cuando no hay lado— el motivo exacto.
+
+    Devuelve `aggressor`, `classification_source` y `why` siempre; el resto
+    cuando la fila lo trae. Nunca inventa un lado y nunca deduce la dirección
+    del tipo de contrato ni del signo de la prima.
+    """
+    if not isinstance(row, dict):
+        return {"aggressor": UNKNOWN, "classification_source": SRC_NONE,
+                "why": WHY_NOT_A_ROW, "trade_side_code": None,
+                "side_field": None, "bid": None, "ask": None, "price": None}
+
+    key, raw_value = _primary_value(row)
+    price = _num(row, _PRICE_FIELDS)
+    ask = _num(row, _ASK_FIELDS)
+    bid = _num(row, _BID_FIELDS)
+    base = {
+        "trade_side_code": None if raw_value is None else str(raw_value),
+        "side_field": key,
+        "price": price, "bid": bid, "ask": ask,
+    }
+
+    # 1 · Campo OFICIAL. Si dice algo, manda; incluso cuando lo que dice es
+    #     «en el medio», que es una respuesta y no un hueco.
+    if key is not None:
+        verdict = classify(raw_value)
+        if verdict != UNKNOWN:
+            return {**base, "aggressor": verdict,
+                    "classification_source": SRC_PRIMARY, "why": WHY_OK}
+        if is_mid(raw_value):
+            return {**base, "aggressor": UNKNOWN,
+                    "classification_source": SRC_PRIMARY, "why": WHY_MID}
+
+    # 2 · Otro campo de lado declarado.
+    for other in AGGRESSOR_FIELDS:
+        if other in PRIMARY_SIDE_ALIASES or other not in row:
+            continue
+        verdict = classify(row.get(other))
+        if verdict != UNKNOWN:
+            return {**base, "aggressor": verdict, "side_field": other,
+                    "classification_source": SRC_FIELD, "why": WHY_OK}
+
+    # 3 · NBBO. Medición, no heurística.
+    verdict, how = from_nbbo(row)
+    if verdict != UNKNOWN:
+        return {**base, "aggressor": verdict,
+                "classification_source": SRC_NBBO, "why": WHY_OK}
+    if how == SRC_NBBO:
+        # Hubo NBBO utilizable y el precio cayó ENTRE bid y ask: ejecución al
+        # medio. Es una observación, no una carencia.
+        return {**base, "aggressor": UNKNOWN,
+                "classification_source": SRC_NBBO, "why": WHY_MID}
+
+    # 4 · Ni campo ni NBBO. Se declara QUÉ clave existía para poder diagnosticar
+    #     sin recapturar la respuesta entera.
+    visto = next((f for f in AGGRESSOR_FIELDS if f in row), None)
+    base = {**base, "side_field": key or visto}
+    # Un campo NO oficial que dice «al medio» sigue siendo una observación del
+    # proveedor, no una carencia: se cuenta como MID_TRADE igual que el oficial.
+    if visto is not None and any(is_mid(row.get(f)) for f in AGGRESSOR_FIELDS if f in row):
+        return {**base, "aggressor": UNKNOWN,
+                "classification_source": SRC_FIELD, "why": WHY_MID}
+    return {**base, "aggressor": UNKNOWN, "classification_source": SRC_NONE,
+            "why": WHY_NBBO_MISSING if visto is not None else WHY_NO_SIDE_FIELD}

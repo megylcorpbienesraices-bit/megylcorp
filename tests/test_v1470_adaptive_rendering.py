@@ -627,36 +627,30 @@ def test_the_relief_is_available_as_a_second_view():
 
 
 def test_flow_markers_are_golden_with_an_arrow_and_an_amount():
-    """v1.50.0 · Tres piezas, tres trabajos: sitio, sentido y cantidad.
+    """La marca tiene TRES piezas y cada una dice una cosa.
 
-    El CÍRCULO dorado marca dónde ocurrió, y su radio dice cuánto —así dos
-    concentraciones se comparan sin leer las cifras—. La FLECHA dice el
-    sentido, y ahora sí puede llevar color: tiene forma propia, así que el
-    verde y el rojo ya no se confunden con la línea de precio como pasaba
-    cuando el color era lo único que distinguía CALL de PUT.
+        círculo dorado   DÓNDE ocurrió, y su radio CUÁNTO pesa
+        flecha           QUIÉN agredió: ▲ verde compra, ▼ rojo venta
+        cifra            la prima
+
+    v1.56.0 · Estas funciones vivían DUPLICADAS en TRACE y en FLUJO. Eran
+    equivalentes el día que se escribieron, y ese es el problema: dos copias
+    equivalentes se separan en cuanto alguien corrige una. Ahora hay UNA, en
+    `itmq_core`, y lo que este test protege es que siga habiendo una.
     """
+    core = _read("app/static/itmq_core.js")
+    assert "function flowHalo(" in core, "falta el círculo dorado"
+    assert "function flowArrow(" in core, "falta la flecha de sentido"
+    assert "function flowAmount(" in core, "falta la cifra"
+    assert "function flowMark(" in core, "falta la marca completa"
+    assert "createRadialGradient" in core, "el halo tiene que separar la marca del fondo"
+
+    # Y NADIE más puede tener su propia copia.
     for rel in ("app/static/itmq_trace.js", "app/static/itmq_orderflow.js"):
         js = _read(rel)
-        assert "function flowHalo(" in js, f"{rel}: falta el círculo dorado"
-        assert "function flowArrow(" in js, f"{rel}: falta la flecha de sentido"
-        assert "function flowAmount(" in js, f"{rel}: falta la cifra"
-        assert "function flowSide(" in js, f"{rel}: el sentido es COMPRA/VENTA"
-        halo = js[js.index("function flowHalo("):js.index("function flowArrow(")]
-        assert "createRadialGradient" in halo, "el halo separa la marca del fondo"
-        assert "7 + 11 * k" in halo, "el radio dice cuánto"
-        arrow = js[js.index("function flowArrow("):js.index("function flowAmount(")]
-        assert "'--pos'" in arrow and "'--neg'" in arrow, "verde compra, rojo venta"
-        # El VÉRTICE va en el extremo: dibujarlo del lado de la base invertía la
-        # flecha, que es peor que no dibujarla — dice justo lo contrario.
-        assert "ctx.moveTo(x, y + t * 13);" in arrow
-        assert "ctx.lineTo(x - 5.5, y + t * 6);" in arrow
-
-    # La etiqueta ya no repite la flecha: la flecha es un dibujo.
-    flow = _read("app/static/itmq_orderflow.js")
-    body = flow[flow.index("function markerLabel("):]
-    body = body[:body.index("\n\n  /**")]
-    assert "Q.money" in body
-    assert "'▲'" not in body and "'▼'" not in body
+        for dup in ("function flowHalo(", "function flowArrow(", "function flowAmount("):
+            assert dup not in js, f"{rel} tiene su propia copia de {dup}"
+        assert "Q.flowMark(" in js, f"{rel} no usa la marca compartida"
 
 
 def test_dark_flow_maps_the_contract_instead_of_guessing_the_field():
@@ -984,11 +978,17 @@ def test_both_strike_panels_declare_what_they_trimmed():
 
 def test_the_marker_radius_compares_within_the_cycle():
     """Sin una referencia común, dos marcas del mismo tamaño mienten."""
+    # v1.56.0 · La escala del radio vive con el resto de la marca, en el núcleo.
+    core = _read("app/static/itmq_core.js")
+    assert "function flowStrength(ev, peak)" in core
+    cuerpo = core[core.index("function flowStrength(ev, peak)"):]
+    cuerpo = cuerpo[:cuerpo.index("\n  }") + 4]
+    assert "peak > 0" in cuerpo, "sin referencia del ciclo el radio no compara"
+    # Y cada pantalla le pasa el pico de SU ciclo.
     trace = _read("app/static/itmq_trace.js")
     assert "S.qflowPeak" in trace
-    assert "function markerStrength(" in trace
     flow = _read("app/static/itmq_orderflow.js")
-    assert "function evStrength(" in flow and "qPeak" in flow
+    assert "qPeak" in flow and "peak" in flow
 
 
 def test_the_drift_curves_carry_their_value_at_the_end():
@@ -1236,14 +1236,17 @@ def test_net_drift_draws_walls_on_a_price_axis_not_on_the_premium_axis():
 
 
 def test_net_drift_marks_the_flow_with_the_same_functions_as_the_rest():
-    """Si la marca se dibujara aquí de otra forma, significaría dos cosas distintas
-    según la pantalla."""
+    """Net Drift dibuja la marca con la MISMA función que TRACE y que la cinta.
+
+    Dibujarla aquí de otra forma haría que la misma marca significara dos cosas
+    según la pantalla, que es exactamente lo que no puede pasar con una señal
+    direccional.
+    """
     js = _read("app/static/itmq_orderflow.js")
     body = js[js.index("function drawDrift("):js.index("function drawDriftCursor(")]
-    assert "flowHalo(ctx, x, y, evStrength(ev, peak))" in body
-    assert "flowArrow(ctx, x, y, up)" in body
-    assert "flowAmount(" in body and "markerLabel(ev)" in body
-    # Y sobre el eje del PRECIO, que es donde ocurrió el flujo.
+    assert "Q.flowMark(ctx, x, y, ev, peak" in body
+    # El ancla es el INSTANTE y el PRECIO, no un índice de bucket.
+    assert "const t = Q.parseTime(ev.t);" in body
     assert "const y = psy(pr);" in body
 
 

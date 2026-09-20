@@ -620,6 +620,150 @@
              short: '?', order: 9, unidentified: true };
   }
 
+  /* ------------------------------------------------- MARCA DE FLUJO (QFLOW)
+   *
+   * v1.56.0 · AUTORIDAD ÚNICA DE LA MARCA.
+   *
+   * Hasta aquí TRACE y FLUJO DE ÓRDENES tenían cada uno su COPIA de estas cinco
+   * funciones. Eran equivalentes el día que se escribieron, y ese es justo el
+   * problema: dos copias equivalentes se separan en cuanto alguien corrige una.
+   * Una marca que significa COMPRA en una pantalla y otra cosa en la de al lado
+   * es peor que no dibujarla.
+   *
+   * LA MARCA TIENE TRES PIEZAS Y CADA UNA DICE UNA COSA
+   *
+   *     círculo dorado   DÓNDE ocurrió, y su radio CUÁNTO pesa
+   *     flecha           QUIÉN agredió   ▲ verde compra · ▼ rojo venta
+   *     rombo neutro     el lado NO está demostrado
+   *     cifra            la prima
+   *
+   * El dorado no es una dirección: marca que ahí hubo una concentración
+   * importante. La dirección la dice la flecha, y sólo cuando se puede.
+   */
+
+  /** COMPRA (true), VENTA (false) o SIN LADO (null). Nunca se deduce del tipo
+   *  de contrato ni del signo de la prima: sale del agresor y de nada más. */
+  function flowSide(ev) {
+    const agg = String((ev && ev.aggressor) || '').toUpperCase();
+    if (agg === 'BUY') return true;
+    if (agg === 'SELL') return false;
+    return null;   // MIXED, UNKNOWN o ausente → sin lado demostrable
+  }
+
+  /** Cuánto pesa una marca, de 0 a 1, contra el pico del propio ciclo.
+   *  Con una constante, un día tranquilo saldría todo diminuto. */
+  function flowStrength(ev, peak) {
+    const v = Math.abs(num(ev && ev.premium, NaN));
+    if (!isNum(v) || !(peak > 0)) return 0.35;
+    return clamp(Math.pow(v / peak, 0.5), 0.12, 1);
+  }
+
+  /** «$141.7M». Sin prima que enseñar, no se inventa una. */
+  function flowAmountText(ev) {
+    const v = Math.abs(num(ev && ev.premium, NaN));
+    return isNum(v) ? money(v, 1) : '';
+  }
+
+  /** El círculo dorado. Devuelve su radio para colgar de él flecha y cifra. */
+  function flowHalo(ctx, x, y, strength) {
+    const gold = token('--gold', '#d9a441');
+    const k = clamp(Number(strength) || 0, 0, 1);
+    const r = 7 + 11 * k;                       // el radio dice cuánto
+    ctx.save();
+    // Halo exterior: separa la marca del fondo pase lo que pase debajo.
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1);
+    g.addColorStop(0, alpha(gold, 0.45));
+    g.addColorStop(0.55, alpha(gold, 0.16));
+    g.addColorStop(1, alpha(gold, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r * 2.1, 0, Math.PI * 2); ctx.fill();
+    // Dos anillos concéntricos.
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = alpha(gold, 0.95);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = alpha(gold, 0.55);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.58, 0, Math.PI * 2); ctx.stroke();
+    // Núcleo.
+    ctx.fillStyle = alpha(gold, 0.92);
+    ctx.beginPath(); ctx.arc(x, y, Math.max(2, r * 0.26), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    return r;
+  }
+
+  /** Flecha de sentido. Devuelve el color usado, para la cifra. */
+  function flowArrow(ctx, x, y, up) {
+    /* `up === null` significa que NO se conoce el lado agresor.
+     *
+     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
+     * evento sin lado salía pintado como compra o como venta según un valor por
+     * defecto. Un lado desconocido se dibuja como ROMBO neutro: quien mire el
+     * gráfico ve que hubo una concentración y que su dirección no está
+     * confirmada, en vez de leer una dirección que nadie midió. */
+    if (up === null || up === undefined) {
+      const mute = token('--text-dim', '#8494ad');
+      ctx.save();
+      ctx.fillStyle = mute;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
+      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      return mute;
+    }
+    const col = up ? token('--pos', '#22c55e') : token('--neg', '#ef4444');
+    const t = up ? -1 : 1;
+    ctx.save();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    // El VÉRTICE va en el extremo: hacia ARRIBA en compra, hacia ABAJO en
+    // venta. Ponerlo del lado de la base dibuja la flecha invertida, que es
+    // peor que no dibujarla: dice justo lo contrario.
+    ctx.moveTo(x, y + t * 13);
+    ctx.lineTo(x - 5.5, y + t * 6);
+    ctx.lineTo(x + 5.5, y + t * 6);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return col;
+  }
+
+  /** Cifra sobre fondo propio: el texto suelto se pierde sobre el mapa. */
+  function flowAmount(ctx, x, y, text, col) {
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 12;
+    ctx.fillStyle = alpha(token('--panel-3', '#1b2436'), 0.94);
+    roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.fill();
+    ctx.strokeStyle = alpha(token('--gold', '#d9a441'), 0.8);
+    ctx.lineWidth = 1;
+    roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  /**
+   * LA MARCA COMPLETA, en una sola llamada. Es lo que usan las TRES pantallas.
+   *
+   *   ctx, x, y   dónde va (ya resuelto por quien llama: cada panel tiene su eje)
+   *   ev          el marcador de QFLOW
+   *   peak        la mayor prima del ciclo, para escalar el radio
+   *
+   * Devuelve `{ r, up, col, dy }`: el radio del círculo, el lado, el color y el
+   * desplazamiento vertical de la zona sensible del hover.
+   */
+  function flowMark(ctx, x, y, ev, peak, opts) {
+    const o = opts || {};
+    const up = flowSide(ev);
+    const above = up !== false;      // sin lado, la marca va por encima
+    const r = flowHalo(ctx, x, y, flowStrength(ev, peak));
+    const col = flowArrow(ctx, x, above ? y - r : y + r, up);
+    const label = o.label === undefined ? flowAmountText(ev) : o.label;
+    if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
+    return { r, up, above, col, dy: above ? -(r + 22) : (r + 22) };
+  }
+
   /* --------------------------------------------------------------- export */
 
   const ITMQ = {
@@ -629,6 +773,8 @@
     NO_DATA,
     token, alpha,
     LEVELS, FLOW_LEVEL_KINDS, levelStyle,
+    // Marca de flujo: UNA implementación para TRACE, FLUJO y NET DRIFT.
+    flowSide, flowStrength, flowAmountText, flowHalo, flowArrow, flowAmount, flowMark,
     LEVEL_FONT, LEVEL_LABEL_H, LEVEL_LABEL_GAP, LEVEL_LINE_WIDTH,
     roundRect, gridY, axisX, chip, levelLine, stackLabels,
     panels: PANELS,

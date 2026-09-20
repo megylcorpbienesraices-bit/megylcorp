@@ -954,104 +954,16 @@
    * se devuelve null y la marca se dibuja neutra. Una flecha inventada sobre un
    * gráfico de operativa puede costar dinero; un rombo que dice «no sé» no.
    */
-  function flowSide(ev) {
-    const agg = String((ev && ev.aggressor) || '').toUpperCase();
-    if (agg === 'BUY') return true;
-    if (agg === 'SELL') return false;
-    return null;   // MIXED, UNKNOWN o ausente → sin lado
-  }
-
-
-  /** Cuánto pesa una marca, de 0 a 1, dentro de lo visible en este ciclo. */
-  function markerStrength(ev) {
-    const v = Math.abs(Q.num(ev && ev.premium, NaN));
-    if (!Q.isNum(v) || !(S.qflowPeak > 0)) return 0.35;
-    return Q.clamp(Math.pow(v / S.qflowPeak, 0.5), 0.12, 1);
-  }
-
-  /** La cifra: «$141.7M». Sin prima que enseñar, no se inventa una. */
-  function markerAmount(ev) {
-    const v = Math.abs(Q.num(ev && ev.premium, NaN));
-    return Q.isNum(v) ? Q.money(v, 1) : '';
-  }
-
-  function flowHalo(ctx, x, y, strength) {
-    const gold = Q.token('--gold', '#d9a441');
-    const k = Q.clamp(Number(strength) || 0, 0, 1);
-    const r = 7 + 11 * k;                       // el radio dice cuánto
-    ctx.save();
-    // Halo exterior: separa la marca del fondo pase lo que pase debajo.
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1);
-    g.addColorStop(0, Q.alpha(gold, 0.45));
-    g.addColorStop(0.55, Q.alpha(gold, 0.16));
-    g.addColorStop(1, Q.alpha(gold, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(x, y, r * 2.1, 0, Math.PI * 2); ctx.fill();
-    // Dos anillos concéntricos.
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = Q.alpha(gold, 0.95);
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = Q.alpha(gold, 0.55);
-    ctx.beginPath(); ctx.arc(x, y, r * 0.58, 0, Math.PI * 2); ctx.stroke();
-    // Núcleo.
-    ctx.fillStyle = Q.alpha(gold, 0.92);
-    ctx.beginPath(); ctx.arc(x, y, Math.max(2, r * 0.26), 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    return r;
-  }
-
-  /** Flecha de sentido: verde compra, rojo venta. La forma ya la distingue. */
-  function flowArrow(ctx, x, y, up) {
-    /* v1.52.0 · `up === null` significa que NO se conoce el lado agresor.
-     *
-     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
-     * evento sin lado salía pintado como compra o como venta según un valor por
-     * defecto. Ahora un lado desconocido se dibuja como ROMBO neutro. Quien mire
-     * el gráfico ve que ahí hubo una concentración y que su dirección no está
-     * confirmada, en vez de leer una dirección que nadie midió. */
-    if (up === null || up === undefined) {
-      const mute = Q.token('--text-dim', '#8494ad');
-      ctx.save();
-      ctx.fillStyle = mute;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
-      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
-      ctx.closePath(); ctx.fill();
-      ctx.restore();
-      return mute;
-    }
-    const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
-    const t = up ? -1 : 1;
-    ctx.save();
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    // El VÉRTICE va en el extremo: hacia arriba en compra, hacia abajo en
-    // venta. Ponerlo del lado de la base dibujaba la flecha invertida, que es
-    // peor que no dibujarla: dice justo lo contrario.
-    ctx.moveTo(x, y + t * 13);
-    ctx.lineTo(x - 5.5, y + t * 6);
-    ctx.lineTo(x + 5.5, y + t * 6);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
-    return col;
-  }
-
-  /** Cifra sobre fondo propio: el texto suelto se pierde sobre el mapa. */
-  function flowAmount(ctx, x, y, text, col) {
-    ctx.save();
-    ctx.font = '700 10px ui-monospace, monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const w = ctx.measureText(text).width + 12;
-    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.94);
-    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.fill();
-    ctx.strokeStyle = Q.alpha(Q.token('--gold', '#d9a441'), 0.8);
-    ctx.lineWidth = 1;
-    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.stroke();
-    ctx.fillStyle = col;
-    ctx.fillText(text, x, y);
-    ctx.restore();
-  }
+  /* v1.56.0 · Las cinco funciones de la marca vivían DUPLICADAS aquí y en
+   * FLUJO DE ÓRDENES. Eran equivalentes el día que se escribieron, y ese es el
+   * problema: dos copias equivalentes se separan en cuanto alguien corrige una,
+   * y una marca que significa COMPRA en una pantalla y otra cosa en la de al
+   * lado es peor que no dibujarla. Ahora hay UNA, en `itmq_core`. */
+  const flowSide = Q.flowSide;
+  const flowArrow = Q.flowArrow;
+  const flowAmount = Q.flowAmount;
+  const markerStrength = ev => Q.flowStrength(ev, S.qflowPeak);
+  const markerAmount = Q.flowAmountText;
 
   function drawQflowMarkers(ctx, box, sx, sy, qflow) {
     const marks = (qflow && qflow.markers) || [];
@@ -1103,14 +1015,12 @@
        * porque tiene forma propia y no se confunde con la línea de precio.
        */
       const a = anchored ? 1 : 0.5;
-      const label = m.label || markerAmount(m);
       ctx.save();
       ctx.globalAlpha = a;
-      const r = flowHalo(ctx, x, y, markerStrength(m));
-      const col = flowArrow(ctx, x, above ? y - r : y + r, up);
-      if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
+      // UNA sola llamada, la misma que usan FLUJO y NET DRIFT.
+      const marca = Q.flowMark(ctx, x, y, m, S.qflowPeak, { label: m.label || undefined });
       ctx.restore();
-      const dy = up ? -(r + 22) : (r + 22);
+      const dy = marca.dy;
 
       // Zona sensible para el hover: el detalle enriquecido del Order Flow no se
       // pinta encima del gráfico, se pide al pasar por la marca.
@@ -1377,6 +1287,28 @@
     lines.push(verdicto
       + (Q.isNum(dom) ? ` · ${dom.toFixed(0)}% dominancia` : '')
       + (Q.isNum(cov) ? ` · ${cov.toFixed(0)}% con agresor` : ''));
+
+    /* v1.56.0 · El reparto, en PORCENTAJE sobre TODA la prima de la ventana.
+     *
+     * No sobre lo clasificado: si el 40 % no tiene lado, aquí tiene que verse
+     * ese 40 %. Repartirlo entre compra y venta para que las cifras sumen 100
+     * es inventar dos tercios de la lectura. */
+    const bp = Q.num(m.buy_pct, NaN), sp = Q.num(m.sell_pct, NaN), up = Q.num(m.unknown_pct, NaN);
+    if (Q.isNum(bp) || Q.isNum(sp) || Q.isNum(up)) {
+      if (Q.isNum(bp)) lines.push(`BUY      ${bp.toFixed(0)} %`);
+      if (Q.isNum(sp)) lines.push(`SELL     ${sp.toFixed(0)} %`);
+      if (Q.isNum(up)) lines.push(`UNKNOWN  ${up.toFixed(0)} %`);
+    }
+    // De qué campo salió la mayoría de los lados. «68 % BUY» no significa lo
+    // mismo desde el campo oficial del proveedor que desde medir el NBBO.
+    const FUENTE = {
+      PROVIDER_TRADE_SIDE_CODE: 'tradeSideCode',
+      PROVIDER_FIELD: 'campo del proveedor',
+      NBBO: 'NBBO del instante',
+    };
+    const fuente = FUENTE[String(m.classification_source || '')];
+    if (fuente) lines.push('Clasificación principal: ' + fuente);
+
     const desglose = [];
     if (Q.isNum(Q.num(m.buy_premium, NaN))) desglose.push('C ' + Q.money(Q.num(m.buy_premium), 1));
     if (Q.isNum(Q.num(m.sell_premium, NaN))) desglose.push('V ' + Q.money(Q.num(m.sell_premium), 1));

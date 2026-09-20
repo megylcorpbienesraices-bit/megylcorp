@@ -104,8 +104,10 @@ def test_las_marcas_de_flujo_se_anclan_por_instante_y_precio():
 
 
 def test_la_flecha_de_la_marca_sale_del_agresor():
-    cuerpo = FLOW[FLOW.index("function flowSide"):]
-    cuerpo = cuerpo[:cuerpo.index("function evStrength")]
+    # v1.56.0 · Una sola implementación, en el núcleo.
+    core = Path("app/static/itmq_core.js").read_text(encoding="utf-8")
+    cuerpo = core[core.index("function flowSide"):]
+    cuerpo = cuerpo[:cuerpo.index("function flowStrength")]
     assert "ev.aggressor" in cuerpo
     assert "'BUY'" in cuerpo and "'SELL'" in cuerpo
     # MIXED y UNKNOWN NO se convierten en un lado.

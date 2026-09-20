@@ -387,12 +387,35 @@ def aggressor_diagnosis(events: List[Dict[str, Any]],
         verdicts[v] = verdicts.get(v, 0) + 1
     sided = verdicts.get("BUY", 0) + verdicts.get("SELL", 0)
 
+    # v1.56.0 · «La cinta no trae lado» eran DOS averías contadas juntas.
+    #
+    #   MID_TRADE      el proveedor SÍ dice el lado, y dice que fue al medio.
+    #                  Es una cinta sana: nadie cruzó el spread. No hay nada
+    #                  que arreglar y no se puede dibujar flecha.
+    #   NBBO_MISSING   no hay campo de lado Y tampoco bid/ask con los que
+    #                  medirlo. Eso sí es una carencia del payload.
+    #
+    # Distinguirlas importa porque la primera se cierra y la segunda se
+    # persigue, y hasta ahora las dos producían el mismo mensaje.
+    mid_rows = int(cov.get("mid_trade_rows") or 0)
+    nbbo_missing = int(cov.get("nbbo_missing_rows") or 0)
+    sin_campo = int(cov.get("without_side_field_rows") or 0)
+
     # El primer eslabón que falla es el que hay que arreglar; los de después
     # fallan por consecuencia y señalarlos manda al sitio equivocado.
     if not rows:
         broken, remedy = "TAPE_MISSING", (
             "la cinta de opciones no devolvió filas en este ciclo: sin operaciones "
             "no hay agresor que medir")
+    elif not cov.get("with_side") and mid_rows and mid_rows >= (nbbo_missing + sin_campo):
+        broken, remedy = "MID_TRADE", (
+            f"la cinta llega con lado declarado y {mid_rows} de {len(rows)} operaciones "
+            "se ejecutaron en el punto MEDIO: nadie cruzó el spread, así que no hay "
+            "agresor que dibujar. No es una avería")
+    elif not cov.get("with_side") and nbbo_missing:
+        broken, remedy = "NBBO_MISSING", (
+            f"{nbbo_missing} operaciones llegan sin campo de lado y sin bid/ask "
+            "utilizables: no hay con qué medir quién cruzó el spread")
     elif not cov.get("with_side"):
         broken, remedy = "TAPE_WITHOUT_SIDE", (
             "la cinta llega pero ninguna operación resuelve lado: el proveedor no "
@@ -440,6 +463,28 @@ def aggressor_diagnosis(events: List[Dict[str, Any]],
         "verdicts": verdicts,
         "markers_with_side": sided,
         "markers_total": len(events or []),
+        # ── CONTADORES EXACTOS DE LA AUDITORÍA ───────────────────────────
+        # Con estos nombres para que la pantalla del Auditor y este módulo no
+        # tengan que traducirse entre sí; una traducción por el medio es donde
+        # se cuela un contador que ya no cuenta lo que dice su nombre.
+        "tape_rows": len(rows),
+        "explicit_side_rows": int(cov.get("explicit_side_rows") or 0),
+        "primary_field_rows": int(cov.get("primary_field_rows") or 0),
+        "nbbo_classified_rows": int(cov.get("nbbo_classified_rows") or 0),
+        "unknown_rows": int(cov.get("unknown_rows") or 0),
+        "mid_trade_rows": mid_rows,
+        "nbbo_missing_rows": nbbo_missing,
+        "without_side_field_rows": sin_campo,
+        "buy_rows": int(cov.get("buy_rows") or 0),
+        "sell_rows": int(cov.get("sell_rows") or 0),
+        "attribution_matches": matched,
+        "attribution_misses": max(0, len(detail) - matched),
+        "coverage_pct": cov.get("pct"),
+        "by_source": cov.get("by_source") or {},
+        "by_reason": cov.get("by_reason") or {},
+        "states": ["DATA_OK", "TAPE_MISSING", "TAPE_WITHOUT_SIDE", "NBBO_MISSING",
+                   "MID_TRADE", "ATTRIBUTION_NO_MATCH", "NO_DOMINANCE"],
+        "state": broken or "DATA_OK",
     }
 
 
@@ -519,6 +564,17 @@ def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -
             e["aggressor"] = "BUY" if buy >= sell else "SELL"
         e["aggressor_confidence"] = round(share, 4)
         e["aggressor_dominance_pct"] = round(100.0 * share, 2)
+        # ── PORCENTAJES SOBRE TODA LA PRIMA DE LA VENTANA ────────────────
+        # No sobre lo clasificado: si el 40 % no tiene lado, el hover tiene que
+        # enseñar ese 40 %. Repartirlo entre compra y venta para que las cifras
+        # sumen 100 es inventar dos tercios de la lectura.
+        unk = abs(_f(d.get("unknown_premium")) or 0.0)
+        bruto = buy + sell + unk
+        if bruto > 0:
+            e["buy_pct"] = round(100.0 * buy / bruto, 1)
+            e["sell_pct"] = round(100.0 * sell / bruto, 1)
+            e["unknown_pct"] = round(100.0 * unk / bruto, 1)
+        e["classification_source"] = d.get("classification_source")
         cov = _f(d.get("aggressor_coverage_pct"))
         e["aggressor_detail"] = (f"compra {buy:,.0f} vs venta {sell:,.0f} "
                                  f"en {d.get('trades', 0)} operaciones"
@@ -560,6 +616,9 @@ def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "unknown_premium": e.get("unknown_premium"),
             "trades": e.get("trades"), "buys": e.get("buys"),
             "sells": e.get("sells"), "unknowns": e.get("unknowns"),
+            "buy_pct": e.get("buy_pct"), "sell_pct": e.get("sell_pct"),
+            "unknown_pct": e.get("unknown_pct"),
+            "classification_source": e.get("classification_source"),
             "arrow": arrow, "premium": premium,
             "label": f"{arrow} ${premium / 1e6:.1f}M",
             "share_of_peak": e.get("share_of_peak"),
@@ -573,6 +632,24 @@ def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # admite medio minuto de holgura a cada lado porque los relojes del agregado y de
 # la cinta no tienen por qué coincidir al milisegundo.
 ATTRIBUTION_WINDOW_SECONDS = 90.0
+
+
+def _fuente_dominante(trades: List[Dict[str, Any]]) -> Optional[str]:
+    """La procedencia que clasificó MÁS PRIMA en esta ventana.
+
+    Se pondera por prima, no por número de operaciones: mil prints minúsculos
+    clasificados por NBBO no deben tapar al que movió el dinero con el campo
+    oficial del proveedor.
+    """
+    por_fuente: Dict[str, float] = {}
+    for t in trades or []:
+        src = t.get("classification_source")
+        if not src:
+            continue
+        por_fuente[str(src)] = por_fuente.get(str(src), 0.0) + abs(_f(t.get("premium")) or 0.0)
+    if not por_fuente:
+        return None
+    return max(por_fuente.items(), key=lambda kv: kv[1])[0]
 
 
 def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
@@ -655,6 +732,10 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
             # Que porcentaje de la PRIMA de la ventana llego con lado agresor.
             # Es lo que separa un veredicto sostenido de uno sostenido por tres
             # prints de los noventa que hubo.
+            # De QUÉ campo salió la mayoría de los lados de esta ventana. El
+            # hover lo enseña: «68 % BUY» no significa lo mismo si viene del
+            # campo oficial del proveedor que si viene de medir el NBBO.
+            "classification_source": _fuente_dominante(trades),
             "aggressor_coverage_pct": (
                 None if not trades else
                 round(100.0 * sum(abs(t["premium"] or 0.0) for t in buys + sells)
@@ -677,6 +758,7 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
 
 def _trade(r: Dict[str, Any]) -> Dict[str, Any]:
     """Una operación con el contrato entero, para poder explicar la concentración."""
+    # (la procedencia se añade al final, junto al resto del contrato)
     premium = _f(r.get("premium"))
     if premium is None:
         price, size = _f(r.get("price")), _f(r.get("size"))
@@ -703,6 +785,11 @@ def _trade(r: Dict[str, Any]) -> Dict[str, Any]:
         "direction": int(direction),
         "aggressor": ("BUY" if direction > 0 else "SELL" if direction < 0 else "UNKNOWN"),
         "execution": str(r.get("execution") or "").upper(),
+        # De dónde salió el lado de ESTA operación. Sube hasta el hover de la
+        # marca: «68 % BUY» no significa lo mismo si viene del campo oficial del
+        # proveedor que si viene de medir el precio contra el NBBO.
+        "classification_source": r.get("classification_source"),
+        "trade_side_code": r.get("trade_side_code"),
         "trades": _f(r.get("trades")),
     }
 
