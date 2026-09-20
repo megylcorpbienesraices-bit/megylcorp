@@ -146,8 +146,10 @@ def observed_option_prints(events: Optional[pd.DataFrame], ticks: Optional[pd.Da
             continue
         out.append({
             "t": pd.Timestamp(r["timestamp"]).isoformat(), "price": p,
-            "strike": _f(r.get("strike")), "contracts": _f(r.get("contracts"), 0.0) or 0.0,
-            "premium": _f(r.get("premium"), 0.0) or 0.0, "direction": int(_f(r.get("direction_sign"), 0.0) or 0.0),
+            # v1.56.0 · Prima y contratos AUSENTES se publican como hueco. Un
+            # print con «$0.0» en la tabla afirma que se negoció sin dinero.
+            "strike": _f(r.get("strike")), "contracts": _f(r.get("contracts")),
+            "premium": _f(r.get("premium")), "direction": int(_f(r.get("direction_sign"), 0.0) or 0.0),
             "aggressor": str(r.get("aggressor") or "UNKNOWN"), "confidence": _f(r.get("aggressor_confidence"), 0.0) or 0.0,
             "option_type": str(r.get("option_type") or ""), "trade_price": _f(r.get("trade_price")),
             "source": str(r.get("flow_source") or "OPRA"),
@@ -375,10 +377,20 @@ def temporal_heatmap_history(gd: Dict[str, Any], spot: float | None, visual_wind
         oi_col = "open_interest" if "open_interest" in x.columns else ("oi" if "oi" in x.columns else None)
         oi_s = _numeric_col(x, oi_col)
         charm_s = _numeric_col(x, "calc_charm" if "calc_charm" in x.columns else ("charm" if "charm" in x.columns else None))
+        # Un spot de 0 haría que CHARM saliera 0 en toda la cadena —se multiplica
+        # por él— y ese cero se lee como «no hay decaimiento de delta», que es
+        # una afirmación. Sin precio, la columna queda en NaN y la suma la
+        # ignora, que es lo que corresponde a un dato que falta.
+        ancla = _f(sp)
+        if ancla is not None and ancla <= 0:
+            ancla = None
         if "underlying_price" in x.columns:
-            spot_s = pd.to_numeric(x["underlying_price"], errors="coerce").fillna(sp or 0.0)
+            spot_s = pd.to_numeric(x["underlying_price"], errors="coerce")
+            if ancla is not None:
+                spot_s = spot_s.fillna(ancla)
         else:
-            spot_s = pd.Series(float(sp or 0.0), index=x.index, dtype=float)
+            spot_s = pd.Series(float("nan") if ancla is None else float(ancla),
+                               index=x.index, dtype=float)
         # El tamaño del contrato se deduce del propio frame (columna declarada o
         # símbolo OCC). Esta función no recibe `symbol` y adivinarlo sería peor.
         # v1.42.4 · Misma unidad canónica que el perfil por strike (CHARM_PER_DAY):
@@ -587,7 +599,19 @@ def build_quant_surface_payload(
     chain["expiration_date"] = chain["expiration_date"].astype(str)
     exps = sorted(chain["expiration_date"].dropna().unique().tolist())[:max(1, int(max_expiries))]
     chain = chain[chain["expiration_date"].isin(exps)].copy()
-    spot = _f(gd.get("spot"), _f(chain["underlying_price"].iloc[-1])) or 0.0
+    # v1.56.0 · UN SPOT DE CERO NO EXISTE.
+    #
+    # `or 0.0` convertía un precio ausente en 0.0, y desde ahí los strikes se
+    # ordenaban por distancia a CERO: la selección devolvía los strikes más
+    # BAJOS de la cadena en vez de los que rodean al precio. El gráfico salía
+    # lleno y equivocado, que es peor que salir vacío.
+    #
+    # Sin precio de referencia no hay «strikes cercanos» que elegir, así que se
+    # toma el centro de la cadena y se declara, en vez de fingir un ancla.
+    spot = _f(gd.get("spot"), _f(chain["underlying_price"].iloc[-1]))
+    todos = sorted(float(k) for k in chain["strike"].dropna().unique().tolist())
+    if spot is None or spot <= 0:
+        spot = todos[len(todos) // 2] if todos else 0.0
     strikes = sorted(chain["strike"].dropna().unique().tolist(), key=lambda k: abs(float(k) - spot))[:max(5, int(max_strikes))]
     strikes = sorted(float(k) for k in strikes)
     chain = chain[chain["strike"].isin(strikes)].copy()

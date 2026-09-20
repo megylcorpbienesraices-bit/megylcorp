@@ -76,8 +76,20 @@ def _options_field(market: Dict[str, Any], volatility: Dict[str, Any], symbol: s
         if abs(net_delta) <= 1e-12:
             net_delta = float(numeric_column(chain,"option_delta_exposure_info",0.0).sum())
 
-    gamma_ratio = _clip(net_gex / max(gross_gex, 1e-12)) if gross_gex > 0 else 0.0
-    delta_ratio = _clip(net_delta / max(gross_delta, 1e-12)) if gross_delta > 0 else 0.0
+    # v1.56.0 · UN RATIO DE CERO NO ES LO MISMO QUE NO HABER MEDIDO NADA.
+    #
+    # Sin exposición, `gamma_ratio` salía 0.0, y de ahí `stability = 50.0` y
+    # `gamma_regime = "TRANSITION"`. Eso se lee como «el mercado está en
+    # transición con gamma neutra», que es una afirmación sobre el libro de
+    # opciones hecha sin haber medido una sola posición.
+    #
+    # Los números se conservan —el campo aguas abajo los necesita— pero se
+    # declara si se midieron. Una pantalla que enseñe TRANSITION sin saber que
+    # nadie midió nada está mintiendo con un número correcto.
+    gamma_measured = gross_gex > 0
+    delta_measured = gross_delta > 0
+    gamma_ratio = _clip(net_gex / max(gross_gex, 1e-12)) if gamma_measured else 0.0
+    delta_ratio = _clip(net_delta / max(gross_delta, 1e-12)) if delta_measured else 0.0
 
     higher = {"vanna_1vol_m": 0.0, "charm_10m_m": 0.0, "speed_1pct_m": 0.0, "color_10m_m": 0.0,
               "contracts": 0, "method": "NO_CHAIN"}
@@ -138,7 +150,14 @@ def _options_field(market: Dict[str, Any], volatility: Dict[str, Any], symbol: s
         "gross_delta": gross_delta,
         "stability": round(stability, 1),
         "instability": round(instability, 1),
-        "gamma_regime": "POSITIVE_FRICTION" if gamma_ratio > 0.08 else "NEGATIVE_FEEDBACK" if gamma_ratio < -0.08 else "TRANSITION",
+        "gamma_regime": ("NO_EXPOSURE_DATA" if not gamma_measured else
+                         "POSITIVE_FRICTION" if gamma_ratio > 0.08 else
+                         "NEGATIVE_FEEDBACK" if gamma_ratio < -0.08 else "TRANSITION"),
+        # Si esto es falso, los ratios y la estabilidad de arriba son el valor
+        # por defecto, no una lectura del mercado.
+        "gamma_measured": bool(gamma_measured),
+        "delta_measured": bool(delta_measured),
+        "measured": bool(gamma_measured or delta_measured),
         "higher_order": higher,
         "note": "Gamma controls friction/stability; Delta contributes direction. Higher Greeks are scenario sensitivities, not observed dealer intent.",
     }

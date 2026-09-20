@@ -3013,8 +3013,31 @@
     "test_una_matriz_toda_a_cero_conserva_sus_huecos",
     "test_una_rejilla_negativa_sale_negativa"
    ]
+  },
+  "tests/test_v1560_gate9_zeros_inventory.py": {
+   "casos": 18,
+   "tests": [
+    "test_cero_observado_es_cero_y_ausente_es_nulo",
+    "test_con_exposicion_el_regimen_vuelve_a_ser_una_lectura",
+    "test_con_lkg_se_muestra_el_valor_y_se_marca_viejo",
+    "test_el_acumulador_de_agresion_sigue_sumando_contribuciones_nulas",
+    "test_el_charm_sin_precio_queda_en_hueco_no_en_cero",
+    "test_el_gate_cubre_las_propiedades_que_no_pueden_romperse",
+    "test_el_gate_de_release_ejecuta_la_auditoria_matematica",
+    "test_el_gate_va_antes_que_la_suite_particionada",
+    "test_la_confianza_del_dealer_ya_no_se_diluye_con_lo_que_falta",
+    "test_las_sumas_de_qflow_siguen_sumando_contribuciones_nulas",
+    "test_los_cinco_ficheros_estan_clasificados",
+    "test_nadie_añade_una_acumulacion_nueva_sin_clasificarla",
+    "test_no_quedan_pendientes",
+    "test_sin_exposicion_el_regimen_lo_dice_en_vez_de_afirmar_transicion",
+    "test_sin_lkg_se_dice_sin_datos",
+    "test_un_componente_ausente_no_arrastra_la_media",
+    "test_un_print_sin_prima_no_se_publica_como_cero_dolares",
+    "test_un_spot_ausente_no_selecciona_los_strikes_mas_bajos"
+   ]
   }
  },
- "total_minimo": 2475,
+ "total_minimo": 2493,
  "version": "1.55.0"
 }

@@ -984,10 +984,25 @@ def dealer_intelligence(chain: pd.DataFrame, events: pd.DataFrame, symbol: str, 
     field_component=field_sign*min(100.0,max(conf,20.0))
     dealer_state_score=float(np.clip(.34*field_component+.34*hp_score+.20*inventory_shift_score+.12*fc_score,-100.0,100.0))
     # Confidence measures observability/model support, not chance of a profitable trade.
-    components=[(float(micro_quality.get("score",0.0) or 0.0),.38),(float(hp.get("confidence",0.0) or 0.0),.22),(float(conf),.20)]
+    # v1.56.0 · UN COMPONENTE AUSENTE NO PUNTUA CERO: SE QUEDA FUERA.
+    #
+    # Con `or 0.0`, una confianza que no llego entraba como 0 CON TODO SU PESO y
+    # arrastraba la media hacia abajo. Eso convierte «no lo he medido» en «lo he
+    # medido y vale cero», que es la diferencia entre un dato que falta y una
+    # señal debil. Ahora el peso se redistribuye entre lo que si se midio.
+    def _componente(valor, peso):
+        v = None if valor is None else float(valor)
+        return None if v is None else (v, peso)
+    components=[c for c in (
+        _componente(micro_quality.get("score"), .38),
+        _componente(hp.get("confidence"), .22),
+        _componente(conf, .20),
+    ) if c is not None]
     if bool(shadow_fit.get("ready")) and bool(shadow_fit.get("beats_constant_baseline")):components.append((75.0,.10))
     else:components.append((30.0,.10))
-    if flow_confirmation.get("state") not in {"UNAVAILABLE","NEUTRAL"}:components.append((float(flow_confirmation.get("confidence",0.0) or 0.0),.10))
+    if flow_confirmation.get("state") not in {"UNAVAILABLE","NEUTRAL"}:
+        _fc=_componente(flow_confirmation.get("confidence"), .10)
+        if _fc is not None:components.append(_fc)
     den=sum(w for _,w in components) or 1.0;overall_conf=float(np.clip(sum(v*w for v,w in components)/den,0,100))
     conf_label="HIGH" if overall_conf>=75 else "MEDIUM" if overall_conf>=50 else "LOW"
     try:

@@ -226,6 +226,56 @@ def _is_build_residue(path: Path) -> bool:
     return False
 
 
+#: Las pruebas que CONGELAN la certificación matemática del Monte Carlo.
+#: Cada una contrasta contra una solución cerrada, no contra el propio
+#: simulador, así que ninguna puede pasar por accidente.
+MONTE_CARLO_GATE = (
+    "tests/test_v1550_monte_carlo_audit.py::test_el_precio_esperado_es_el_del_activo_sin_arbitraje",
+    "tests/test_v1550_monte_carlo_audit.py::test_la_varianza_terminal_es_la_lognormal_exacta",
+    "tests/test_v1550_monte_carlo_audit.py::test_el_mismo_mercado_publica_el_mismo_numero",
+    "tests/test_v1550_monte_carlo_audit.py::test_si_el_mercado_cambia_la_simulacion_cambia",
+    "tests/test_v1550_monte_carlo_audit.py::test_contar_trayectorias_subestimaria_el_toque_a_la_mitad",
+    "tests/test_v1550_monte_carlo_audit.py::test_los_percentiles_terminales_son_los_cuantiles_lognormales",
+    "tests/test_v1550_monte_carlo_audit.py::test_el_error_cae_como_uno_partido_por_raiz_de_n",
+    "tests/test_v1550_monte_carlo_audit.py::test_tocar_nunca_es_menos_probable_que_terminar_mas_alla",
+    "tests/test_v1550_monte_carlo_audit.py::test_entradas_imposibles_no_producen_un_cono_falso",
+)
+
+
+def monte_carlo_math_gate() -> None:
+    """Gate matemático del Monte Carlo. Punto 28 del cierre integral.
+
+    ═══════════════════════════════════════════════════════════════════════
+    POR QUÉ ESTO ES UN GATE Y NO UNA PRUEBA MÁS
+    ═══════════════════════════════════════════════════════════════════════
+
+    El resto de la suite protege el comportamiento. Esto protege la CORRECCIÓN
+    MATEMÁTICA, que es distinta: un simulador con la deriva mal puesta corre
+    igual de bien, pasa todos los tests de humo y publica probabilidades
+    equivocadas con seis decimales de aparente precisión.
+
+    Estas nueve pruebas se contrastan contra soluciones CERRADAS —`N(d₂)`, la
+    varianza lognormal exacta, la fórmula de primer paso con reflexión, el
+    cuantil lognormal— y contra el comportamiento asintótico del error. Ninguna
+    puede pasar por accidente.
+
+    Lo que impiden, en concreto:
+
+        · quitar la semilla determinista, y que el mismo mercado quieto
+          publique 43,8 % y un minuto después 44,2 %
+        · romper la corrección de puente browniano, y que P(tocar) vuelva a
+          salir a la mitad de lo que es
+        · romper la convergencia, y que más trayectorias dejen de comprar
+          precisión
+        · introducir NaN/Inf, o producir un cono con entradas imposibles
+
+    Se ejecutan APARTE de la suite particionada y antes que ella: si la
+    matemática está rota, el resto de la validación no significa nada.
+    """
+    run(sys.executable, "-m", "pytest", "-q", "--no-header", *MONTE_CARLO_GATE)
+    print(f"MONTE CARLO MATH GATE PASS · {len(MONTE_CARLO_GATE)} pruebas contra solución cerrada")
+
+
 def artifact_cleanliness_guard() -> None:
     leaked = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if _is_build_residue(p)]
     if leaked:
@@ -597,6 +647,9 @@ def main() -> int:
         for guard in ("codemod_silent_except.py", "codemod_version_asserts.py", "codemod_orphan_docstrings.py"):
             run(sys.executable, f"scripts/{guard}", "--check")
         run(sys.executable, "scripts/test_inventory.py", "--check")
+        # La matemática primero: si está rota, el resto de la validación no
+        # significa nada.
+        monte_carlo_math_gate()
         _js_guard(args.production)
         _rust_guard(args.production)
         partitioned_pytest_gate(args.production)
