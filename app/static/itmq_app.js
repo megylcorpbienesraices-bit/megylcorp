@@ -1796,7 +1796,13 @@
     // FLUJO
     el('ofThreshold')?.addEventListener('change', e => Flow.setMinPremium(Number(e.target.value)));
     segment('ofMode', b => Flow.setMode(b.dataset.mode));
-    segment('ofPanel', b => Flow.setPanel(b.dataset.panel));
+    segment('ofPanel', b => {
+      Flow.setPanel(b.dataset.panel);
+      // El criterio de marcado en oro sólo tiene sentido en Net Drift.
+      const g = el('ofGoldGroup');
+      if (g) g.hidden = b.dataset.panel !== 'drift';
+    });
+    segment('ofGold', b => Flow.setGoldRule(b.dataset.gold));
 
     // EXPOSICIÓN
     el('expMetric')?.addEventListener('change', () => { if (state.bundle) renderExposicion(state.bundle); });
@@ -1934,7 +1940,8 @@
     Trace.mount({ left: el('traceLeft'), main: el('traceMain'), right: el('traceRight') });
     Flow.mount({ price: el('ofPrice'), aggressor: el('ofAggressor'), net: el('ofNet'),
       volume: el('ofVolume'), total: el('ofTotal'),
-      drift: el('ofDrift'), driftVolume: el('ofDriftVolume') });
+      drift: el('ofDrift'), driftTotal: el('ofDriftTotal'),
+      driftVolume: el('ofDriftVolume') });
 
     bindControls();
 

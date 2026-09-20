@@ -312,6 +312,21 @@ def _exposicion(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str, A
                               rows=len(engine_rows),
                               detail="Quant Data no sirvió exposure-by-strike en este ciclo")
 
+    # ── v1.50.0 · recorte a los strikes que IMPORTAN ─────────────────────────
+    #
+    # `exposure-by-strike` devuelve la cadena entera: en DIA a 516 $ eso incluye
+    # el 433 y el 473, a un 16 % del precio y con exposición nula, que ocupan
+    # media pantalla y empujan hacia arriba la zona que se está mirando.
+    #
+    # Se recorta por distancia PORCENTUAL —comparable entre un ETF de 9 $ y un
+    # índice de 7.500— y se conserva todo strike lejano cuya exposición sea
+    # comparable a la de la zona central: un muro real fuera de la banda es
+    # justo el caso que más importa.
+    from .core.strike_window import relevant_rows
+    _spot = _f(state.get("spot"))
+    by_strike, strike_meta = relevant_rows(
+        by_strike, _spot, symbol=symbol, value_keys=("gex", "dex", "vex", "chex"))
+
     # ── por vencimiento: mismo orden de autoridad ────────────────────────────
     provider_exp = HUB.exposure_by_expiration(symbol, intel)
     by_exp = list(provider_exp.get("rows") or [])
@@ -337,6 +352,9 @@ def _exposicion(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str, A
     return {
         "by_strike": by_strike, "by_expiration": by_exp,
         "spot": spot,
+        # Qué se recortó y por qué. Un panel que recorta en silencio es
+        # indistinguible de un proveedor que no envió esos strikes.
+        "strike_window": strike_meta,
         "by_strike_source": exposure_source,
         "by_expiration_source": expiry_source,
         "source_mode": source_mode,
@@ -467,6 +485,15 @@ def _open_interest(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str
                                derivation="snapshot de cadena de ITM QUANT",
                                detail="Quant Data no sirvió open-interest-by-strike")
 
+    # Mismo recorte que EXPOSICIÓN: el perfil de interés abierto se lee
+    # alrededor del precio, y un strike al que el mercado no puede llegar sólo
+    # empuja hacia arriba la zona que importa.
+    from .core.strike_window import relevant_rows as _relevant
+    by_strike, oi_strike_meta = _relevant(
+        by_strike, _f(state.get("spot")),
+        symbol=str(state.get("active_symbol") or state.get("symbol") or "").upper(),
+        value_keys=("oi", "call_oi", "put_oi"))
+
     by_exp = [
         {"expiration": str(e.get("expiration") or e.get("expiration_date") or ""), "oi": _f(e.get("oi"), 0.0)}
         for e in (_d(state, "expiry_intelligence", "per_expiration", default=[]) or [])
@@ -560,6 +587,7 @@ def _open_interest(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str
         "top_call_strike": _f(pos.get("top_call_oi_strike")),
         "top_put_strike": _f(pos.get("top_put_oi_strike")),
         "by_strike": by_strike, "by_expiration": by_exp,
+        "strike_window": oi_strike_meta,
         "by_strike_source": oi_source,
         "by_strike_source_mode": oi_source_mode,
         "reconstruction": "NEVER_FROM_VOLUME",

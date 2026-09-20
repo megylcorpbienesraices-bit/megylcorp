@@ -318,8 +318,13 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
    trades del intervalo seleccionado cierra abajo con altura fija: así el
    gráfico nunca se queda sin sitio cuando la lista crece. */
 .drift-stack {
+  /* v1.50.0 · La curva se lleva el sitio. Con 1fr / .34fr / .38fr el gráfico
+     principal se quedaba con menos de la mitad del alto y las tres curvas
+     acumuladas se aplastaban unas sobre otras justo donde hay que leer su
+     separación. La tabla de trades es un detalle bajo demanda: se le deja lo
+     justo para tres o cuatro filas y crece con scroll. */
   flex: 1; min-height: 0; display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, .34fr) minmax(120px, .38fr);
+  grid-template-rows: minmax(0, 2.2fr) minmax(0, .42fr) minmax(0, .42fr) minmax(104px, .5fr);
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
 }
 .drift-stack[hidden], .flow-stack[hidden] { display: none; }

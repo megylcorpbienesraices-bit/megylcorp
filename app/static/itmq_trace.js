@@ -764,17 +764,126 @@
    * precio del bucket, declarado: una marca huérfana es información, pero no debe
    * parecer tan firme como una anclada.
    */
+
+  /* ── Marca de flujo: círculo dorado + flecha de sentido + cantidad ────────
+   *
+   * v1.50.0 · Tres piezas, cada una con un trabajo distinto:
+   *
+   *   CÍRCULO DORADO   marca el SITIO. Anillos concéntricos con un núcleo
+   *                    brillante, para que se vea encima de un mapa de calor
+   *                    saturado sin taparlo. El radio crece con la magnitud,
+   *                    así que dos concentraciones se comparan de un vistazo.
+   *   FLECHA           el SENTIDO, y aquí sí en verde compra / rojo venta: la
+   *                    flecha tiene forma propia, así que el color no se
+   *                    confunde con el de la línea de precio como pasaba
+   *                    cuando el color era lo único que distinguía CALL de PUT.
+   *   CIFRA            la CANTIDAD, al lado de la flecha.
+   *
+   * Se dibuja en el punto exacto en que ocurrió, sobre el precio.
+   */
+  /** ¿Compra o venta? El agresor manda; el lado del contrato es el respaldo. */
+  function flowIsBuy(ev) {
+    const dir = String((ev && (ev.direction || ev.aggressor || ev.side)) || '').toUpperCase();
+    if (dir === 'BUY' || dir === 'ASK' || dir === 'CALL') return true;
+    if (dir === 'SELL' || dir === 'BID' || dir === 'PUT') return false;
+    return Q.num(ev && ev.premium, 0) >= 0;
+  }
+
+  /** Cuánto pesa una marca, de 0 a 1, dentro de lo visible en este ciclo. */
+  function markerStrength(ev) {
+    const v = Math.abs(Q.num(ev && ev.premium, NaN));
+    if (!Q.isNum(v) || !(S.qflowPeak > 0)) return 0.35;
+    return Q.clamp(Math.pow(v / S.qflowPeak, 0.5), 0.12, 1);
+  }
+
+  /** La cifra: «$141.7M». Sin prima que enseñar, no se inventa una. */
+  function markerAmount(ev) {
+    const v = Math.abs(Q.num(ev && ev.premium, NaN));
+    return Q.isNum(v) ? Q.money(v, 1) : '';
+  }
+
+  function flowHalo(ctx, x, y, strength) {
+    const gold = Q.token('--gold', '#d9a441');
+    const k = Q.clamp(Number(strength) || 0, 0, 1);
+    const r = 7 + 11 * k;                       // el radio dice cuánto
+    ctx.save();
+    // Halo exterior: separa la marca del fondo pase lo que pase debajo.
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1);
+    g.addColorStop(0, Q.alpha(gold, 0.45));
+    g.addColorStop(0.55, Q.alpha(gold, 0.16));
+    g.addColorStop(1, Q.alpha(gold, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r * 2.1, 0, Math.PI * 2); ctx.fill();
+    // Dos anillos concéntricos.
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = Q.alpha(gold, 0.95);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = Q.alpha(gold, 0.55);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.58, 0, Math.PI * 2); ctx.stroke();
+    // Núcleo.
+    ctx.fillStyle = Q.alpha(gold, 0.92);
+    ctx.beginPath(); ctx.arc(x, y, Math.max(2, r * 0.26), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    return r;
+  }
+
+  /** Flecha de sentido: verde compra, rojo venta. La forma ya la distingue. */
+  function flowArrow(ctx, x, y, up) {
+    const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
+    const t = up ? -1 : 1;
+    ctx.save();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    // El VÉRTICE va en el extremo: hacia arriba en compra, hacia abajo en
+    // venta. Ponerlo del lado de la base dibujaba la flecha invertida, que es
+    // peor que no dibujarla: dice justo lo contrario.
+    ctx.moveTo(x, y + t * 13);
+    ctx.lineTo(x - 5.5, y + t * 6);
+    ctx.lineTo(x + 5.5, y + t * 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    return col;
+  }
+
+  /** Cifra sobre fondo propio: el texto suelto se pierde sobre el mapa. */
+  function flowAmount(ctx, x, y, text, col) {
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 12;
+    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.94);
+    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.fill();
+    ctx.strokeStyle = Q.alpha(Q.token('--gold', '#d9a441'), 0.8);
+    ctx.lineWidth = 1;
+    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
   function drawQflowMarkers(ctx, box, sx, sy, qflow) {
     const marks = (qflow && qflow.markers) || [];
     if (!marks.length) return;
     S.qflowHits = [];
+    // El radio compara dentro del ciclo: sin una referencia común, dos marcas
+    // del mismo tamaño podrían significar cosas muy distintas.
+    S.qflowPeak = 0;
+    for (const mk of marks) {
+      const v = Math.abs(Q.num(mk.premium, NaN));
+      if (Q.isNum(v)) S.qflowPeak = Math.max(S.qflowPeak, v);
+    }
     ctx.save();
     ctx.font = '600 10px ui-monospace, monospace';
     ctx.textAlign = 'center';
     for (const m of marks) {
       const t = Q.parseTime(m.t);
       if (!Q.isNum(t)) continue;
-      const up = m.side === 'CALL';
+      // v1.50.0 · La flecha dice COMPRA o VENTA, no CALL o PUT. El agresor es
+      // lo que el operador necesita leer; el lado del contrato ya viaja en el
+      // detalle que abre el hover.
+      const up = flowIsBuy(m);
       const hit = candleAt(t);
 
       let x, y, anchored;
@@ -795,55 +904,23 @@
       if (!Q.isNum(x) || !Q.isNum(y)) continue;
       if (x < box.x - 20 || x > box.x + box.w + 20) continue;
 
-      /* v1.48.0 · La marca es DORADA; la flecha dice el sentido.
+      /* v1.50.0 · Círculo dorado en el sitio, flecha de sentido, cantidad.
        *
-       * Antes el color codificaba CALL/PUT —verde o rojo— y competía con las
-       * velas, que usan ese mismo verde y ese mismo rojo para otra cosa. Una
-       * marca de prima grande sobre una vela verde desaparecía dentro de ella.
-       *
-       * El oro no lo usa ningún otro elemento del gráfico, así que la marca se
-       * ve siempre y en el sitio exacto donde ocurrió. El SENTIDO va en la
-       * flecha —▲ compra, ▼ venta— y la CANTIDAD al lado, que es la lectura
-       * que se pedía: qué pasó, de cuánto, y dónde.
+       * El círculo marca DÓNDE ocurrió y su radio dice cuánto, así que dos
+       * concentraciones se comparan sin leer las cifras. La flecha dice el
+       * sentido —verde compra, rojo venta— y ahora sí puede llevar color,
+       * porque tiene forma propia y no se confunde con la línea de precio.
        */
-      const col = Q.token('--gold', '#d9a441');
-      const dy = up ? -16 : 16;
       const a = anchored ? 1 : 0.5;
-      const label = m.label || (up ? '▲' : '▼');
+      const label = m.label || markerAmount(m);
+      ctx.save();
+      ctx.globalAlpha = a;
+      const r = flowHalo(ctx, x, y, markerStrength(m));
+      const col = flowArrow(ctx, x, up ? y - r : y + r, up);
+      if (label) flowAmount(ctx, x, up ? y - r - 22 : y + r + 22, label, col);
+      ctx.restore();
+      const dy = up ? -(r + 22) : (r + 22);
 
-      // Guía desde el precio hasta la marca: sin ella la cifra flota y no se
-      // sabe a qué vela pertenece.
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + dy * 0.52);
-      ctx.strokeStyle = Q.alpha(col, a * 0.7);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Punta de flecha rellena en el punto exacto del precio.
-      const tip = up ? -1 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x, y + tip * 2);
-      ctx.lineTo(x - 4.5, y + tip * 8);
-      ctx.lineTo(x + 4.5, y + tip * 8);
-      ctx.closePath();
-      ctx.fillStyle = Q.alpha(col, a);
-      ctx.fill();
-
-      // Cifra sobre un fondo propio: encima del mapa de calor, el texto suelto
-      // se pierde contra el fondo pase lo que pase con el color.
-      ctx.textBaseline = 'middle';
-      const tw = ctx.measureText(label).width + 10;
-      const ly = y + dy;
-      ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), a * 0.92);
-      Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4);
-      ctx.fill();
-      ctx.strokeStyle = Q.alpha(col, a * 0.85);
-      ctx.lineWidth = 1;
-      Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4);
-      ctx.stroke();
-      ctx.fillStyle = Q.alpha(col, a);
-      ctx.fillText(label, x, ly);
       // Zona sensible para el hover: el detalle enriquecido del Order Flow no se
       // pinta encima del gráfico, se pide al pasar por la marca.
       S.qflowHits.push({ x, y: y + dy, marker: m, anchored });

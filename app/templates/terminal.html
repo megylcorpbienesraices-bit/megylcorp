@@ -272,6 +272,15 @@
       <button data-panel="tape" class="active">Cinta</button>
       <button data-panel="drift">Net Drift</button>
     </div>
+    <!-- Qué intervalos se marcan en oro. Marcarlos todos sería no marcar
+         ninguno; el criterio se elige y se declara. -->
+    <div class="group" id="ofGoldGroup" hidden>
+      <span class="label">DORADO</span>
+      <div class="seg" id="ofGold">
+        <button data-gold="top3" class="active">Top 3</button>
+        <button data-gold="x10">≥10×</button>
+      </div>
+    </div>
     <div class="spacer"></div>
     <div class="group">
       <span class="label">SESGO</span><b class="mono" id="ofBias">—</b>
@@ -305,6 +314,11 @@
        No se reconstruye con GEX, DEX, Net Flow ni QFLOW. -->
   <div class="drift-stack" id="ofDriftPanel" hidden>
     <div class="flow-lane" id="ofDrift"></div>
+    <!-- v1.50.0 · Prima por intervalo, con las concentraciones marcadas en oro
+         y su cifra. La curva de arriba dice hacia dónde va la sesión; este
+         carril dice EN QUÉ MINUTO se pagó, que es lo que se busca cuando la
+         curva cambia de pendiente de golpe. -->
+    <div class="flow-lane" id="ofDriftTotal"></div>
     <div class="flow-lane" id="ofDriftVolume"></div>
     <div class="drift-trades">
       <header><h2>TRADES DEL INTERVALO SELECCIONADO</h2><span class="mono" id="ofDriftPickLabel">—</span></header>

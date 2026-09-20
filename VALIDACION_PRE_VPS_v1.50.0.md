@@ -1,14 +1,100 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.49.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.50.0
 
-Release: `ITM_QUANT_v1.49.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.50.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A13** es la de esta release.
+> Documento acumulativo. La sección **A14** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2028 casos / 147 ficheros**
-- Particiones: 21 · `plan_sha256`: `ff47f5956ec04a2299245398620b558613d7d3d8f5c31f3989109ebd126c7e7e`
+- Inventario nominal: **2038 casos / 147 ficheros**
+- Particiones: 21 · `plan_sha256`: `ce3db8bcc6eadffecdc5737066a18ef744941e0fa2a88371896e9b8332727aaf`
 - Resultado: **PASS**
+
+---
+
+## A14 · v1.50.0 · Ventana de strikes, marca del flujo y espacio del Net Drift
+
+### Qué se certifica
+
+Diez casos nuevos en `tests/test_v1470_adaptive_rendering.py`.
+
+**1 · El perfil descarta los strikes que no pueden importar.**
+`test_the_strike_profile_drops_strikes_that_cannot_matter`: con el subyacente en
+534 y filas hasta 433, las lejanas irrelevantes se van y las de la zona operable
+se quedan.
+
+**2 · Un muro real fuera de la banda NUNCA se oculta.**
+`test_a_real_wall_outside_the_band_is_never_hidden`. Es el caso que la regla
+existe para proteger: si se perdiera un muro por recortar, el recorte sería peor
+que el problema.
+
+**3 · La banda es proporcional, así que sirve para cualquier activo.**
+`test_the_band_is_proportional_so_it_works_for_every_asset`: el mismo 6 % da 32
+dólares en un ETF de 534 y 348 en un índice de 5.800. Ningún umbral absoluto.
+
+**4 · Pocos strikes no se recortan nunca.**
+`test_few_strikes_are_never_trimmed`: `MIN_ROWS = 12` protege el libro corto.
+
+**5 · Los dos paneles declaran lo que recortaron.**
+`test_both_strike_panels_declare_what_they_trimmed`: EXPOSICIÓN e INTERÉS
+ABIERTO publican `strike_window` con banda, total, conservadas, descartadas y
+motivo. Un recorte silencioso no sería auditable.
+
+**6 · La marca de flujo es dorada, con flecha e importe.**
+`test_flow_markers_are_golden_with_an_arrow_and_an_amount`, sobre TRACE **y**
+sobre FLUJO DE ÓRDENES, desde las mismas funciones (`flowHalo`, `flowArrow`,
+`flowAmount`, `flowIsBuy`).
+
+**7 · El radio compara dentro del ciclo.**
+`test_the_marker_radius_compares_within_the_cycle`: `S.qflowPeak` / `qPeak`. Con
+una referencia absoluta, dos marcas del mismo tamaño no significarían nada.
+
+**8 · Net Drift tiene carril TOTAL con marcado dorado declarado.**
+`test_net_drift_has_a_total_lane_with_declared_gold_marking`: el criterio es
+`Top 3` o `≥10×` la media, elegible, y la media se dibuja como referencia.
+
+**9 · Cada curva lleva su valor al final.**
+`test_the_drift_curves_carry_their_value_at_the_end`, con separación de 17 px
+cuando dos etiquetas colisionan.
+
+**10 · El gráfico tiene el sitio que necesita.**
+`test_the_drift_chart_got_the_room_it_needs`: `minmax(0, 2.2fr)`.
+
+**+ Ningún carril mudo.**
+`test_every_lane_of_the_tape_declares_why_it_is_empty`: con ejes dibujados y
+ningún contenedor con prima, el carril declara `SIN PRIMA OBSERVADA` en vez de
+quedarse en blanco.
+
+### El defecto que encontró el propio test
+
+`test_the_band_is_proportional_so_it_works_for_every_asset` falló la primera vez
+con un perfil **plano**: al ser todas las filas parecidas, *cada* strike lejano
+superaba `MATERIAL_FRACTION` del máximo y no se recortaba nada. La regla se
+completó con `MATERIAL_STANDOUT = 3.0` contra la **mediana de las lejanas**: lo
+que importa no es ser grande, es destacar en su propio vecindario.
+
+### Verificación visual
+
+Terminal real en `127.0.0.1:8781`, **0 errores de consola**, cinco capturas:
+
+| Panel | Qué se ve |
+|---|---|
+| EXPOSICIÓN | 21 strikes de 530.20 a 540.20, una barra gruesa por strike, con el conmutador `Barras / Relieve 3D`. Los 433, 445 y 473 de antes ya no están. |
+| INTERÉS ABIERTO | Mismo recorte, barras call/put gruesas y separadas sobre el eje de strike. |
+| TRACE | DEX a la izquierda, campo continuo con contornos y velas al centro, GEX a la derecha, todos sobre el mismo eje de precio. |
+| FLUJO DE ÓRDENES | Curva del subyacente con walls, y los tres carriles inferiores declarando su causa cuando no hay cinta. |
+| NET DRIFT | Gráfico grande con sus controles `Cinta / Net Drift` y `Dorado: Top 3 / ≥10×`. |
+
+### Límites de esta verificación
+
+- **Sin cinta de opciones real** en este entorno: las marcas doradas se validan
+  por test sobre el código de render y por la regresión visual geométrica, no
+  fotografiadas sobre flujo vivo.
+- **Sin HTTP 200 real de `dark-pool-levels`**: sin salida a `quantdata.us` ni
+  credenciales. Pendiente de `scripts/verify_live_quantdata.py` con la API key.
+- **Empaquetado certificado imposible aquí**: el empaquetador oficial es
+  fail-closed sobre Python 3.12.14 / Node 22.16.0 y este entorno corre
+  3.11.15 / 22.22.2.
 
 ---
 

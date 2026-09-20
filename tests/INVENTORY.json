@@ -2477,22 +2477,27 @@
    ]
   },
   "tests/test_v1470_adaptive_rendering.py": {
-   "casos": 188,
+   "casos": 198,
    "tests": [
     "test_a_closed_market_never_asks_for_a_day_that_is_not_a_session",
     "test_a_dominated_group_declares_its_peak",
     "test_a_missing_open_interest_aggregate_is_not_a_zero",
+    "test_a_real_wall_outside_the_band_is_never_hidden",
     "test_a_rejected_body_keeps_type_detail_and_every_field_error",
     "test_a_tiny_panel_degrades_without_lying",
     "test_absent_dark_volume_is_not_summed_as_zero",
     "test_aggregation_keeps_range_extreme_count_and_members",
+    "test_both_strike_panels_declare_what_they_trimmed",
     "test_dark_flow_resolves_its_volume_field_from_the_real_response",
     "test_dark_pool_levels_sends_the_documented_contract",
     "test_dark_pool_shows_the_lanes_that_do_have_data",
+    "test_every_lane_of_the_tape_declares_why_it_is_empty",
     "test_few_observations_get_thick_bars_without_becoming_blocks",
+    "test_few_strikes_are_never_trimmed",
     "test_flow_markers_are_golden_with_an_arrow_and_an_amount",
     "test_grouping_is_not_used_when_the_data_already_reads_well",
     "test_more_data_never_makes_the_bars_thinner",
+    "test_net_drift_has_a_total_lane_with_declared_gold_marking",
     "test_no_density_produces_a_hairline_or_an_overlap",
     "test_nothing_in_the_render_path_knows_a_ticker",
     "test_one_bar_per_strike_keeps_its_thickness",
@@ -2500,9 +2505,12 @@
     "test_statistics_never_fabricate_a_zero_premium",
     "test_temporal_aggregation_keeps_the_bars_on_their_real_instant",
     "test_the_axis_peak_has_no_absolute_seed",
+    "test_the_band_is_proportional_so_it_works_for_every_asset",
     "test_the_component_is_loaded_before_everything_that_needs_it",
     "test_the_documented_200_is_parsed_with_its_official_field_names",
     "test_the_documented_200_travels_to_the_frontend_as_direct_provider",
+    "test_the_drift_chart_got_the_room_it_needs",
+    "test_the_drift_curves_carry_their_value_at_the_end",
     "test_the_empty_reason_can_change_between_cycles",
     "test_the_engine_reports_an_unmeasurable_drift_as_unmeasured",
     "test_the_exposure_profile_draws_one_bar_per_strike",
@@ -2513,6 +2521,7 @@
     "test_the_interval_map_is_a_surface_not_a_painted_table",
     "test_the_levels_request_never_carries_a_forbidden_field",
     "test_the_live_verifier_demands_a_real_200_for_levels",
+    "test_the_marker_radius_compares_within_the_cycle",
     "test_the_minimum_extent_cannot_make_a_small_value_look_big",
     "test_the_plan_is_identical_for_every_asset_scale",
     "test_the_real_renderers_draw_readable_bars_in_every_case",
@@ -2522,6 +2531,7 @@
     "test_the_relief_is_available_as_a_second_view",
     "test_the_repair_cannot_add_a_field_this_endpoint_forbids",
     "test_the_replica_matches_the_shipped_constants",
+    "test_the_strike_profile_drops_strikes_that_cannot_matter",
     "test_the_target_thickness_is_reached_whenever_the_panel_allows_it",
     "test_the_three_lanes_stay_independent",
     "test_the_trace_no_longer_raises_a_name_error_building_its_window",
@@ -2532,6 +2542,6 @@
    ]
   }
  },
- "total_minimo": 2028,
- "version": "1.49.0"
+ "total_minimo": 2038,
+ "version": "1.50.0"
 }

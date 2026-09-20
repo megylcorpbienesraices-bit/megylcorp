@@ -613,23 +613,36 @@ def test_the_relief_is_available_as_a_second_view():
 
 
 def test_flow_markers_are_golden_with_an_arrow_and_an_amount():
-    """El color codificaba CALL/PUT con el verde y el rojo que usa el precio.
+    """v1.50.0 · Tres piezas, tres trabajos: sitio, sentido y cantidad.
 
-    Una marca sobre un tramo de su propio color desaparecía dentro de él. El
-    oro no lo usa ningún otro elemento del gráfico; el sentido va en la flecha
-    y la cantidad al lado.
+    El CÍRCULO dorado marca dónde ocurrió, y su radio dice cuánto —así dos
+    concentraciones se comparan sin leer las cifras—. La FLECHA dice el
+    sentido, y ahora sí puede llevar color: tiene forma propia, así que el
+    verde y el rojo ya no se confunden con la línea de precio como pasaba
+    cuando el color era lo único que distinguía CALL de PUT.
     """
     for rel in ("app/static/itmq_trace.js", "app/static/itmq_orderflow.js"):
         js = _read(rel)
-        assert "Q.token('--gold', '#d9a441')" in js, rel
+        assert "function flowHalo(" in js, f"{rel}: falta el círculo dorado"
+        assert "function flowArrow(" in js, f"{rel}: falta la flecha de sentido"
+        assert "function flowAmount(" in js, f"{rel}: falta la cifra"
+        assert "function flowIsBuy(" in js, f"{rel}: el sentido es COMPRA/VENTA"
+        halo = js[js.index("function flowHalo("):js.index("function flowArrow(")]
+        assert "createRadialGradient" in halo, "el halo separa la marca del fondo"
+        assert "7 + 11 * k" in halo, "el radio dice cuánto"
+        arrow = js[js.index("function flowArrow("):js.index("function flowAmount(")]
+        assert "'--pos'" in arrow and "'--neg'" in arrow, "verde compra, rojo venta"
+        # El VÉRTICE va en el extremo: dibujarlo del lado de la base invertía la
+        # flecha, que es peor que no dibujarla — dice justo lo contrario.
+        assert "ctx.moveTo(x, y + t * 13);" in arrow
+        assert "ctx.lineTo(x - 5.5, y + t * 6);" in arrow
+
+    # La etiqueta ya no repite la flecha: la flecha es un dibujo.
     flow = _read("app/static/itmq_orderflow.js")
     body = flow[flow.index("function markerLabel("):]
-    body = body[:body.index("\n  /**")]
-    assert "'▲'" in body and "'▼'" in body, "la flecha dice el sentido"
-    assert "Q.money" in body, "y la cifra, la cantidad"
-    # Ni el verde ni el rojo vuelven a codificar el sentido de la marca.
-    qmark = flow[flow.index("const qEvents ="):flow.index("// último precio")]
-    assert "'--pos'" not in qmark and "'--neg'" not in qmark
+    body = body[:body.index("\n\n  /**")]
+    assert "Q.money" in body
+    assert "'▲'" not in body and "'▼'" not in body
 
 
 def test_dark_flow_resolves_its_volume_field_from_the_real_response():
@@ -877,3 +890,136 @@ def test_the_three_lanes_stay_independent():
     assert out["diagnosis"]["degraded"] is True
     assert out["lanes"]["dark_flow"]["state"] == "DIRECT_PROVIDER_OK"
     assert out["lanes"]["dark_pool_levels"]["state"] == "REQUEST_INVALID"
+
+
+# ═══════════════════════════════════════════ 11 · v1.50.0 · LO QUE IMPORTA
+
+def test_the_strike_profile_drops_strikes_that_cannot_matter():
+    """La cadena entera incluye el 433 con DIA a 516: un 16 % del precio.
+
+    Esos strikes ocupan media pantalla, no llevan exposición y empujan hacia
+    arriba la zona que se está mirando. Recortar por número de strikes no sirve
+    —la separación cambia por activo— y por dólares tampoco.
+    """
+    from app.core.strike_window import relevant_rows
+
+    rows = [{"strike": k, "gex": (2e8 if abs(k - 516) < 6 else 1e5)} for k in
+            (433, 445, 455, 465, 475, 495, 505, 510, 513, 515, 516,
+             517, 520, 525, 527, 535, 544, 554, 590, 640, 750)]
+    kept, meta = relevant_rows(rows, 516.0, symbol="DIA", value_keys=("gex",))
+    strikes = [r["strike"] for r in kept]
+    assert 433 not in strikes and 750 not in strikes
+    assert 516 in strikes and 520 in strikes
+    assert meta["dropped"] == len(rows) - len(kept) > 0
+    assert meta["reason"], "un recorte en silencio no se puede auditar"
+
+
+def test_a_real_wall_outside_the_band_is_never_hidden():
+    """Es el caso que MÁS importa: recortarlo por distancia esconde la respuesta."""
+    from app.core.strike_window import relevant_rows
+
+    rows = [{"strike": float(k), "gex": (2e8 if abs(k - 516) < 6 else 1e5)} for k in
+            (433, 445, 455, 465, 475, 495, 505, 510, 513, 515, 516,
+             517, 520, 525, 527, 535, 544, 554, 590, 640, 750)]
+    rows.append({"strike": 600.0, "gex": 1.5e8})          # muro real, lejos
+    kept, meta = relevant_rows(rows, 516.0, symbol="DIA", value_keys=("gex",))
+    assert 600.0 in [r["strike"] for r in kept]
+    assert meta["kept_far"] == 1
+    assert 750 not in [r["strike"] for r in kept]
+
+
+def test_the_band_is_proportional_so_it_works_for_every_asset():
+    """Un porcentaje del precio ya es comparable entre un ETF de 9 $ y un índice."""
+    from app.core.strike_window import relevant_rows
+
+    # Perfil PLANO a propósito: sin estructura, lo único que queda es la
+    # distancia, y es donde el recorte hace más falta.
+    for spot, step in ((9.52, 0.05), (48.3, 0.5), (516.0, 1.0), (7543.0, 5.0)):
+        rows = [{"strike": spot + i * step, "gex": 1e6} for i in range(-60, 61)]
+        kept, meta = relevant_rows(rows, spot, value_keys=("gex",))
+        for r in kept:
+            pct = 100.0 * abs(r["strike"] - spot) / spot
+            assert pct <= meta["band_pct"] + 1e-9, f"{spot}: {r['strike']} a {pct:.1f}%"
+
+
+def test_few_strikes_are_never_trimmed():
+    """Con pocos strikes el recorte no ayuda y puede dejar el panel sin forma."""
+    from app.core.strike_window import relevant_rows
+
+    rows = [{"strike": 500 + i, "gex": 1e6} for i in range(8)]
+    kept, meta = relevant_rows(rows, 516.0, value_keys=("gex",))
+    assert len(kept) == len(rows) and meta["dropped"] == 0
+
+
+def test_both_strike_panels_declare_what_they_trimmed():
+    from app.terminal_api import _exposicion, _open_interest
+
+    state = {"active_symbol": "DIA", "spot": 516.0}
+    trace = {"profiles": {"rows": [
+        {"strike": float(k), "gamma_m": (200.0 if abs(k - 516) < 6 else 0.1),
+         "oi": (9000 if abs(k - 516) < 6 else 4)}
+        for k in (433, 445, 465, 495, 505, 513, 515, 516, 517, 520,
+                  527, 535, 554, 590, 640, 750)]}}
+    ex = _exposicion(trace, state, {})
+    assert ex["strike_window"]["dropped"] > 0
+    assert 433.0 not in [r["strike"] for r in ex["by_strike"]]
+    oi = _open_interest(trace, state, {})
+    assert "strike_window" in oi
+
+
+def test_the_marker_radius_compares_within_the_cycle():
+    """Sin una referencia común, dos marcas del mismo tamaño mienten."""
+    trace = _read("app/static/itmq_trace.js")
+    assert "S.qflowPeak" in trace
+    assert "function markerStrength(" in trace
+    flow = _read("app/static/itmq_orderflow.js")
+    assert "function evStrength(" in flow and "qPeak" in flow
+
+
+def test_the_drift_curves_carry_their_value_at_the_end():
+    """Tres curvas superpuestas obligan a seguir cada trazo hasta la escala."""
+    js = _read("app/static/itmq_orderflow.js")
+    body = js[js.index("const tail = vis[vis.length - 1];"):]
+    body = body[:body.index("// El último bucket sigue ABIERTO")]
+    assert "Q.money(m.v, 1)" in body
+    # Dos curvas cercanas dejarían sus etiquetas una encima de la otra.
+    assert "marks[i].y - marks[i - 1].y < 17" in body
+
+
+def test_net_drift_has_a_total_lane_with_declared_gold_marking():
+    """Marcar todos los intervalos sería no marcar ninguno."""
+    js = _read("app/static/itmq_orderflow.js")
+    assert "function drawDriftTotal(" in js
+    body = js[js.index("function drawDriftTotal("):js.index("function drawDriftVolume(")]
+    assert "S.goldRule" in body, "el criterio se elige"
+    assert "mean * 10" in body and "slice(0, 3)" in body
+    # La media se dibuja: es contra lo que destacan.
+    assert "media ${Q.money(mean, 0)}" in body
+    assert "function setGoldRule(" in js
+    html = _read("app/templates/terminal.html")
+    assert 'id="ofDriftTotal"' in html and 'id="ofGold"' in html
+    app = _read("app/static/itmq_app.js")
+    assert "driftTotal: el('ofDriftTotal')" in app
+    assert "segment('ofGold'" in app
+
+
+def test_the_drift_chart_got_the_room_it_needs():
+    """Con 1fr/.34fr/.38fr las tres curvas se aplastaban unas sobre otras."""
+    css = _read("app/static/itmq_terminal.css")
+    block = css[css.index(".drift-stack {"):]
+    block = block[:block.index("}")]
+    assert "minmax(0, 2.2fr)" in block
+
+
+def test_every_lane_of_the_tape_declares_why_it_is_empty():
+    """Un carril en blanco sin causa es indistinguible de un fallo de render."""
+    js = _read("app/static/itmq_orderflow.js")
+    body = js[js.index("function drawTotal("):js.index("function drawVolume(")]
+    # El caso que se veía en pantalla: había buckets, pero ninguno con prima,
+    # así que el eje se dibujaba y el carril quedaba mudo.
+    assert "let painted = 0;" in body and "painted += 1;" in body
+    assert "if (!painted) {" in body
+    assert "empty(ctx, env, 'SIN PRIMA OBSERVADA')" in body
+    # El ctx.restore() del clip tiene que ocurrir antes de escribir el texto.
+    idx = body.index("if (!painted) {")
+    assert "ctx.restore();" in body[idx:idx + 120]

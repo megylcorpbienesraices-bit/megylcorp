@@ -1,5 +1,34 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.50.0 · Lo que se mira, y dónde ocurrió
+
+Ninguna fórmula cambia. Cambia **qué se muestra y con cuánto sitio**.
+
+- **El perfil de strikes deja de arrastrar lo que no puede importar.** Con el
+  subyacente en 534, los strikes 433 y 445 ocupaban medio eje. El corte no es un
+  número fijo —±5 dólares es todo el libro en un ETF de 40 y ruido en un índice
+  de 5.800—: es una **banda proporcional** (6 % del subyacente) más
+  **materialidad relativa**. Una fila lejana se conserva si llega al 18 % del
+  máximo **y** destaca 3× sobre la mediana de las lejanas: en un perfil plano la
+  primera condición sola no filtra nada. **Un muro real fuera de la banda nunca
+  se oculta.**
+- **El recorte es presentación, no dato.** Las filas siguen en el bundle, los
+  agregados siguen saliendo del libro entero, y el panel publica `strike_window`
+  con banda, total, conservadas, descartadas y motivo.
+- **La marca de flujo separa el hecho de la dirección.** Círculo **dorado** donde
+  ocurrió (el hecho), radio contra el pico del ciclo (cuánto), flecha
+  **verde/roja** (compra o venta) e importe. Idéntica en TRACE y en FLUJO DE
+  ÓRDENES, desde las mismas funciones.
+- **TRACE, disposición definitiva y global**: DEX a la izquierda, campo continuo
+  con contornos y velas al centro, GEX a la derecha, los tres sobre el mismo eje
+  de precio. Sin tratamiento por activo — hay un test que lo comprueba.
+- **Net Drift con sitio**: `2.2fr` en vez de `1fr`, el valor de cada curva al
+  final del trazo, y un carril **TOTAL** que **suma** la prima del intervalo con
+  marcado dorado de criterio elegible (`Top 3` o `≥10×` la media) y la media
+  dibujada como referencia.
+- **Ningún carril mudo**: con ejes dibujados y sin dato, el carril declara la
+  causa en vez de quedarse en blanco.
+
 ## v1.49.0 · El contrato de `dark-pool-levels`
 
 El cuerpo mínimo estaba **incompleto**, y por eso salía 400. El contrato exige

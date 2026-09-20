@@ -89,6 +89,8 @@
     mode: 'area',          // area | line
     minPremium: 0,         // 0 = automático
     bucketMs: 60_000,
+    // Qué intervalos se marcan en oro en el carril TOTAL de Net Drift.
+    goldRule: 'top3',
     hover: NaN,
     _netMax: new Q.GlideValue(300),
     _totMax: new Q.GlideValue(300),
@@ -350,44 +352,31 @@
       ctx.save();
       ctx.font = '700 9px ui-monospace, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      // Referencia común del ciclo: sin ella, dos marcas del mismo tamaño
+      // podrían significar cosas muy distintas.
+      let qPeak = 0;
+      for (const ev of qEvents.slice(0, 8)) {
+        const v = Math.abs(Q.num(ev.premium, NaN));
+        if (Q.isNum(v)) qPeak = Math.max(qPeak, v);
+      }
       for (const ev of qEvents.slice(0, 8)) {
         const t = Q.parseTime(ev.t), pxv = Q.num(ev.price, NaN);
         if (!Q.isNum(t) || !Q.isNum(pxv)) continue;
         const x = sx(t), y = sy(pxv);
         if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) continue;
-        /* v1.48.0 · Marca DORADA en el punto exacto, flecha para el sentido.
+        /* v1.50.0 · Círculo dorado en el sitio, flecha de sentido, cantidad.
          *
-         * El color codificaba CALL/PUT con el mismo verde y el mismo rojo que
-         * usa el precio, así que una marca sobre un tramo de su color se perdía
-         * dentro de él. El oro no lo usa ningún otro elemento del gráfico.
-         *
-         * La marca lleva la flecha Y la magnitud —«▲ $4.2M»—: un triángulo
-         * suelto dice que pasó algo; la etiqueta dice cuánto, que es lo que
-         * permite comparar dos concentraciones sin abrir el panel.
+         * El círculo marca DÓNDE ocurrió y su radio dice cuánto, así que dos
+         * concentraciones se comparan sin leer las cifras. La flecha dice el
+         * sentido —verde compra, rojo venta—: tiene forma propia, así que el
+         * color ya no se confunde con el de la línea de precio, que es lo que
+         * pasaba cuando el color era lo único que distinguía CALL de PUT.
          */
-        const dir = String(ev.direction || ev.aggressor || ev.side || '').toUpperCase();
-        const up = dir === 'BUY' || dir === 'CALL' || Q.num(ev.premium, 0) > 0;
-        const col = Q.token('--gold', '#d9a441');
-        const tip = up ? -1 : 1;
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        ctx.moveTo(x, y + tip * 3);
-        ctx.lineTo(x - 5, y + tip * 11);
-        ctx.lineTo(x + 5, y + tip * 11);
-        ctx.closePath(); ctx.fill();
-
-        // Cifra sobre fondo propio: el texto suelto sobre el área de precio se
-        // pierde en cuanto el relleno tiene algo de opacidad.
+        const up = flowIsBuy(ev);
+        const r = flowHalo(ctx, x, y, evStrength(ev, qPeak));
+        const col = flowArrow(ctx, x, up ? y - r : y + r, up);
         const label = markerLabel(ev);
-        const ly = up ? y - 20 : y + 20;
-        const tw = ctx.measureText(label).width + 10;
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.92);
-        Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4); ctx.fill();
-        ctx.strokeStyle = Q.alpha(col, 0.85); ctx.lineWidth = 1;
-        Q.roundRect(ctx, x - tw / 2, ly - 8, tw, 16, 4); ctx.stroke();
-        ctx.fillStyle = col;
-        ctx.fillText(label, x, ly);
+        if (label) flowAmount(ctx, x, up ? y - r - 22 : y + r + 22, label, col);
       }
       ctx.restore();
     }
@@ -655,6 +644,7 @@
     ctx.save();
     ctx.beginPath(); ctx.rect(box.x, box.y - 14, box.w, box.h + 14); ctx.clip();
     const tall = [];
+    let painted = 0;
     const totalBins = laneBins(box, win);
     for (const r of totalBins.rows) {
       // Prima total: SUMA. El pico del intervalo decide si el contenedor se
@@ -674,8 +664,13 @@
       // cuando en realidad estaba lleno de actividad normal.
       ctx.fillStyle = big ? gold : Q.alpha(dim, 0.55);
       ctx.fillRect(bx, y0 - h, bw, h);
+      painted += 1;
       if (big) tall.push({ x: bx + bw / 2, y, total: agg.sum });
     }
+    // Ejes dibujados pero ningun contenedor con prima: el carril quedaria en
+    // blanco sin decir por que. Un carril vacio sin causa es indistinguible de
+    // un fallo de render, asi que se declara.
+    if (!painted) { ctx.restore(); empty(ctx, env, 'SIN PRIMA OBSERVADA'); return false; }
     // sólo los picos llevan cifra: etiquetar todo haría ilegible el carril
     tall.sort((a, b) => b.total - a.total);
     ctx.font = '10px ui-monospace, monospace';
@@ -735,14 +730,82 @@
    * rojo que las velas, y una marca sobre una vela de su color desaparecía
    * dentro de ella. La flecha no se confunde con nada.
    */
+  /** ¿Compra o venta? El agresor manda; el lado del contrato es el respaldo. */
+  function flowIsBuy(ev) {
+    const dir = String((ev && (ev.direction || ev.aggressor || ev.side)) || '').toUpperCase();
+    if (dir === 'BUY' || dir === 'ASK' || dir === 'CALL') return true;
+    if (dir === 'SELL' || dir === 'BID' || dir === 'PUT') return false;
+    return Q.num(ev && ev.premium, 0) >= 0;
+  }
+
+  function evStrength(ev, peak) {
+    const v = Math.abs(Q.num(ev && ev.premium, NaN));
+    if (!Q.isNum(v) || !(peak > 0)) return 0.35;
+    return Q.clamp(Math.pow(v / peak, 0.5), 0.12, 1);
+  }
+
+  /* Círculo dorado + flecha + cifra. Tres piezas, tres trabajos: el sitio, el
+   * sentido y la cantidad. */
+  function flowHalo(ctx, x, y, strength) {
+    const gold = Q.token('--gold', '#d9a441');
+    const k = Q.clamp(Number(strength) || 0, 0, 1);
+    const r = 7 + 11 * k;
+    ctx.save();
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1);
+    g.addColorStop(0, Q.alpha(gold, 0.45));
+    g.addColorStop(0.55, Q.alpha(gold, 0.16));
+    g.addColorStop(1, Q.alpha(gold, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r * 2.1, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = Q.alpha(gold, 0.95);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = Q.alpha(gold, 0.55);
+    ctx.beginPath(); ctx.arc(x, y, r * 0.58, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = Q.alpha(gold, 0.92);
+    ctx.beginPath(); ctx.arc(x, y, Math.max(2, r * 0.26), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    return r;
+  }
+
+  function flowArrow(ctx, x, y, up) {
+    const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
+    const t = up ? -1 : 1;
+    ctx.save();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    // El VÉRTICE va en el extremo: hacia arriba en compra, hacia abajo en
+    // venta. Ponerlo del lado de la base dibujaba la flecha invertida, que es
+    // peor que no dibujarla: dice justo lo contrario.
+    ctx.moveTo(x, y + t * 13);
+    ctx.lineTo(x - 5.5, y + t * 6);
+    ctx.lineTo(x + 5.5, y + t * 6);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return col;
+  }
+
+  function flowAmount(ctx, x, y, text, col) {
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 12;
+    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.94);
+    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.fill();
+    ctx.strokeStyle = Q.alpha(Q.token('--gold', '#d9a441'), 0.8);
+    ctx.lineWidth = 1;
+    Q.roundRect(ctx, x - w / 2, y - 9, w, 18, 5); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
   function markerLabel(ev) {
     if (!ev) return '';
     if (ev.label) return String(ev.label);
-    const dir = String(ev.direction || ev.aggressor || ev.side || '').toUpperCase();
-    const up = dir === 'BUY' || dir === 'CALL' || Q.num(ev.premium, 0) > 0;
-    const arrow = up ? '▲' : '▼';
+    // v1.50.0 · Sólo la cantidad. El sentido lo dice la flecha dibujada, y
+    // repetirlo en el texto ocupaba sitio sin añadir nada.
     const amount = Q.money(Math.abs(Q.num(ev.premium, NaN)), 1);
-    return amount === '—' ? arrow : arrow + ' ' + amount;
+    return amount === '—' ? '' : amount;
   }
 
   /** Qué operaciones produjeron una concentración, en una línea legible.
@@ -980,6 +1043,43 @@
     line('call', posC, 1.8);
     line('put', negC, 1.8);
 
+    /* v1.50.0 · El valor de cada curva, en su extremo.
+     *
+     * Tres curvas superpuestas y una leyenda arriba obligan a seguir cada
+     * trazo con la vista hasta la escala para saber cuánto vale. La cifra en
+     * el extremo responde «¿cuánto llevamos?» sin recorrer nada, que es la
+     * pregunta que se le hace a una curva acumulada.
+     */
+    const tail = vis[vis.length - 1];
+    if (tail) {
+      const marks = [
+        ['net', Q.alpha(Q.token('--text-dim', '#8494ad'), 0.95)],
+        ['call', posC], ['put', negC],
+      ].map(([k, c]) => ({ v: Q.num(tail[k], 0), col: c, y: sy(Q.num(tail[k], 0)) }))
+       .sort((a, b) => a.y - b.y);
+      // Sin separarlas, dos curvas cercanas dejan sus etiquetas una encima de
+      // la otra y no se lee ninguna.
+      for (let i = 1; i < marks.length; i++) {
+        if (marks[i].y - marks[i - 1].y < 17) marks[i].y = marks[i - 1].y + 17;
+      }
+      ctx.save();
+      ctx.font = '700 10px ui-monospace, monospace';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      for (const m of marks) {
+        const txt = Q.money(m.v, 1);
+        const w = ctx.measureText(txt).width + 12;
+        const y = Q.clamp(m.y, box.y + 9, box.y + box.h - 9);
+        const x = box.x + box.w - 4;
+        ctx.fillStyle = Q.alpha(m.col, 0.16);
+        Q.roundRect(ctx, x - w, y - 8, w, 16, 4); ctx.fill();
+        ctx.strokeStyle = Q.alpha(m.col, 0.85); ctx.lineWidth = 1;
+        Q.roundRect(ctx, x - w, y - 8, w, 16, 4); ctx.stroke();
+        ctx.fillStyle = m.col;
+        ctx.fillText(txt, x - 6, y);
+      }
+      ctx.restore();
+    }
+
     // El último bucket sigue ABIERTO: se marca hueco para que no se lea como un
     // valor consolidado. Es el único punto de la curva que aún puede cambiar.
     const last = vis[vis.length - 1];
@@ -1052,6 +1152,104 @@
   }
 
   /** Subgráfico de VOLUMEN NETO CALL/PUT, tal y como lo firma el proveedor. */
+  /* ── Carril TOTAL de Net Drift: prima por intervalo, con las puntas en oro ──
+   *
+   * La curva de arriba responde «¿hacia dónde va la sesión?». Este carril
+   * responde «¿EN QUÉ MINUTO se pagó?», que es lo que se busca en cuanto la
+   * curva cambia de pendiente de golpe.
+   *
+   * Marcar todos los intervalos sería no marcar ninguno: se marcan los que
+   * destacan, con un criterio que se ELIGE y se declara —las tres mayores, o
+   * las que superan diez veces la media—, y la referencia de esa media se
+   * dibuja para que la comparación se vea.
+   */
+  function drawDriftTotal(ctx, env) {
+    const box = driftBox(env);
+    box.y = 12; box.h = env.h - 26;
+    if (box.w <= 8 || box.h <= 8) return false;
+    const rows = driftRows();
+    const win = window_();
+    if (!rows.length || !win) { empty(ctx, env, 'SIN PRIMA POR INTERVALO'); return false; }
+    const sx = Q.scale(win.t0, win.t1, box.x, box.x + box.w);
+
+    const vis = [];
+    for (const p of rows) {
+      const t = driftT(p);
+      if (!Q.isNum(t) || t < win.t0 - S.bucketMs || t > win.t1) continue;
+      // Prima del intervalo: lo que se pagó en ese minuto, no el acumulado.
+      const v = Math.abs(Q.num(p.total_premium, NaN));
+      const val = Q.isNum(v) ? v
+        : Math.abs(Q.num(p.call_premium, 0)) + Math.abs(Q.num(p.put_premium, 0));
+      if (!(val > 0)) continue;
+      vis.push({ t, v: val, net: Q.num(p.net_premium, 0) });
+    }
+    if (!vis.length) { empty(ctx, env, 'SIN PRIMA POR INTERVALO'); return false; }
+
+    const peak = Math.max.apply(null, vis.map(r => r.v));
+    const mean = vis.reduce((a, r) => a + r.v, 0) / vis.length;
+    const sy = Q.scale(0, peak * 1.22, box.y + box.h, box.y);
+
+    // Qué se marca en oro. El criterio es explícito y cambiable.
+    const gold = new Set();
+    if (S.goldRule === 'x10') {
+      for (const r of vis) if (mean > 0 && r.v >= mean * 10) gold.add(r.t);
+    } else {
+      vis.slice().sort((a, b) => b.v - a.v).slice(0, 3).forEach(r => gold.add(r.t));
+    }
+
+    const bins = AB.timeBins(vis, win.t0, win.t1 + S.bucketMs, S.bucketMs, box.w);
+    const bw = bins.thickness;
+    const dim = Q.token('--text-dim', '#8494ad');
+    const goldC = Q.token('--gold', '#d9a441');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y - 12, box.w, box.h + 24); ctx.clip();
+    const labels = [];
+    for (const r of bins.rows) {
+      const agg = AB.reduceBin(r, p => Q.num(p.v, 0));
+      if (!(agg.sum > 0)) continue;
+      const isGold = r.members.some(p => gold.has(p.t));
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const x = x0 + (x1 - x0) / 2;
+      const y = sy(agg.sum);
+      const h = laneExtent((box.y + box.h) - y, agg.sum, box.h);
+      ctx.fillStyle = isGold ? goldC : Q.alpha(dim, 0.5);
+      ctx.fillRect(Math.round(x - bw / 2), Math.round(box.y + box.h - h),
+                   Math.max(1, Math.round(bw)), Math.max(1, Math.round(h)));
+      if (isGold) labels.push({ x, y, v: agg.sum });
+    }
+
+    // La media, como referencia de contra qué destacan.
+    if (mean > 0) {
+      const my = Math.round(sy(mean)) + 0.5;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = Q.alpha(Q.token('--text-mute', '#5b6880'), 0.9);
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(box.x, my); ctx.lineTo(box.x + box.w, my); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = '700 10px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillStyle = goldC;
+    for (const l of labels) ctx.fillText(Q.money(l.v, 1), l.x, Math.max(box.y + 10, l.y - 4));
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = Q.alpha(dim, 0.85);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('TOTAL · PRIMA POR INTERVALO', box.x + 4, box.y - 10);
+    if (mean > 0) {
+      ctx.textAlign = 'right';
+      ctx.fillText(`media ${Q.money(mean, 0)}`, box.x + box.w - 4, box.y - 10);
+    }
+    ctx.restore();
+    return false;
+  }
+
   function drawDriftVolume(ctx, env) {
     const box = driftBox(env);
     if (box.w <= 8 || box.h <= 8) return false;
@@ -1247,6 +1445,8 @@
     S.panels.drift = ids.drift ? new Q.Panel(ids.drift, drawDrift, driftOpts('flow:drift')) : null;
     S.panels.driftVolume = ids.driftVolume
       ? new Q.Panel(ids.driftVolume, drawDriftVolume, driftOpts('flow:driftvol')) : null;
+    S.panels.driftTotal = ids.driftTotal
+      ? new Q.Panel(ids.driftTotal, drawDriftTotal, driftOpts('flow:drifttotal')) : null;
     for (const k in S.panels) if (!S.panels[k]) delete S.panels[k];
     S.link.on(invalidateAll);
     renderDriftPick();
@@ -1378,6 +1578,12 @@
   function setMode(m) { S.mode = m === 'line' ? 'line' : 'area'; invalidateAll(); }
   function setFollow(on) { S.link.follow = !!on; if (on) applyTrace({ symbol: S.symbol, candles: S.candles, option_prints: S.prints, levels: S.levels, bar_interval_ms: S.bucketMs }); }
 
-  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, setPanel,
+  /** Criterio de marcado en oro del carril TOTAL. */
+  function setGoldRule(rule) {
+    S.goldRule = rule === 'x10' ? 'x10' : 'top3';
+    for (const p of Object.values(S.panels)) if (p) p.invalidate();
+  }
+
+  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, setPanel, setGoldRule,
     setMinPremium, setMode, setFollow, state: S };
 })(window);
