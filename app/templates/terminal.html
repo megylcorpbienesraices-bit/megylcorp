@@ -303,17 +303,22 @@
     </div>
   </div>
 
-  <div class="grid c4" style="flex:0 0 auto" id="ofTapeKpis">
-    <div class="kpi"><span>PRIMA TOTAL</span><b id="ofTotalPremium">—</b><small id="ofPrintCount">—</small></div>
-    <div class="kpi pos"><span>PRIMA COMPRADORA</span><b id="ofBuyPremium">—</b><small id="ofBuyNote">agresor en ask</small></div>
-    <div class="kpi neg"><span>PRIMA VENDEDORA</span><b id="ofSellPremium">—</b><small id="ofSellNote">agresor en bid</small></div>
+  <!-- v1.56.0 · DOS DATASETS DISTINTOS, y se dice cuál es cuál.
+       NET FLOW OFICIAL viene del endpoint del proveedor y es acumulado de
+       sesión. El TAPE es lo que ITM QUANT observó en la cinta de opciones.
+       Presentarlos sin distinguirlos invita a restar uno del otro, y esa resta
+       no significa nada: miden cosas distintas sobre ventanas distintas. -->
+  <div class="grid c4" style="flex:0 0 auto" id="ofTapeKpis" data-dataset="TAPE_OBSERVADO">
+    <div class="kpi"><span>PRIMA TOTAL · TAPE</span><b id="ofTotalPremium">—</b><small id="ofPrintCount">—</small></div>
+    <div class="kpi pos"><span>PRIMA COMPRADORA · TAPE</span><b id="ofBuyPremium">—</b><small id="ofBuyNote">agresor en ask</small></div>
+    <div class="kpi neg"><span>PRIMA VENDEDORA · TAPE</span><b id="ofSellPremium">—</b><small id="ofSellNote">agresor en bid</small></div>
     <div class="kpi"><span>PRINT MAYOR</span><b id="ofBiggest">—</b><small id="ofBiggestDetail">—</small></div>
   </div>
 
-  <div class="grid c5" style="flex:0 0 auto" id="ofDriftKpis" hidden>
-    <div class="kpi pos"><span>CALL ACUMULADO</span><b id="ndCall">SIN DATOS</b><small>net call premium · sesión</small></div>
-    <div class="kpi neg"><span>PUT ACUMULADO</span><b id="ndPut">SIN DATOS</b><small>net put premium · sesión</small></div>
-    <div class="kpi accent"><span>NETO ACUMULADO</span><b id="ndNet">SIN DATOS</b><small>call + put, con su signo</small></div>
+  <div class="grid c5" style="flex:0 0 auto" id="ofDriftKpis" data-dataset="NET_FLOW_OFICIAL" hidden>
+    <div class="kpi pos"><span>CALL ACUM · OFICIAL</span><b id="ndCall">SIN DATOS</b><small>net call premium · sesión</small></div>
+    <div class="kpi neg"><span>PUT ACUM · OFICIAL</span><b id="ndPut">SIN DATOS</b><small>net put premium · sesión</small></div>
+    <div class="kpi accent"><span>NETO ACUM · OFICIAL</span><b id="ndNet">SIN DATOS</b><small>call + put, con su signo</small></div>
     <div class="kpi"><span>VOLUMEN NETO C/P</span><b id="ndVolume">SIN DATOS</b><small>contratos netos acumulados</small></div>
     <div class="kpi"><span>ESTADO</span><b id="ndState">SIN DATOS</b><small id="ndStateDetail">deriva neta de la sesión</small></div>
   </div>

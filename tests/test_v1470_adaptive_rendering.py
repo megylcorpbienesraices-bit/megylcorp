@@ -1224,7 +1224,12 @@ def test_net_drift_draws_walls_on_a_price_axis_not_on_the_premium_axis():
     dos magnitudes distintas es como se fabrica una lectura falsa."""
     js = _read("app/static/itmq_orderflow.js")
     body = js[js.index("function drawDrift("):js.index("function drawDriftCursor(")]
-    assert "const px = vis.filter(v => Q.isNum(v.price));" in body
+    # v1.56.0 · El eje ya no depende SÓLO de `stockPrice`: cuando el proveedor
+    # no publica ese campo, el precio sale de las velas, que son el mismo
+    # subyacente sobre el mismo reloj. Sin ese respaldo, su ausencia se llevaba
+    # por delante el precio, los dos muros y todas las marcas de QFLOW.
+    assert "let px = vis.filter(v => Q.isNum(v.price));" in body
+    assert "priceSource = 'CANDLES_FALLBACK'" in body
     assert "const psy = Q.scale(plo - ppad, phi + ppad" in body
     assert "Q.levelLine(ctx, box, y, Q.alpha(col, 0.8)" in body
     # Los muros entran en el dominio: uno fuera del encuadre se confundiría con

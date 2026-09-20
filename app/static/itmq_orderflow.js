@@ -81,6 +81,8 @@
     // FlowViewModel: politica UNICA de frescura por carril. Cuando viaja, las
     // tarjetas leen de el; si no, se recalculan de la cinta local como antes.
     flowView: null,
+    // De dónde sale el eje de precio del panel de Net Drift. Ver drawDrift.
+    driftPriceSource: null,
     driftPick: NaN,   // instante seleccionado sobre la curva
     panel: 'tape',    // tape | drift
 
@@ -1143,7 +1145,26 @@
      * distintos en el mismo gráfico es peor que no dibujar los muros, porque las
      * dos parecen válidas y sólo una sitúa bien la línea.
      */
-    const px = vis.filter(v => Q.isNum(v.price));
+    /* v1.56.0 · EL EJE DE PRECIO NO PUEDE DEPENDER DE UN CAMPO OPCIONAL.
+     *
+     * Este eje se construía SÓLO con `stockPrice` de los buckets de Net Drift.
+     * Cuando el proveedor no publica ese campo —y no siempre lo publica— el
+     * bloque entero se saltaba, y con él se iban el recorrido del precio, CALL
+     * WALL, PUT WALL y las marcas de QFLOW. En pantalla parecía que los muros
+     * «no existían» cuando lo que faltaba era una columna del otro dataset.
+     *
+     * El subyacente es el MISMO en las velas, que este panel ya comparte por el
+     * TimeLink. Se usan como respaldo declarado: mismo activo, mismo reloj,
+     * misma magnitud. Lo que no se hace nunca es abrir un segundo eje.
+     */
+    let px = vis.filter(v => Q.isNum(v.price));
+    let priceSource = 'NET_DRIFT_STOCK_PRICE';
+    if (px.length <= 1 && S.candles.length > 1) {
+      px = S.candles.map(c => ({ t: Q.parseTime(c.t), price: Q.num(c.c, NaN) }))
+        .filter(v => Q.isNum(v.t) && Q.isNum(v.price));
+      priceSource = 'CANDLES_FALLBACK';
+    }
+    S.driftPriceSource = px.length > 1 ? priceSource : null;
     if (px.length > 1) {
       let plo = Infinity, phi = -Infinity;
       for (const v of px) { plo = Math.min(plo, v.price); phi = Math.max(phi, v.price); }
@@ -1251,7 +1272,9 @@
     ctx.globalAlpha = 0.7;
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'right';
-    ctx.fillText('NET DRIFT · QUANT DATA (OFICIAL)', box.x + box.w - 6, box.y + 4);
+    ctx.fillText('NET DRIFT · QUANT DATA (OFICIAL)'
+      + (S.driftPriceSource === 'CANDLES_FALLBACK' ? ' · PRECIO DE VELAS' : ''),
+      box.x + box.w - 6, box.y + 4);
     ctx.restore();
     return true;
   }

@@ -1454,6 +1454,17 @@ def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str
         engine = _f((walls.get(side) or {}).get("strike"))
         drawn = [_f(lv.get("price")) for lv in levels if lv.get("kind") == side]
         card = _f(res.get(side))
+        # TRACE, FLUJO, NET DRIFT y DARK POOL dibujan la MISMA lista `levels`
+        # —cada uno filtrando los `kind` que le tocan—, así que comprobarla una
+        # vez los cubre a los cuatro. RESUMEN y SCANNER leen la tarjeta.
+        consumidores = {
+            "TRACE": drawn[0] if drawn else None,
+            "FLUJO": drawn[0] if drawn else None,
+            "NET_DRIFT": drawn[0] if drawn else None,
+            "DARK_POOL": drawn[0] if drawn else None,
+            "RESUMEN": card,
+            "SCANNER": card,
+        }
         # Mas de una linea con el mismo `kind` YA es el defecto, aunque coincidan.
         duplicated = len(drawn) > 1
         values = [v for v in ([engine] + drawn + [card]) if v is not None]
@@ -1466,6 +1477,7 @@ def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str
             "authority": "ITMQ_WALL_ENGINE",
             "source_mode": (walls.get(side) or {}).get("source_mode"),
             "duplicated_lines": duplicated,
+            "consumers": consumidores,
             "agree": agree,
             "detail": ("" if agree else
                        "mas de una linea con el mismo nombre" if duplicated else
@@ -2567,6 +2579,10 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     # v1.55.0 · AUTORIDAD ÚNICA DE MUROS, comprobada y no sólo declarada.
     resumen_block = _resumen(state, trace, intel)
     auditor["walls"] = wall_consistency(trace, resumen_block)
+    # El CÁLCULO, no sólo la coincidencia: exposición por strike, interés
+    # abierto, distancia, puntuación, ranking y la fórmula exacta.
+    auditor["wall_calculation"] = (trace or {}).get("wall_audit") or {
+        "authority": "ITMQ_WALL_ENGINE", "note": "el trace no publicó la auditoría"}
     # IDENTIDAD DE LÍNEAS. Mientras `unidentified` no sea cero, hay una línea
     # anónima sobre el gráfico de operativa y eso es un defecto abierto.
     auditor["level_identity"] = ((trace or {}).get("level_identity_audit")

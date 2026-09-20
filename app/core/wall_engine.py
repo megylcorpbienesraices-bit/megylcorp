@@ -441,6 +441,129 @@ def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = 
                          fallback=fallback)
 
 
-__all__ = ["resolve_walls", "walls_from_hub", "build_candidates", "WALLS",
+def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """CÓMO se calculó cada muro, con los números que lo sostienen.
+
+    ═══════════════════════════════════════════════════════════════════════
+    POR QUÉ NO BASTA CON QUE APAREZCA LA LÍNEA
+    ═══════════════════════════════════════════════════════════════════════
+
+    Un muro dibujado es una afirmación: «aquí hay una concentración de gamma
+    que va a frenar el precio». Si el único respaldo de esa afirmación es que
+    hay una línea en el gráfico, no hay forma de discutirla — ni de detectar
+    que el cálculo empezó a medir otra cosa.
+
+    Esto publica los datos CON LOS QUE se decidió: la exposición de cada
+    candidato, su interés abierto, su distancia, su puntuación y su puesto en
+    el ranking, más la fórmula exacta que produjo esa puntuación.
+
+    ═══════════════════════════════════════════════════════════════════════
+    LA FÓRMULA, DICHA ENTERA
+    ═══════════════════════════════════════════════════════════════════════
+
+        1. Se descartan los strikes del lado equivocado. Un muro de calls por
+           DEBAJO del precio ya fue atravesado: es historia, no resistencia.
+        2. La exposición del lado se normaliza dentro de los candidatos, y el
+           interés abierto del lado también.
+        3. La puntuación es una media geométrica ponderada:
+
+               score = 100 · exposición^(1−w) · interés_abierto^w     w = OI_WEIGHT
+
+           Geométrica, no aritmética, porque un strike con mucha exposición y
+           NADA de libro abierto no sostiene un muro: la media aritmética lo
+           premiaría igual, y la geométrica lo hunde, que es lo correcto.
+        4. Sin interés abierto utilizable NO se multiplica por cero —eso
+           afirmaría que no hay libro, no que no se sabe—: se puntúa sólo con
+           la exposición y se declara con `exposure-only-no-open-interest`.
+        5. Entre candidatos válidos gana el de mayor puntuación, con histéresis:
+           el nuevo tiene que ser CLARAMENTE mejor que el vigente, no
+           marginalmente. Un muro que salta de strike cada ciclo no es un
+           nivel: es ruido con nombre.
+
+    No cambia ninguna metodología. Sólo la hace comprobable.
+    """
+    w = walls if isinstance(walls, dict) else {}
+    h = hub if isinstance(hub, dict) else {}
+    exposicion = (h.get("exposure_by_strike") or {})
+    filas = exposicion.get("rows") or []
+
+    # Exposición de CALL y de PUT por strike, tal y como llegó. Es lo que
+    # permite contrastar el veredicto contra el crudo sin recalcular nada.
+    por_strike: Dict[float, Dict[str, Any]] = {}
+    for r in filas:
+        if not isinstance(r, dict):
+            continue
+        k = _f(r.get("strike"))
+        if k is None:
+            continue
+        por_strike[k] = {
+            "strike": k,
+            "callExposure": _f(r.get("call_gex") if r.get("call_gex") is not None
+                               else r.get("call_exposure") or r.get("call")),
+            "putExposure": _f(r.get("put_gex") if r.get("put_gex") is not None
+                              else r.get("put_exposure") or r.get("put")),
+        }
+
+    lados = {}
+    for side in (CALL_WALL, PUT_WALL):
+        muro = w.get(side) or {}
+        candidatos = []
+        for puesto, c in enumerate(muro.get("candidates") or [], 1):
+            if not isinstance(c, dict):
+                continue
+            k = _f(c.get("strike"))
+            crudo = por_strike.get(k) if k is not None else None
+            candidatos.append({
+                "ranking": puesto,
+                "strike": k,
+                "exposure": c.get("exposure"),
+                "exposure_norm": c.get("exposure_norm"),
+                "open_interest": c.get("oi"),
+                "oi_norm": c.get("oi_norm"),
+                "distance_pct": c.get("distance_pct"),
+                "within_range": c.get("within_range"),
+                "score": c.get("score"),
+                "callExposure": (crudo or {}).get("callExposure"),
+                "putExposure": (crudo or {}).get("putExposure"),
+                "selected": (k is not None and _f(muro.get("strike")) == k),
+            })
+        lados[side] = {
+            "selected_strike": muro.get("strike"),
+            "score": muro.get("score"),
+            "exposure": muro.get("exposure"),
+            "open_interest": muro.get("oi"),
+            "distance_pct": muro.get("distance_pct"),
+            "method": muro.get("method"),
+            "oi_available": muro.get("oi_available"),
+            "source_mode": muro.get("source_mode"),
+            "fallback_used": muro.get("fallback_used"),
+            "change_reason": muro.get("change_reason"),
+            "retired": muro.get("retired"),
+            "ranking": candidatos,
+            "candidates_considered": len(candidatos),
+        }
+
+    return {
+        "symbol": w.get("symbol"),
+        "spot": w.get("spot"),
+        "snapshotTime": w.get("timestamp") or (exposicion.get("timestamp")),
+        "representationMode": "STRIKE_EXPOSURE_BY_SIDE",
+        "expirations": exposicion.get("expirations") or exposicion.get("expiration_scope"),
+        "authority": "ITMQ_WALL_ENGINE",
+        "formula": ("score = 100 · exposición_lado^(1-w) · interés_abierto_lado^w, "
+                    f"w = {OI_WEIGHT}; media GEOMÉTRICA, no aritmética; "
+                    "sin OI utilizable se puntúa sólo con exposición y se declara; "
+                    f"sólo candidatos a menos del {MAX_DISTANCE_PCT} % del precio; "
+                    f"histéresis del {HYSTERESIS_MARGIN} para sustituir al muro vigente"),
+        "oi_weight": OI_WEIGHT,
+        "max_distance_pct": MAX_DISTANCE_PCT,
+        "hysteresis_margin": HYSTERESIS_MARGIN,
+        "sides": lados,
+        "note": ("No cambia ninguna metodología: publica los números con los que "
+                 "el Wall Engine ya decidía, para que la decisión se pueda discutir."),
+    }
+
+
+__all__ = ["resolve_walls", "walls_from_hub", "build_candidates", "wall_audit", "WALLS",
            "WallState", "CALL_WALL", "PUT_WALL", "HYSTERESIS_MARGIN",
            "OI_WEIGHT", "MAX_DISTANCE_PCT"]

@@ -2918,8 +2918,51 @@
     "test_net_drift_es_su_propio_carril",
     "test_sin_cinta_el_estado_es_tape_missing_y_no_otro"
    ]
+  },
+  "tests/test_v1560_gate5_netdrift.py": {
+   "casos": 17,
+   "tests": [
+    "test_cada_curva_lleva_su_valor_en_el_extremo",
+    "test_call_wall_y_put_wall_estan_entre_los_niveles_del_panel",
+    "test_el_eje_de_precio_no_depende_de_un_campo_opcional",
+    "test_el_eje_de_prima_y_el_de_precio_son_dos_escalas_distintas",
+    "test_el_respaldo_es_el_mismo_activo_y_el_mismo_reloj",
+    "test_el_respaldo_se_declara_en_pantalla",
+    "test_hay_exactamente_un_eje_de_precio",
+    "test_la_curva_acumulada_tiene_suelo_en_pixeles_y_se_lleva_el_reparto",
+    "test_las_tres_curvas_estan_rotuladas",
+    "test_los_dos_datasets_se_declaran_en_el_marcado",
+    "test_los_kpi_dicen_de_que_dataset_son",
+    "test_los_muros_cuelgan_del_eje_de_precio_no_del_de_prima",
+    "test_los_muros_salen_de_la_autoridad_unica",
+    "test_net_drift_es_del_endpoint_oficial_y_no_se_reconstruye",
+    "test_qflow_se_ancla_por_instante_y_precio_no_por_indice",
+    "test_un_carril_no_desaparece_porque_falte_el_otro",
+    "test_un_nivel_muy_lejano_no_aplasta_el_recorrido_del_precio"
+   ]
+  },
+  "tests/test_v1560_gate6_walls.py": {
+   "casos": 16,
+   "tests": [
+    "test_cada_candidato_lleva_sus_numeros_y_su_puesto",
+    "test_call_wall_es_identico_en_las_seis",
+    "test_el_muro_de_calls_solo_puede_estar_por_encima_del_precio",
+    "test_el_muro_de_dark_pool_no_se_confunde_con_el_de_opciones",
+    "test_el_ranking_esta_ordenado_por_puntuacion",
+    "test_la_auditoria_no_cambia_la_metodologia",
+    "test_la_auditoria_publica_todo_lo_que_sostiene_la_decision",
+    "test_la_auditoria_viaja_al_trace_y_al_auditor",
+    "test_la_exposicion_cruda_de_call_y_put_viaja_al_lado_del_veredicto",
+    "test_la_formula_se_publica_entera_con_sus_constantes",
+    "test_las_seis_secciones_leen_el_mismo_muro",
+    "test_los_muros_son_iguales_en_cualquier_activo",
+    "test_ninguna_seccion_recalcula_su_muro",
+    "test_put_wall_es_identico_en_las_seis",
+    "test_sin_interes_abierto_no_se_multiplica_por_cero",
+    "test_un_centimo_de_diferencia_rompe_la_igualdad"
+   ]
   }
  },
- "total_minimo": 2400,
+ "total_minimo": 2433,
  "version": "1.55.0"
 }

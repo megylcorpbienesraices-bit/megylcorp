@@ -1642,6 +1642,16 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
     hub = HUB.hub_snapshot(symbol, intel,
                            engine_heatmap=(payload.get("heatmap_history") or {}))
     walls = WE.walls_from_hub(symbol, hub, spot=spot, fallback=fallback)
+    # v1.56.0 · CÓMO se calculó cada muro, con los números que lo sostienen.
+    # Un muro dibujado es una afirmación sobre el mercado; si su único respaldo
+    # es que hay una línea en el gráfico, no hay forma de discutirla ni de
+    # detectar que el cálculo empezó a medir otra cosa.
+    try:
+        payload["wall_audit"] = WE.wall_audit(walls, hub)
+    except Exception as exc:
+        _obs_note("main:wall_audit", exc, severity="DEGRADED")
+        payload["wall_audit"] = {"authority": "ITMQ_WALL_ENGINE",
+                                 "note": "la auditoría de muros no se pudo construir"}
 
     kept = [lv for lv in levels
             if not (isinstance(lv, dict) and lv.get("kind") in ("call_wall", "put_wall"))]
