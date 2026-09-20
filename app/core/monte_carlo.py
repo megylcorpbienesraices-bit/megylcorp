@@ -28,6 +28,7 @@ sin subir el numero de pasos: el coste de calculo no cambia.
 from __future__ import annotations
 
 from typing import Any, Dict
+import hashlib
 import math
 import numpy as np
 
@@ -35,6 +36,26 @@ from .expiry_clock import year_fraction
 
 DEFAULT_SIMS = 20_000
 PERCENTILES = (5, 10, 25, 50, 75, 90, 95)
+
+
+def deterministic_seed(*parts: Any) -> int:
+    """Semilla REPRODUCIBLE derivada de las propias entradas.
+
+    v1.55.0 · Hasta aqui produccion llamaba sin `seed`, asi que cada refresco
+    sorteaba numeros nuevos. Con 20.000 trayectorias el error tipico de una
+    probabilidad cercana al 50 % es ~0,35 pp, de modo que el mismo mercado, sin
+    haberse movido un centimo, publicaba 43,8 % y un minuto despues 44,2 %.
+
+    Un operador no tiene forma de distinguir eso de un cambio real, y es lo peor
+    que puede hacer una herramienta de probabilidad: moverse sola.
+
+    Derivando la semilla de las entradas, dos ciclos con los MISMOS datos dan el
+    MISMO numero, y en cuanto el mercado cambia —spot, IV, DTE o un nivel— la
+    semilla cambia con el. No es congelar el resultado: es que solo se mueva
+    cuando se mueve el mercado.
+    """
+    raw = "|".join("" if p is None else f"{p!r}" for p in parts).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big")
 
 
 def simulate_gbm_paths(spot: float, r: float, q: float, sigma: float, dte_days: float, *,
@@ -107,7 +128,16 @@ def monte_carlo_level_report(spot: float, r: float, q: float, atm_iv_pct: float,
         dte_f = float(dte_days)
         if not (math.isfinite(spot_f) and spot_f > 0 and math.isfinite(dte_f) and dte_f > 0):
             return {"ready": False, "reason": "INVALID_SPOT_OR_DTE"}
-        paths = simulate_gbm_paths(spot_f, r, q, sigma, dte_f, n_sims=n_sims, seed=seed)
+        # Sin semilla explicita se DERIVA de las entradas: mismo mercado, mismo
+        # numero. Ver `deterministic_seed`.
+        resolved_seed = (int(seed) if seed is not None else
+                         deterministic_seed(round(spot_f, 6), round(float(r), 8),
+                                            round(float(q), 8), round(sigma, 8),
+                                            round(dte_f, 8), int(n_sims),
+                                            tuple(sorted((str(k), None if v is None else round(float(v), 6))
+                                                         for k, v in (levels or {}).items()
+                                                         if v is None or isinstance(v, (int, float))))))
+        paths = simulate_gbm_paths(spot_f, r, q, sigma, dte_f, n_sims=n_sims, seed=resolved_seed)
     except Exception as exc:
         return {"ready": False, "reason": f"{type(exc).__name__}: {exc}"[:160]}
 
@@ -140,16 +170,26 @@ def monte_carlo_level_report(spot: float, r: float, q: float, atm_iv_pct: float,
         # Tocar es estrictamente mas debil que terminar mas alla; el puente lo respeta
         # por construccion, pero el suelo deja la invariante explicita y auditable.
         touch = float(min(100.0, max(touch, finish)))
+        # Error tipico de la propia simulacion, en puntos porcentuales. Publicarlo
+        # es lo que separa «43,8 %» de «43,8 % +/- 0,35»: sin el, una diferencia
+        # de tres decimas entre dos niveles parece informacion y es ruido.
+        se_finish = math.sqrt(max(finish * (100.0 - finish), 0.0) / max(int(n_sims), 1))
+        se_touch = math.sqrt(max(touch * (100.0 - touch), 0.0) / max(int(n_sims), 1))
         level_stats[name] = {
             "level": lvl_f,
             "side": "ABOVE_SPOT" if above else "BELOW_SPOT",
             "prob_finish_beyond_pct": finish,
             "prob_touch_by_expiry_pct": touch,
+            "prob_finish_stderr_pp": se_finish,
+            "prob_touch_stderr_pp": se_touch,
             "touch_method": "BROWNIAN_BRIDGE_CONTINUOUS",
         }
 
     return {
         "ready": True, "n_sims": int(n_sims), "n_steps": int(n_steps),
+        # Reproducibilidad: con estas mismas entradas sale exactamente esto.
+        "seed": int(resolved_seed), "seed_source": "EXPLICIT" if seed is not None else "DERIVED_FROM_INPUTS",
+        "deterministic": True,
         "dte_days": dte_f, "atm_iv_pct": float(atm_iv_pct), "spot": spot_f,
         "risk_free_rate": float(r), "dividend_yield": float(q),
         "days_axis": days_axis,

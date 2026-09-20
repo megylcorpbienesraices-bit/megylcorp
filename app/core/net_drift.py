@@ -98,6 +98,27 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
+def _acc(total: Optional[float], value: Optional[float]) -> Optional[float]:
+    """Suma corrida que IGNORA lo ausente y no lo confunde con cero.
+
+    Un bucket sin dato no aporta nada al acumulado, pero tampoco lo estrena: si
+    todavía no ha llegado ningún valor medido, el acumulado sigue siendo `None`.
+    """
+    if value is None:
+        return total
+    return value if total is None else total + value
+
+
+def _add(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    if a is None and b is None:
+        return None
+    return (a or 0.0) + (b or 0.0)
+
+
+def _r(v: Optional[float], nd: int = 4) -> Optional[float]:
+    return None if v is None else round(v, nd)
+
+
 def _parse_ts(v: Any) -> Optional[datetime]:
     if isinstance(v, datetime):
         return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
@@ -175,8 +196,12 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
             ts = _parse_ts(r.get("t") or r.get("timestamp") or r.get("timestamp_ms"))
             if ts is None:
                 continue
-            call = _f(r.get("net_call_premium")) or 0.0
-            put = _f(r.get("net_put_premium")) or 0.0
+            # Un campo AUSENTE no es un cero medido. Si el proveedor no publica
+            # `netCallPremium` en un bucket, ese minuto no dice «no hubo prima
+            # de calls»: dice que no se sabe. Se conserva `None` y el bucket se
+            # dibuja como hueco, no como barra a cero.
+            call = _f(r.get("net_call_premium"))
+            put = _f(r.get("net_put_premium"))
             price = _f(r.get("stock_price"))
             if price is not None and price <= 0:
                 price = None
@@ -184,9 +209,11 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
                 "ts": ts,
                 "call": call,
                 "put": put,
-                "net": call + put,
-                "call_volume": _f(r.get("net_call_volume")) or 0.0,
-                "put_volume": _f(r.get("net_put_volume")) or 0.0,
+                # El neto del intervalo existe si al menos uno de los dos lados
+                # se midió; sumar un lado ausente como cero lo inventaría.
+                "net": None if (call is None and put is None) else (call or 0.0) + (put or 0.0),
+                "call_volume": _f(r.get("net_call_volume")),
+                "put_volume": _f(r.get("net_put_volume")),
                 "mid_call": _f(r.get("mid_call_premium")),
                 "mid_put": _f(r.get("mid_put_premium")),
                 "price": price,
@@ -210,29 +237,37 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
     # Un instante futuro (reloj adelantado del proveedor) también está abierto.
     open_bucket = age_s < BUCKET_SECONDS
 
-    call_cum = put_cum = call_vol_cum = put_vol_cum = 0.0
+    # El acumulado arranca en `None` y sólo se vuelve número cuando llega el
+    # primer valor MEDIDO. Así, una sesión en la que el proveedor nunca publicó
+    # prima de calls no enseña «0 $ acumulados» —que es una afirmación— sino
+    # SIN DATOS, que es la verdad.
+    call_cum = put_cum = call_vol_cum = put_vol_cum = None
+    missing = {"call": 0, "put": 0, "call_volume": 0, "put_volume": 0, "price": 0}
     series: List[Dict[str, Any]] = []
     for i, c in enumerate(clean):
-        call_cum += c["call"]
-        put_cum += c["put"]
-        call_vol_cum += c["call_volume"]
-        put_vol_cum += c["put_volume"]
+        call_cum = _acc(call_cum, c["call"])
+        put_cum = _acc(put_cum, c["put"])
+        call_vol_cum = _acc(call_vol_cum, c["call_volume"])
+        put_vol_cum = _acc(put_vol_cum, c["put_volume"])
+        for field in missing:
+            if c.get(field) is None:
+                missing[field] += 1
         series.append({
             "t": c["ts"].isoformat(),
             "timestamp_ms": int(c["ts"].timestamp() * 1000),
-            "call": round(c["call"], 4),
-            "put": round(c["put"], 4),
-            "net": round(c["net"], 4),
-            "call_volume": round(c["call_volume"], 4),
-            "put_volume": round(c["put_volume"], 4),
+            "call": _r(c["call"]),
+            "put": _r(c["put"]),
+            "net": _r(c["net"]),
+            "call_volume": _r(c["call_volume"]),
+            "put_volume": _r(c["put_volume"]),
             "mid_call": c["mid_call"],
             "mid_put": c["mid_put"],
             "price": c["price"],
-            "cum_call": round(call_cum, 4),
-            "cum_put": round(put_cum, 4),
-            "cum_net": round(call_cum + put_cum, 4),
-            "cum_call_volume": round(call_vol_cum, 4),
-            "cum_put_volume": round(put_vol_cum, 4),
+            "cum_call": _r(call_cum),
+            "cum_put": _r(put_cum),
+            "cum_net": _r(_add(call_cum, put_cum)),
+            "cum_call_volume": _r(call_vol_cum),
+            "cum_put_volume": _r(put_vol_cum),
             "open": bool(open_bucket and i == len(clean) - 1),
         })
 
@@ -256,11 +291,14 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
         "last_bucket": last_ts.isoformat(),
         "age_minutes": round(age_min, 2),
         "open_bucket": bool(open_bucket),
-        "cum_call_premium": round(call_cum, 4),
-        "cum_put_premium": round(put_cum, 4),
-        "cum_net_premium": round(call_cum + put_cum, 4),
-        "cum_call_volume": round(call_vol_cum, 4),
-        "cum_put_volume": round(put_vol_cum, 4),
+        "cum_call_premium": _r(call_cum),
+        "cum_put_premium": _r(put_cum),
+        "cum_net_premium": _r(_add(call_cum, put_cum)),
+        "cum_call_volume": _r(call_vol_cum),
+        "cum_put_volume": _r(put_vol_cum),
+        # Cuántos buckets llegaron SIN cada campo. Si esto no es cero, la curva
+        # tiene huecos reales y el Auditor puede decir exactamente cuántos.
+        "missing_by_field": dict(missing),
         # Acumulado sin el bucket abierto: lo que ya no puede cambiar.
         "closed": None if closed is None else {
             "t": closed["t"],
@@ -310,25 +348,37 @@ def certify_against_raw(raw_rows: Any, built: Dict[str, Any], *,
     # La serie se publica redondeada a 4 decimales, así que un desvío de hasta medio
     # cuanto de redondeo (5e-5) es la propia publicación, no un error de cálculo.
     round_atol = 5e-5
-    call = put = cvol = pvol = 0.0
+    # Mismos operadores que la construcción: lo ausente no suma y no estrena el
+    # acumulado. Si el certificador usara `or 0.0` y el constructor no, la
+    # certificación mediría su propia aritmética en vez de la publicada.
+    call = put = cvol = pvol = None
     worst = 0.0
     worst_abs = 0.0
     worst_at = None
     checked = 0
     for ts in sorted(by_ts):
         r = by_ts[ts]
-        call += _f(r.get("net_call_premium")) or 0.0
-        put += _f(r.get("net_put_premium")) or 0.0
-        cvol += _f(r.get("net_call_volume")) or 0.0
-        pvol += _f(r.get("net_put_volume")) or 0.0
+        call = _acc(call, _f(r.get("net_call_premium")))
+        put = _acc(put, _f(r.get("net_put_premium")))
+        cvol = _acc(cvol, _f(r.get("net_call_volume")))
+        pvol = _acc(pvol, _f(r.get("net_put_volume")))
         point = next((p for p in series if p["t"] == ts.isoformat()), None)
         if point is None:
             return {"ok": False, "reason": f"la curva no publica el instante {ts.isoformat()}",
                     "points": checked}
         checked += 1
-        for expected, key in ((call, "cum_call"), (put, "cum_put"), (call + put, "cum_net"),
+        for expected, key in ((call, "cum_call"), (put, "cum_put"), (_add(call, put), "cum_net"),
                               (cvol, "cum_call_volume"), (pvol, "cum_put_volume")):
-            got = _f(point.get(key)) or 0.0
+            got = _f(point.get(key))
+            if expected is None or got is None:
+                # Ausencia contra ausencia es coincidencia; ausencia contra
+                # número es un dato inventado, y eso NO se certifica.
+                if expected is None and got is None:
+                    continue
+                return {"ok": False, "points": checked,
+                        "reason": (f"{ts.isoformat()}·{key}: el crudo dice "
+                                   f"{'SIN DATO' if expected is None else expected} y la curva "
+                                   f"publica {'SIN DATO' if got is None else got}")}
             # El desvío se mide en términos relativos a la propia magnitud para que
             # la comparación signifique lo mismo con primas de 10 $ que de 10 M$, y
             # se admite además el cuanto de redondeo de la publicación.

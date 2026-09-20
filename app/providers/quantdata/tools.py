@@ -380,16 +380,27 @@ def norm_net_drift(payload: Dict[str, Any]) -> Dict[str, Any]:
         price = _f(_pick(r, "stockPrice", "underlyingPrice", "spot", "price"), None)
         if price is not None and price <= 0:
             price = None
-        call = _f(_pick(r, "netCallPremium", "callPremium", "callSum"), 0.0) or 0.0
-        put = _f(_pick(r, "netPutPremium", "putPremium", "putSum"), 0.0) or 0.0
+        # v1.55.0 · AUSENTE NO ES CERO.
+        #
+        # `_f(..., 0.0) or 0.0` convertia un campo que el proveedor no publica en
+        # una prima neta de 0 $. Ese cero viaja hasta la curva acumulada y hasta
+        # los KPI, donde se lee como «este minuto no entro dinero» — una
+        # afirmacion sobre el mercado que nadie midio. Es el mismo defecto que
+        # dibujaba la sierra de la deriva de volatilidad.
+        #
+        # Un cero que SI viene en la respuesta se conserva como 0.0 y se publica
+        # como 0.0: lo que desaparece es el cero inventado.
+        call = _f(_pick(r, "netCallPremium", "callPremium", "callSum"), None)
+        put = _f(_pick(r, "netPutPremium", "putPremium", "putSum"), None)
         out.append({
             "t": t,
             "timestamp_ms": _epoch_ms(raw_t),
             "net_call_premium": call,
             "net_put_premium": put,
-            "net_premium": call + put,
-            "net_call_volume": _f(_pick(r, "netCallVolume", "callVolume"), 0.0) or 0.0,
-            "net_put_volume": _f(_pick(r, "netPutVolume", "putVolume"), 0.0) or 0.0,
+            # El neto del intervalo existe si al menos un lado se midio.
+            "net_premium": None if (call is None and put is None) else (call or 0.0) + (put or 0.0),
+            "net_call_volume": _f(_pick(r, "netCallVolume", "callVolume"), None),
+            "net_put_volume": _f(_pick(r, "netPutVolume", "putVolume"), None),
             "mid_call_premium": _f(_pick(r, "midMarketCallPremium", "midCallPremium"), None),
             "mid_put_premium": _f(_pick(r, "midMarketPutPremium", "midPutPremium"), None),
             "stock_price": price,
@@ -1057,9 +1068,13 @@ def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:
             # Nombres del contrato publicado primero; los alias detrás, para
             # respuestas antiguas. `notionalValue`, `size` y `tradeCount` son los
             # que documenta el proveedor.
-            "notional": _f(_pick(r, "notionalValue", "notional", "value", "dollarVolume"), 0.0) or 0.0,
-            "shares": _f(_pick(r, "size", "shares", "volume"), 0.0) or 0.0,
-            "prints": int(_f(_pick(r, "tradeCount", "prints", "count", "trades"), 0) or 0),
+            # v1.55.0 · Sin `or 0.0`: un nivel cuyo nocional el proveedor no
+            # publica NO vale 0 $. Con el cero se colaba al final de la tabla
+            # con una cifra inventada; ahora sale SIN DATO y se ve que falta.
+            "notional": _f(_pick(r, "notionalValue", "notional", "value", "dollarVolume")),
+            "shares": _f(_pick(r, "size", "shares", "volume")),
+            "prints": (lambda n: None if n is None else int(n))(
+                _f(_pick(r, "tradeCount", "prints", "count", "trades"))),
             "dark_volume": _f(_pick(r, "darkVolume")),
             "lit_volume": _f(_pick(r, "litVolume")),
             "pct_of_volume": _f(_pick(r, "percentOfVolume", "pctOfVolume")),
@@ -1068,7 +1083,9 @@ def norm_levels(payload: Dict[str, Any]) -> Dict[str, Any]:
         if extra:
             row["extra"] = extra
         out.append(row)
-    out.sort(key=lambda x: -x["notional"])
+    # Los niveles SIN nocional no pueden ordenarse por tamano, asi que van al
+    # final en vez de fingir que valen cero y colarse entre los pequenos.
+    out.sort(key=lambda x: (x["notional"] is None, -(x["notional"] or 0.0)))
     # Precio del subyacente publicado con la respuesta, no por nivel. Es lo que
     # permite situar los niveles respecto al último precio SIN mezclar la fuente
     # del subyacente con la del dark pool.
@@ -1093,13 +1110,18 @@ def norm_stats(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         out.append({
             "label": str(_pick(r, "contract", "symbol", "name", "label", "expiration") or ""),
-            "premium": _f(_pick(r, "premium", "notional", "totalPremium"), 0.0) or 0.0,
-            "contracts": _f(_pick(r, "contracts", "volume", "size"), 0.0) or 0.0,
-            "trades": int(_f(_pick(r, "trades", "count", "executions"), 0) or 0),
+            # v1.55.0 · Sin `or 0.0`: un contrato cuya prima el proveedor no
+            # publica no ha negociado 0 $. Con el cero se ordenaba el ultimo con
+            # una cifra que nadie midio y la tabla lo daba por bueno.
+            "premium": _f(_pick(r, "premium", "notional", "totalPremium")),
+            "contracts": _f(_pick(r, "contracts", "volume", "size")),
+            "trades": (lambda n: None if n is None else int(n))(
+                _f(_pick(r, "trades", "count", "executions"))),
             "bid_side": _f(_pick(r, "bidSide", "sellPremium", "askSidePremium"), None),
             "ask_side": _f(_pick(r, "askSide", "buyPremium", "bidSidePremium"), None),
         })
-    out.sort(key=lambda x: -abs(x["premium"]))
+    # Lo que no tiene prima no se puede ordenar por prima: va al final.
+    out.sort(key=lambda x: (x["premium"] is None, -abs(x["premium"] or 0.0)))
     return {"ready": bool(out), "rows": out, "count": len(out)}
 
 

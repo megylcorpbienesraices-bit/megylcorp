@@ -2653,8 +2653,50 @@
     "test_un_error_del_proveedor_no_borra_el_ultimo_bueno",
     "test_una_tesis_completa_produce_las_cuatro_lineas"
    ]
+  },
+  "tests/test_v1550_fabricated_zeros.py": {
+   "casos": 12,
+   "tests": [
+    "test_acumulado_sin_ningun_dato_medido_es_none_no_cero",
+    "test_campo_ausente_sale_none_no_cero",
+    "test_cero_medido_se_conserva_como_cero",
+    "test_el_certificador_rechaza_un_cero_inventado",
+    "test_el_hueco_no_hunde_el_acumulado",
+    "test_el_motor_declara_cuantos_buckets_llegaron_sin_cada_campo",
+    "test_la_curva_se_certifica_valor_a_valor_contra_el_crudo",
+    "test_los_niveles_sin_nocional_van_al_final_no_entre_los_pequenos",
+    "test_los_normalizadores_oficiales_no_reintroducen_el_patron",
+    "test_neto_del_intervalo_existe_si_un_lado_se_midio",
+    "test_neto_es_none_cuando_faltan_los_dos_lados",
+    "test_nivel_sin_nocional_no_vale_cero_dolares"
+   ]
+  },
+  "tests/test_v1550_monte_carlo_audit.py": {
+   "casos": 42,
+   "tests": [
+    "test_contar_trayectorias_subestimaria_el_toque_a_la_mitad",
+    "test_el_error_cae_como_uno_partido_por_raiz_de_n",
+    "test_el_informe_declara_sus_supuestos_y_no_alimenta_direccion",
+    "test_el_informe_publica_su_propio_error_tipico",
+    "test_el_mismo_mercado_publica_el_mismo_numero",
+    "test_el_precio_esperado_es_el_del_activo_sin_arbitraje",
+    "test_entradas_imposibles_no_producen_un_cono_falso",
+    "test_la_deriva_empuja_en_el_sentido_correcto",
+    "test_la_semilla_derivada_cabe_en_el_generador",
+    "test_la_semilla_explicita_manda_sobre_la_derivada",
+    "test_la_varianza_terminal_es_la_lognormal_exacta",
+    "test_los_percentiles_terminales_son_los_cuantiles_lognormales",
+    "test_mas_tiempo_hace_mas_probable_tocar",
+    "test_mas_volatilidad_hace_mas_probable_tocar",
+    "test_probabilidad_de_terminar_mas_alla_coincide_con_n_d2",
+    "test_probabilidad_de_tocar_coincide_con_el_primer_paso_continuo",
+    "test_si_el_mercado_cambia_la_simulacion_cambia",
+    "test_tocar_nunca_es_menos_probable_que_terminar_mas_alla",
+    "test_toda_trayectoria_arranca_en_el_spot",
+    "test_un_nivel_imposible_se_descarta_en_vez_de_publicarse"
+   ]
   }
  },
- "total_minimo": 2170,
+ "total_minimo": 2224,
  "version": "1.54.0"
 }

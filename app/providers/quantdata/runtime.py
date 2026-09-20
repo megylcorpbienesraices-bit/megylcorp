@@ -122,10 +122,21 @@ def _net_drift_series(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict) or not data:
         return {"available": False, "buckets": [], "source": "QUANTDATA_NET_DRIFT"}
     rows: list[dict[str, Any]] = []
-    call_cum = 0.0
-    put_cum = 0.0
-    call_vol_cum = 0.0
-    put_vol_cum = 0.0
+    # Arrancan en `None`: un acumulado en cero es una AFIRMACION («no se movio
+    # nada») y aqui todavia no se ha medido nada. Solo lo medido lo convierte
+    # en numero.
+    call_cum: float | None = None
+    put_cum: float | None = None
+    call_vol_cum: float | None = None
+    put_vol_cum: float | None = None
+
+    def _acc(total: float | None, value: float | None) -> float | None:
+        if value is None:
+            return total
+        return value if total is None else total + value
+
+    def _add(a: float | None, b: float | None) -> float | None:
+        return None if (a is None and b is None) else (a or 0.0) + (b or 0.0)
     def _key(item: tuple[Any, Any]) -> int:
         try:
             return int(str(item[0]))
@@ -139,14 +150,17 @@ def _net_drift_series(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             _obs_note("runtime:net_drift_timestamp", exc)
             continue
-        call = _f(row.get("netCallPremium"), 0.0) or 0.0
-        put = _f(row.get("netPutPremium"), 0.0) or 0.0
-        call_vol = _f(row.get("netCallVolume"), 0.0) or 0.0
-        put_vol = _f(row.get("netPutVolume"), 0.0) or 0.0
-        call_cum += call
-        put_cum += put
-        call_vol_cum += call_vol
-        put_vol_cum += put_vol
+        # Campo ausente -> `None`, no cero. El bucket queda como hueco y el
+        # grafico dibuja una discontinuidad en vez de una barra a cero que
+        # afirmaria que ese minuto no hubo prima.
+        call = _f(row.get("netCallPremium"))
+        put = _f(row.get("netPutPremium"))
+        call_vol = _f(row.get("netCallVolume"))
+        put_vol = _f(row.get("netPutVolume"))
+        call_cum = _acc(call_cum, call)
+        put_cum = _acc(put_cum, put)
+        call_vol_cum = _acc(call_vol_cum, call_vol)
+        put_vol_cum = _acc(put_vol_cum, put_vol)
         px = _f(row.get("stockPrice"))
         if px is not None and px <= 0:
             px = None
@@ -162,7 +176,7 @@ def _net_drift_series(payload: dict[str, Any]) -> dict[str, Any]:
             "stock_price": px,
             "cum_call_premium": call_cum,
             "cum_put_premium": put_cum,
-            "cum_net_premium": call_cum + put_cum,
+            "cum_net_premium": _add(call_cum, put_cum),
             "cum_call_volume": call_vol_cum,
             "cum_put_volume": put_vol_cum,
         })

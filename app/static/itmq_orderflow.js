@@ -1048,8 +1048,10 @@
     for (const p of rows) {
       const t = driftT(p);
       if (!Q.isNum(t) || t < win.t0 - S.bucketMs || t > win.t1) continue;
-      vis.push({ t, call: Q.num(p.cum_call, 0), put: Q.num(p.cum_put, 0),
-        net: Q.num(p.cum_net, 0), price: Q.num(p.price, NaN), open: !!p.open });
+      // v1.55.0 · Un bucket sin acumulado es un HUECO, no un cero. Con `0` la
+      // curva caia al eje y afirmaba que la sesion se habia vaciado.
+      vis.push({ t, call: Q.num(p.cum_call, NaN), put: Q.num(p.cum_put, NaN),
+        net: Q.num(p.cum_net, NaN), price: Q.num(p.price, NaN), open: !!p.open });
     }
     if (!vis.length) { empty(ctx, env, 'SIN DATOS EN LA VENTANA'); return false; }
 
@@ -1057,8 +1059,10 @@
     // es la lectura: una curva que no muestra su cruce por cero no dice nada.
     let lo = 0, hi = 0;
     for (const v of vis) {
-      lo = Math.min(lo, v.call, v.put, v.net);
-      hi = Math.max(hi, v.call, v.put, v.net);
+      for (const x of [v.call, v.put, v.net]) {
+        if (!Q.isNum(x)) continue;   // un hueco no estira ni encoge la escala
+        lo = Math.min(lo, x); hi = Math.max(hi, x);
+      }
     }
     const span = Math.max(hi - lo, 1);
     const sy = Q.scale(lo - span * 0.08, hi + span * 0.08, box.y + box.h, box.y);
@@ -1077,8 +1081,16 @@
     const line = (key, color, width, dash) => {
       ctx.save();
       ctx.setLineDash(dash || []);
+      // El hueco PARTE el trazo. Interpolar por encima de un bucket sin dato
+      // dibujaria una recta que nadie midio.
       ctx.beginPath();
-      vis.forEach((v, i) => { const x = sx(v.t), y = sy(v[key]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      let started = false;
+      for (const v of vis) {
+        const val = v[key];
+        if (!Q.isNum(val)) { started = false; continue; }
+        const x = sx(v.t), y = sy(val);
+        if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; }
+      }
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.stroke();
       ctx.restore();
     };
@@ -1098,7 +1110,8 @@
       const marks = [
         ['net', Q.alpha(Q.token('--text-dim', '#8494ad'), 0.95)],
         ['call', posC], ['put', negC],
-      ].map(([k, c]) => ({ v: Q.num(tail[k], 0), col: c, y: sy(Q.num(tail[k], 0)) }))
+      ].map(([k, c]) => ({ v: Q.num(tail[k], NaN), col: c, y: sy(Q.num(tail[k], NaN)) }))
+       .filter(m => Q.isNum(m.v))   // sin valor no hay cifra que rotular
        .sort((a, b) => a.y - b.y);
       // Sin separarlas, dos curvas cercanas dejan sus etiquetas una encima de
       // la otra y no se lee ninguna.
@@ -1128,6 +1141,7 @@
     const last = vis[vis.length - 1];
     if (last && last.open) {
       for (const [key, col] of [['call', posC], ['put', negC]]) {
+        if (!Q.isNum(last[key])) continue;
         ctx.beginPath(); ctx.arc(sx(last.t), sy(last[key]), 3.2, 0, Math.PI * 2);
         ctx.fillStyle = Q.token('--panel', '#0d131c'); ctx.fill();
         ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.stroke();

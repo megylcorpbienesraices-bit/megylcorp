@@ -470,9 +470,12 @@
       // distinguir un mercado tranquilo de un hueco de datos.
       empty: nd && !nd.ready ? `SIN DATOS · ${motivoVacio(nd.state, 'sin datos en este ciclo')}` : 'SIN DATOS',
     })).set([
-      { name: 'CALL', color: Q.token('--pos', '#22c55e'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_call, 0) })) },
-      { name: 'PUT', color: Q.token('--neg', '#ef4444'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_put, 0) })) },
-      { name: 'NET', color: Q.token('--accent', '#38bdf8'), width: 2, points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_net, 0) })) },
+      // v1.55.0 · `Q.num(x, 0)` mandaba al eje CERO todo bucket sin dato. Un
+      // acumulado de prima en cero afirma que la sesion no ha movido nada, y lo
+      // que habia era un hueco. Con NaN el trazo se parte y el hueco se ve.
+      { name: 'CALL', color: Q.token('--pos', '#22c55e'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_call, NaN) })) },
+      { name: 'PUT', color: Q.token('--neg', '#ef4444'), points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_put, NaN) })) },
+      { name: 'NET', color: Q.token('--accent', '#38bdf8'), width: 2, points: ndRows.map(x => ({ t: x.t, v: Q.num(x.cum_net, NaN) })) },
     ]);
 
     pill('pillFlow', candles.length ? 'live' : 'off', candles.length ? `${candles.length} barras` : 'esperando');
