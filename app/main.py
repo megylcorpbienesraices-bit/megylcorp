@@ -1654,6 +1654,35 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
     # IDENTIDAD de cada línea que TRACE va a dibujar. No calcula ni renombra
     # nada: adjunta la procedencia que el nivel ya tiene, para que una línea sin
     # etiqueta se pueda identificar sin deducirla por el color.
+    # PLAN del Scanner. TRACE lo REPRESENTA; no recalcula dirección ni deriva
+    # entrada, objetivos o invalidación cuando el Scanner no los publica.
+    try:
+        from .core import scanner_plan as _SP
+        plan = _SP.build(STATE.scanner or {}, spot=spot)
+        payload["scanner_plan"] = plan
+        # v1.54.0 · El plan SUSTITUYE a `target` y `risk`, no convive con ellos.
+        #
+        # Los dos salen del MISMO campo del Scanner —`target1/2` e
+        # `invalidation`—, así que dibujarlos a la vez pintaba dos líneas
+        # idénticas en el mismo precio con dos etiquetas encima: «OBJ1 533.70»
+        # pegada a «OBJ 533.70». Un nivel duplicado no es un nivel más fuerte:
+        # es la misma información ocupando el sitio de otra.
+        if plan.get("ready"):
+            kept = [lv for lv in kept
+                    if not (isinstance(lv, dict) and lv.get("kind") in ("target", "risk"))]
+        # Sus líneas entran en el MISMO conjunto que dibuja TRACE, con su kind
+        # propio: así no hay una segunda ruta de render que mantener.
+        for ln in plan.get("lines") or []:
+            kept.append({"kind": ln["kind"], "name": ln["name"], "price": ln["price"],
+                         "authority": "SCANNER", "source_mode": "SCANNER",
+                         "direction": ln["direction"], "strength": ln["strength"],
+                         "thesis_id": plan.get("thesis_id")})
+        payload["levels"] = kept
+    except Exception as exc:
+        _obs_note("main:scanner_plan", exc, severity="DEGRADED")
+        payload["scanner_plan"] = {"ready": False, "state": "ESPERANDO",
+                                   "detail": "el plan del Scanner no se pudo construir",
+                                   "lines": []}
     try:
         from .core import level_identity as _LI
         payload["level_identity"] = _LI.describe(kept, symbol=symbol)

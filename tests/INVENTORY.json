@@ -2615,8 +2615,46 @@
     "test_the_origin_names_the_real_function_and_field",
     "test_the_same_level_tolerance_is_relative_not_in_dollars"
    ]
+  },
+  "tests/test_v1540_flow_freshness.py": {
+   "casos": 37,
+   "tests": [
+    "test_A_live_con_datos_nuevos",
+    "test_B2_un_hueco_corto_sigue_siendo_live",
+    "test_B_ciclo_siguiente_vacio_conserva_el_ultimo_valido",
+    "test_C_mercado_cerrado_carga_la_ultima_sesion_valida",
+    "test_D2_la_sesion_tambien_forma_parte_de_la_clave",
+    "test_D_cambiar_de_activo_no_arrastra_el_dato_anterior",
+    "test_E_net_flow_disponible_y_tape_ausente",
+    "test_F_tape_disponible_y_net_flow_ausente",
+    "test_G_sin_historico_ni_actual_es_el_unico_sin_datos",
+    "test_a_las_cuatro_de_ecuador_entra_london_monitor",
+    "test_el_acumulado_se_guarda_por_simbolo_fecha_y_sesion",
+    "test_el_acumulado_solo_crece_con_lo_medido",
+    "test_el_corte_de_nueva_york_sigue_su_horario_de_verano",
+    "test_el_diagnostico_senala_el_primer_eslabon_roto",
+    "test_el_diagnostico_viaja_en_qflow",
+    "test_el_hover_identifica_la_linea_bajo_el_cursor",
+    "test_el_plan_es_transaccional",
+    "test_el_plan_no_conoce_ningun_ticker",
+    "test_el_plan_sustituye_a_target_y_risk_en_vez_de_convivir",
+    "test_el_precio_que_cruza_la_invalidacion_marca_el_plan_invalidado",
+    "test_el_trace_tiene_mas_alto",
+    "test_el_vwap_de_la_sesion_pondera_por_volumen",
+    "test_la_barra_del_scanner_vive_en_el_encabezado_de_trace",
+    "test_la_pantalla_operativa_no_escribe_jerga_tecnica",
+    "test_la_prima_sin_agresor_tiene_su_propio_cubo",
+    "test_la_seccion_esta_viva_mientras_algo_suyo_lo_este",
+    "test_la_sesion_no_conoce_ningun_ticker",
+    "test_las_lineas_del_scanner_tienen_identidad_y_prioridad_alta",
+    "test_londres_no_se_borra_cuando_empieza_nueva_york",
+    "test_sin_tesis_el_plan_espera_y_no_inventa_nada",
+    "test_un_cero_medido_no_es_un_hueco",
+    "test_un_error_del_proveedor_no_borra_el_ultimo_bueno",
+    "test_una_tesis_completa_produce_las_cuatro_lineas"
+   ]
   }
  },
- "total_minimo": 2133,
- "version": "1.53.1"
+ "total_minimo": 2170,
+ "version": "1.54.0"
 }

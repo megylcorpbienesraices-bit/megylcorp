@@ -28,8 +28,15 @@ def test_the_colour_cannot_identify_a_line():
     by_colour = {}
     for kind, colour in re.findall(r"(\w+):\s*\{ color: '(--[\w-]+)'", block):
         by_colour.setdefault(colour, []).append(kind)
-    assert set(by_colour["--neg"]) == {"put_wall", "risk"}
-    assert set(by_colour["--pos"]) == {"call_wall", "target"}
+    # v1.54.0 · Con las líneas del Scanner el agrupamiento es AÚN mayor: rojo
+    # es put_wall, risk Y la invalidación del Scanner; verde es call_wall,
+    # target Y los dos objetivos. Razón de más para no deducir por color.
+    assert set(by_colour["--neg"]) == {"put_wall", "risk", "scanner_inval"}
+    assert set(by_colour["--pos"]) == {"call_wall", "target",
+                                       "scanner_target1", "scanner_target2"}
+    # Y ninguno de esos colores identifica un solo `kind`.
+    for colour in ("--neg", "--pos"):
+        assert len(by_colour[colour]) > 1, colour
 
 
 def test_every_kind_the_engine_emits_has_a_declared_origin():

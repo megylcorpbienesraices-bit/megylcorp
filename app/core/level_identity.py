@@ -114,6 +114,32 @@ LEVEL_ORIGIN: Dict[str, Dict[str, str]] = {
         "method": "trace_analytics.structural_walls · máximo de exposición firmada",
         "label": "Hedge Wall",
     },
+    # v1.54.0 · Las cuatro líneas del PLAN del Scanner. TRACE las representa;
+    # el Scanner sigue siendo la única autoridad direccional.
+    "scanner_entry": {
+        "function": "scanner_plan.build",
+        "field": "scanner['entry'] · scanner['zone']['center']",
+        "method": "scanner · precio de entrada de la tesis activa",
+        "label": "ENTRADA",
+    },
+    "scanner_inval": {
+        "function": "scanner_plan.build",
+        "field": "scanner['invalidation']",
+        "method": "scanner · precio que invalida la tesis activa",
+        "label": "INVAL",
+    },
+    "scanner_target1": {
+        "function": "scanner_plan.build",
+        "field": "scanner['target1']",
+        "method": "scanner · primer objetivo de la tesis activa",
+        "label": "OBJ1",
+    },
+    "scanner_target2": {
+        "function": "scanner_plan.build",
+        "field": "scanner['target2']",
+        "method": "scanner · segundo objetivo de la tesis activa",
+        "label": "OBJ2",
+    },
 }
 
 #: Campos donde un nivel puede traer su fuerza. El primero que exista manda.

@@ -389,6 +389,7 @@
 
   function renderAll(d) {
     renderHeader(d);
+    renderScannerBar(d);
     renderResumen(d);
     renderExposicion(d);
     renderOpenInterest(d);
@@ -1514,6 +1515,30 @@
    * el nivel ya trae. Si un `kind` no está en el registro, se dice con esas
    * palabras en vez de inventarle un origen.
    */
+  /* La barra del PLAN del Scanner, dentro del encabezado de TRACE.
+   *
+   * El Scanner es la unica autoridad direccional: aqui solo se REPRESENTA su
+   * salida. Sin tesis lista no se inventa entrada, objetivos ni invalidacion —
+   * se dice ESPERANDO y se explica que falta.
+   */
+  function renderScannerBar(d) {
+    const p = ((state.trace || {}).scanner_plan) || {};
+    const dir = p.direction || '—';
+    const el2 = el('sbDirection');
+    if (el2) { el2.textContent = dir; el2.dataset.dir = dir; }
+    const st = Q.num(p.strength, NaN);
+    set('sbStrength', Q.isNum(st) ? `${st.toFixed(0)}/100` : '—');
+    const px = v => { const x = Q.num(v, NaN); return Q.isNum(x) ? x.toFixed(x >= 1000 ? 2 : 2) : '—'; };
+    set('sbEntry', px(p.entry));
+    set('sbInval', px(p.invalidation));
+    set('sbObj1', px(p.target1));
+    set('sbObj2', px(p.target2));
+    const stEl = el('sbState');
+    const estado = p.state || 'ESPERANDO';
+    if (stEl) { stEl.textContent = estado; stEl.dataset.state = estado; }
+    set('sbDetail', p.detail || '');
+  }
+
   function renderLevelIdentity(d) {
     const rows = ((state.trace || {}).level_identity) || [];
     const unknown = rows.filter(r => r.known_to_registry === false).length;

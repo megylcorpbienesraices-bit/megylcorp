@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 cls
 echo ================================================================
-echo ITM QUANT v1.53.1 - PRUEBA REAL TASTYTRADE OAUTH + DXLINK
+echo ITM QUANT v1.54.0 - PRUEBA REAL TASTYTRADE OAUTH + DXLINK
 echo ================================================================
 echo.
 set /p SYMBOL=Simbolo a probar [DIA]: 

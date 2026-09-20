@@ -1256,7 +1256,8 @@ def test_the_two_main_charts_have_a_floor_in_pixels():
     de filas se lleva su parte pase lo que pase."""
     css = _read("app/static/itmq_terminal.css")
     trace = css[css.index(".trace-grid {"):css.index(".trace-col {")]
-    assert "min-height: 640px" in trace
+    # v1.54.0 · 640 -> 780: el gráfico salía comprimido, velas y líneas pegadas.
+    assert "min-height: 780px" in trace
     drift = css[css.index(".drift-stack {"):css.index(".drift-stack[hidden]")]
     assert "minmax(520px," in drift
 

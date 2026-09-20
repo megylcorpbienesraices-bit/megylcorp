@@ -126,7 +126,8 @@ def _empty(state: str, detail: str, symbol: str) -> Dict[str, Any]:
 def build_qflow(rows: Any, *, symbol: str, now: Optional[datetime] = None,
                 provider_error: Optional[str] = None,
                 order_flow: Any = None,
-                order_flow_tool: str = "") -> Dict[str, Any]:
+                order_flow_tool: str = "",
+                order_flow_block: Any = None) -> Dict[str, Any]:
     """Serie, nivel y CONCENTRACIONES ATRIBUIDAS de QFLOW.
 
     `rows` es la lista normalizada por `norm_time_series` de `net-flow`: cada fila
@@ -199,6 +200,11 @@ def build_qflow(rows: Any, *, symbol: str, now: Optional[datetime] = None,
     # que resolverse ANTES de las marcas: una marca que dice «compra» sin haber
     # mirado quién agredió es una afirmación inventada sobre el mercado.
     apply_aggressor(events, attribution)
+    # Y el diagnóstico de POR QUÉ, para que un rombo neutro sea accionable.
+    agg_diag = aggressor_diagnosis(
+        events, attribution,
+        order_flow_block if isinstance(order_flow_block, dict)
+        else {"rows": order_flow or [], "tool": order_flow_tool})
     markers = _markers(events)
 
     call_total = sum(c["call"] for c in clean if c["call"] is not None) or None
@@ -211,6 +217,7 @@ def build_qflow(rows: Any, *, symbol: str, now: Optional[datetime] = None,
         "ready": True, "state": state, "detail": detail, "symbol": sym,
         "series": series, "level": level, "events": events,
         "markers": markers, "attribution": attribution,
+        "aggressor_diagnosis": agg_diag,
         "threshold": threshold.to_dict(), "asset_scale": threshold.scale,
         "net_premium": round(float(cum[-1]), 4),
         "call_premium": None if call_total is None else round(float(call_total), 4),
@@ -335,6 +342,105 @@ def _robust_z(value: float, scale: Dict[str, Any]) -> Optional[float]:
 # Por debajo sigue siendo MIXED, y la confianza exacta viaja en el evento, así
 # que un 61 % y un 95 % no se leen igual aunque los dos digan COMPRA.
 AGGRESSOR_DOMINANCE_SHARE = 0.60
+
+
+def aggressor_diagnosis(events: List[Dict[str, Any]],
+                        attribution: Dict[str, Any],
+                        order_flow: Dict[str, Any]) -> Dict[str, Any]:
+    """POR QUÉ cada marca tiene o no tiene lado. Eslabón por eslabón.
+
+    v1.54.0 · Las marcas seguían saliendo en rombo neutro y no había forma de
+    saber cuál de los cuatro eslabones fallaba. «No lo sé» es honesto y no
+    accionable: hace falta decir DÓNDE se rompe.
+
+    La cadena tiene cuatro puntos y cada uno puede romperla por su cuenta:
+
+        1. LA CINTA LLEGA        `order-flow` devuelve filas, o no
+        2. LA CINTA TRAE LADO    cada print resuelve BUY/SELL, por campo del
+                                 proveedor o por NBBO
+        3. LA ATRIBUCIÓN CRUZA   las operaciones caen dentro de la ventana de
+                                 ±90 s del bucket de la concentración
+        4. HAY DOMINANCIA        un lado pesa al menos el 60 % de la prima
+                                 agredida del bucket
+
+    Se publica el recuento de cada paso, de modo que el Auditor pueda decir
+    «la cinta llega pero sin lado» o «la cinta trae lado pero no cruza con
+    ninguna concentración», que son averías distintas con arreglos distintos.
+    """
+    of = order_flow if isinstance(order_flow, dict) else {}
+    rows = of.get("rows") or []
+    cov = of.get("aggressor_coverage") or {}
+    attr = attribution if isinstance(attribution, dict) else {}
+    detail = attr.get("events") or []
+
+    matched = sum(1 for d in detail if isinstance(d, dict) and d.get("matched"))
+    with_side = 0
+    for d in detail:
+        if not isinstance(d, dict) or not d.get("matched"):
+            continue
+        if abs(float(d.get("buy_premium") or 0.0)) + abs(float(d.get("sell_premium") or 0.0)) > 0:
+            with_side += 1
+
+    verdicts: Dict[str, int] = {}
+    for e in events or []:
+        v = str(e.get("aggressor") or "UNKNOWN")
+        verdicts[v] = verdicts.get(v, 0) + 1
+    sided = verdicts.get("BUY", 0) + verdicts.get("SELL", 0)
+
+    # El primer eslabón que falla es el que hay que arreglar; los de después
+    # fallan por consecuencia y señalarlos manda al sitio equivocado.
+    if not rows:
+        broken, remedy = "TAPE_MISSING", (
+            "la cinta de opciones no devolvió filas en este ciclo: sin operaciones "
+            "no hay agresor que medir")
+    elif not cov.get("with_side"):
+        broken, remedy = "TAPE_WITHOUT_SIDE", (
+            "la cinta llega pero ninguna operación resuelve lado: el proveedor no "
+            "publica campo de agresor y tampoco bid/ask con los que medirlo")
+    elif not matched:
+        broken, remedy = "ATTRIBUTION_NO_MATCH", (
+            "la cinta trae lado pero ninguna operación cae dentro de la ventana "
+            f"de ±{int(ATTRIBUTION_WINDOW_SECONDS)}s de una concentración: los dos "
+            "relojes no coinciden")
+    elif not with_side:
+        broken, remedy = "MATCHED_WITHOUT_SIDE", (
+            "las operaciones cruzan con las concentraciones pero ninguna de ESAS "
+            "trae lado utilizable")
+    elif not sided:
+        broken, remedy = "NO_DOMINANCE", (
+            "hay lado en las operaciones pero ningún bucket alcanza el "
+            f"{int(AGGRESSOR_DOMINANCE_SHARE * 100)} % de dominancia: el flujo "
+            "estuvo genuinamente repartido")
+    else:
+        broken, remedy = None, ""
+
+    return {
+        "chain": [
+            {"step": 1, "name": "LA CINTA LLEGA", "ok": bool(rows),
+             "count": len(rows), "tool": of.get("tool"),
+             "detail": of.get("detail") or f"{len(rows)} operaciones"},
+            {"step": 2, "name": "LA CINTA TRAE LADO",
+             "ok": bool(cov.get("with_side")),
+             "count": int(cov.get("with_side") or 0),
+             "of": int(cov.get("total") or 0),
+             "by_field": cov.get("by_field") or {},
+             "detail": (f"{cov.get('with_side') or 0} de {cov.get('total') or 0} "
+                        f"operaciones con lado")},
+            {"step": 3, "name": "LA ATRIBUCIÓN CRUZA", "ok": bool(matched),
+             "count": matched, "of": len(detail),
+             "window_seconds": ATTRIBUTION_WINDOW_SECONDS,
+             "detail": f"{matched} de {len(detail)} concentraciones con operaciones"},
+            {"step": 4, "name": "HAY DOMINANCIA", "ok": bool(sided),
+             "count": sided, "of": len(events or []),
+             "threshold": AGGRESSOR_DOMINANCE_SHARE,
+             "detail": f"{sided} de {len(events or [])} marcas con lado"},
+        ],
+        "broken_at": broken,
+        "remedy": remedy,
+        "verdicts": verdicts,
+        "markers_with_side": sided,
+        "markers_total": len(events or []),
+    }
 
 
 def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -> None:

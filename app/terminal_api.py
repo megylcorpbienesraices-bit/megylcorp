@@ -1225,9 +1225,13 @@ def _net_drift_order_flow(intel: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("options_order_flow_raw", "options_order_flow"):
         rows = _qd_rows(intel, key)
         if rows:
+            blk = _qd_block(intel, key)
             return {"ready": True, "source": "QUANTDATA", "tool": key,
                     "consolidated": key == "options_order_flow",
-                    "rows": rows[:1500], "count": len(rows)}
+                    "rows": rows[:1500], "count": len(rows),
+                    # La cobertura del lado agresor viaja con la cinta: es lo que
+                    # convierte «todas las marcas salen neutras» en un diagnóstico.
+                    "aggressor_coverage": blk.get("aggressor_coverage") or {}}
     block = intel.get("options_order_flow_raw") if isinstance(intel, dict) else None
     detail = None
     if isinstance(block, dict):
@@ -1280,7 +1284,8 @@ def _qflow(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
                 "order_flow": of}
 
     out = build_qflow(block.get("rows"), symbol=symbol,
-                      order_flow=of_rows, order_flow_tool=of_tool)
+                      order_flow=of_rows, order_flow_tool=of_tool,
+                      order_flow_block=of)
     out["provider"] = "QUANT_DATA"
     out["tool"] = "net_flow"
     out["route"] = block.get("route")

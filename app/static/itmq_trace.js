@@ -735,7 +735,11 @@
     }
 
     // 7 · crosshair
-    if (S.panels.main && S.panels.main.pointer.inside) drawCrosshair(ctx, box, sx, sy);
+    if (S.panels.main && S.panels.main.pointer.inside) {
+      drawCrosshair(ctx, box, sx, sy);
+      // Y la identidad de la línea bajo el cursor, si hay una.
+      drawLevelHover(ctx, box, sy, S.panels.main.pointer.y);
+    }
 
     let moving = S.spot.step(env.dt);
     moving = S.priceLo.step(env.dt) || moving;
@@ -1251,6 +1255,69 @@
         { bg: Q.alpha(it.color, it.off ? 0.62 : 0.92), color: '#06101c',
           font: Q.LEVEL_FONT, h: Q.LEVEL_LABEL_H, padX: 7 });
     }
+  }
+
+  /* v1.54.0 · Al pasar por una línea, QUÉ es.
+   *
+   * Sale del registro de identidad que el motor ya publica —nombre, precio,
+   * dirección, fuerza, fuente y timestamp—, no de una tabla paralela en el
+   * cliente. Sin esto, una línea a la que el precio reacciona sigue siendo
+   * anónima mientras no se abra el Auditor.
+   */
+  const HOVER_HIT_PX = 6;
+
+  function levelUnderPointer(box, sy, py) {
+    const d = S.data || {};
+    const ident = d.level_identity || [];
+    const lvls = d.levels || [];
+    let best = null, bestD = Infinity;
+    for (const lv of lvls) {
+      const p = Q.num(lv.price, NaN);
+      if (!Q.isNum(p)) continue;
+      const y = sy(p);
+      if (y < box.y || y > box.y + box.h) continue;
+      const dist = Math.abs(py - y);
+      if (dist < bestD && dist <= HOVER_HIT_PX) { bestD = dist; best = lv; }
+    }
+    if (!best) return null;
+    const id = ident.find(r => Math.abs(Q.num(r.price, NaN) - Q.num(best.price, 0)) < 1e-9
+                               && String(r.type || '') === String(best.kind || ''));
+    return { level: best, identity: id || null };
+  }
+
+  function drawLevelHover(ctx, box, sy, py) {
+    const hit = levelUnderPointer(box, sy, py);
+    if (!hit) return;
+    const lv = hit.level, id = hit.identity || {};
+    const st = LEVEL_STYLE[lv.kind] || { color: '--text-dim' };
+    const col = Q.token(st.color, '#8494ad');
+    const price = Q.num(lv.price, 0);
+    const lines = [
+      `${lv.name || st.label || lv.kind}   ${price.toFixed(price >= 1000 ? 2 : 2)}`,
+    ];
+    // Dirección y fuerza sólo si el nivel es del Scanner: en un muro no
+    // significan nada y escribirlos sugeriría que sí.
+    if (lv.direction) lines.push(`dirección ${lv.direction}`);
+    if (Q.isNum(Q.num(lv.strength, NaN))) lines.push(`fuerza ${Q.num(lv.strength).toFixed(0)}/100`);
+    lines.push(`fuente ${lv.authority || id.source || '—'}`);
+    if (id.timestamp) lines.push(String(id.timestamp).replace('T', ' ').slice(0, 19));
+    ctx.save();
+    ctx.font = '11px ui-monospace, monospace';
+    let w = 0;
+    for (const t of lines) w = Math.max(w, ctx.measureText(t).width);
+    const bw = w + 18, bh = lines.length * 15 + 10;
+    const bx = Q.clamp(box.x + box.w * 0.5, box.x + 4, box.x + box.w - bw - 4);
+    const by = Q.clamp(sy(price) - bh - 10, box.y + 4, box.y + box.h - bh - 4);
+    Q.roundRect(ctx, bx, by, bw, bh, 5);
+    ctx.fillStyle = Q.alpha(Q.token('--panel-3', '#1b2436'), 0.97); ctx.fill();
+    ctx.strokeStyle = Q.alpha(col, 0.9); ctx.lineWidth = 1;
+    Q.roundRect(ctx, bx, by, bw, bh, 5); ctx.stroke();
+    ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    lines.forEach((t, i) => {
+      ctx.fillStyle = i === 0 ? col : Q.token('--text-dim', '#8494ad');
+      ctx.fillText(t, bx + 9, by + 6 + i * 15);
+    });
+    ctx.restore();
   }
 
   function drawCrosshair(ctx, box, sx, sy) {

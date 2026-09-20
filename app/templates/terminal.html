@@ -184,7 +184,22 @@
   </div>
 
   <div class="trace-shell">
-    <div class="trace-grid">
+    <!-- v1.54.0 · El PLAN del Scanner, dentro del encabezado de TRACE. No es una
+       seccion nueva: es la misma barra. El Scanner sigue siendo la unica
+       autoridad direccional; esto solo lo representa. -->
+  <div class="scanner-bar" id="scannerBar">
+    <span class="sb-tag">SCANNER</span>
+    <b class="sb-dir" id="sbDirection">—</b>
+    <span class="sb-strength" id="sbStrength">—</span>
+    <span class="sb-sep"></span>
+    <span class="sb-lvl">Entrada <b id="sbEntry">—</b></span>
+    <span class="sb-lvl sb-inval">INVAL <b id="sbInval">—</b></span>
+    <span class="sb-lvl sb-obj">OBJ1 <b id="sbObj1">—</b></span>
+    <span class="sb-lvl sb-obj">OBJ2 <b id="sbObj2">—</b></span>
+    <span class="sb-state" id="sbState">ESPERANDO</span>
+    <span class="sb-detail" id="sbDetail"></span>
+  </div>
+  <div class="trace-grid">
       <div class="trace-col">
         <header>
           <select class="ctl" id="traceLeftMetric">

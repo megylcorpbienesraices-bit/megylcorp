@@ -274,6 +274,33 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 
 .trace-shell { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 
+/* v1.54.0 · Barra del PLAN del Scanner. Una linea, dentro del encabezado de
+   TRACE: lo que el operador necesita ver sin abrir nada. */
+.scanner-bar {
+  display: flex; align-items: center; gap: 12px; flex: 0 0 auto;
+  padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--panel-2); font-family: ui-monospace, monospace; font-size: 12px;
+}
+.scanner-bar .sb-tag { font-size: 10px; letter-spacing: .1em; color: var(--text-mute); }
+.scanner-bar .sb-dir { font-size: 15px; font-weight: 700; letter-spacing: .04em; }
+.scanner-bar .sb-dir[data-dir="COMPRA"] { color: var(--pos); }
+.scanner-bar .sb-dir[data-dir="VENTA"] { color: var(--neg); }
+.scanner-bar .sb-dir[data-dir="—"] { color: var(--text-mute); }
+.scanner-bar .sb-strength { color: var(--text-dim); font-size: 12px; }
+.scanner-bar .sb-sep { width: 1px; align-self: stretch; background: var(--border); }
+.scanner-bar .sb-lvl { color: var(--text-dim); font-size: 11px; }
+.scanner-bar .sb-lvl b { color: var(--text); font-size: 13px; margin-left: 4px; }
+.scanner-bar .sb-inval b { color: var(--neg); }
+.scanner-bar .sb-obj b { color: var(--pos); }
+.scanner-bar .sb-state {
+  margin-left: auto; font-size: 11px; letter-spacing: .06em; padding: 3px 9px;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--text-mute);
+}
+.scanner-bar .sb-state[data-state="ACTIVO"] { color: var(--pos); border-color: var(--pos); }
+.scanner-bar .sb-state[data-state="INVALIDADO"] { color: var(--neg); border-color: var(--neg); }
+.scanner-bar .sb-state[data-state="OBJETIVO ALCANZADO"] { color: var(--accent); border-color: var(--accent); }
+.scanner-bar .sb-detail { font-size: 11px; color: var(--text-mute); }
+
 .trace-grid {
   /* v1.51.0 · El gráfico es la seccion, no un panel de la seccion.
      `min-height: 0` dejaba que el HUD y la tarjeta de MAPA le comieran altura
@@ -281,7 +308,9 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
      manda y lo de abajo se ajusta a lo que sobra. Las columnas laterales suben a
      252 px porque los perfiles DEX y GEX se leen contra el eje de precio y a 230
      las cifras del eje quedaban pegadas a las barras. */
-  flex: 1; min-height: 640px;
+  /* v1.54.0 · 640 -> 780. El grafico salia comprimido: velas y lineas pegadas
+     unas a otras justo donde hay que leer la separacion. */
+  flex: 1; min-height: 780px;
   display: grid;
   grid-template-columns: var(--trace-side, 252px) minmax(0, 1fr) var(--trace-side, 252px);
   gap: 0;

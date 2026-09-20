@@ -1,29 +1,35 @@
 {
- "version": "1.53.1",
- "release": "ITM_QUANT_v1.53.1_PRE_VPS",
+ "version": "1.54.0",
+ "release": "ITM_QUANT_v1.54.0_PRE_VPS",
  "scope": "MULTI_ASSET",
- "base_version": "1.53.0",
+ "base_version": "1.53.1",
  "focus": [
-  "IDENTIDAD DE CADA LINEA DE TRACE: habia lineas dibujadas SIN ETIQUETA. Se identifican desde el MOTOR, no por el color: rojo es put_wall Y risk, verde es call_wall Y target.",
-  "Las dos lineas anonimas resultaron ser `risk` (Invalidacion) y `target` (T1/T2), los ultimos por prioridad y por eso fuera del cupo de etiquetas.",
-  "AUDITOR: tabla nueva con precio, type, nombre del motor, source, campo, method, magnitud, persistencia y timestamp de cada linea visible.",
-  "TRACE: toda linea visible lleva etiqueta. El sitio sale del alto del panel; si no caben con nombre largo, se abrevia antes que quedarse muda."
+  "AGRESOR: diagnostico de la CADENA en cuatro eslabones. Un rombo neutro era honesto y no accionable; ahora dice DONDE se rompe: la cinta no llega, llega sin lado, no cruza con la concentracion, o no hay dominancia.",
+  "FLUJO: FlowViewModel con LKG POR CARRIL. El modulo se vaciaba entero porque el ultimo ciclo vino vacio: 405 buckets validos desaparecian y las tarjetas decian SIN DATOS mientras el estado decia «405 buckets».",
+  "FLUJO: LIVE / STALE / HISTORICAL / NO_DATA / PROVIDER_ERROR, con clave (symbol, session_date, dataset). Un LKG mal indexado ensena un numero correcto en el sitio equivocado.",
+  "SCANNER EN TRACE: barra en el encabezado —direccion, fuerza, entrada, INVAL, OBJ1, OBJ2, estado— y las cuatro lineas en el grafico. El Scanner sigue siendo la UNICA autoridad direccional; TRACE solo representa.",
+  "SCANNER: el plan es TRANSACCIONAL (`thesis_id` sobre el conjunto) y SUSTITUYE a `target`/`risk` en vez de convivir: los dos salian del mismo campo y se pintaban dos lineas identicas.",
+  "HOVER: al pasar por una linea, su nombre, precio, direccion, fuerza, fuente y timestamp.",
+  "TRACE mas alto: 640 -> 780 px.",
+  "SESION: LONDON_MONITOR desde las 04:00 de America/Guayaquil, con acumulado propio, y NEW_YORK despues. Londres se SELLA, no se borra."
  ],
  "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
  "quant_logic_changes": [
-  "NINGUN cambio de calculo. `level_identity` describe lo que el motor ya publico; no calcula ni renombra ningun nivel.",
-  "`short` es abreviatura de PANTALLA: el nombre que manda sigue siendo el que publica el motor."
+  "SIN CAMBIOS de formula.",
+  "TRACE no recalcula direccion: representa el plan del Scanner. Si el Scanner no publica entrada, objetivos o invalidacion, no se derivan.",
+  "El LKG no cambia ningun valor: conserva el ULTIMO MEDIDO en vez de borrarlo. Un cero medido sigue siendo cero.",
+  "El corte de sesion se construye en hora de NUEVA YORK y se convierte: una hora UTC fija fallaria medio ano por el horario de verano."
  ],
  "tests": {
-  "collected": 2133,
-  "passed": 2133,
+  "collected": 2170,
+  "passed": 2170,
   "failed": 0,
   "skipped": 0,
   "errors": 0,
-  "files": 149,
+  "files": 150,
   "status": "PASS",
   "partitions": 21,
-  "plan_sha256": "c5b631232177bd39b731493261f3768059b34bb1fd4edbf737910614dc0d0aec"
+  "plan_sha256": "136c4773d1e11bcfe23a3422ee3e1d692da726fad09beae45efacf7923e5fe4e"
  },
  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
  "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -145,13 +151,22 @@
   "level_identity": "PROVENANCE_ATTACHED_NEVER_INFERRED_FROM_COLOUR",
   "level_persistence": "CONSECUTIVE_CYCLES_WITH_A_RELATIVE_TOLERANCE",
   "level_labels": "EVERY_VISIBLE_LINE_IS_NAMED_SHORT_BEFORE_SILENT",
-  "unregistered_kind": "SAYS_SO_INSTEAD_OF_INVENTING_AN_ORIGIN"
+  "unregistered_kind": "SAYS_SO_INSTEAD_OF_INVENTING_AN_ORIGIN",
+  "aggressor_chain_diagnosis": "FOUR_LINKS_THE_FIRST_BROKEN_ONE_IS_NAMED",
+  "flow_lkg": "PER_LANE_KEYED_BY_SYMBOL_SESSION_AND_DATASET",
+  "flow_states": "LIVE_STALE_HISTORICAL_NO_DATA_PROVIDER_ERROR",
+  "flow_never_wipes": "AN_EMPTY_CYCLE_NEVER_DELETES_A_VALID_SERIES",
+  "scanner_plan": "REPRESENTED_NEVER_RECOMPUTED",
+  "scanner_plan_transactional": "THESIS_ID_OVER_THE_WHOLE_SET",
+  "scanner_replaces_legacy": "TARGET_AND_RISK_ARE_THE_SAME_SOURCE",
+  "level_hover": "NAME_PRICE_DIRECTION_STRENGTH_SOURCE_TIMESTAMP",
+  "session_mode": "LONDON_MONITOR_FROM_0400_AMERICA_GUAYAQUIL",
+  "session_cut": "BUILT_IN_NEW_YORK_TIME_NEVER_A_FIXED_UTC_HOUR"
  },
  "verification_limits": [
-  "El recorte del campo se verifico INYECTANDO una matriz de 90 strikes en el navegador real, porque en demo el respaldo del motor ya cabe en la ventana: 90 -> 13 filas, 77 recortadas, 210 segmentos de isolinea frente a 94. Con el proveedor LIVE es donde importa.",
-  "La via NBBO se verifica valor a valor sobre el clasificador. NO se ha contrastado contra una cinta real: sin credenciales ni salida al proveedor.",
-  "La cobertura del agresor es la herramienta para comprobarlo en LIVE: si sigue saliendo neutra, `aggressor_coverage.by_field` dira si el proveedor no manda campo ni NBBO.",
-  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2.",
-  "La identidad se volco contra el MOTOR REAL en ejecucion (11 lineas, con su funcion y campo). Los precios concretos de la sesion del usuario —roja ~517.2, verde ~515.0— corresponden a su activo en vivo; aqui el mismo `type` sale en otros precios porque el demo cotiza en otro nivel. La IDENTIDAD es la misma y es la que se comprobo."
+  "El diagnostico del agresor se prueba en sus CINCO estados con datos construidos. En este entorno la cadena sale SANA, asi que el caso del usuario —todas las marcas neutras— no se puede reproducir aqui: el diagnostico es precisamente la herramienta para localizarlo en su terminal LIVE.",
+  "La politica de frescura se prueba en los siete escenarios A-G exigidos. El cableado del FlowViewModel a la pantalla queda para la siguiente entrega: en esta release el modulo existe, esta probado y publicado, pero la seccion todavia lee sus valores por la ruta anterior.",
+  "El acumulado de Londres se prueba con relojes construidos, incluido el cambio de horario de verano. No se ha podido observar una sesion de Londres real en este entorno.",
+  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2."
  ]
 }

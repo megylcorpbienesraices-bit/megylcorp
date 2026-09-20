@@ -1,14 +1,71 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.53.1
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.54.0
 
-Release: `ITM_QUANT_v1.53.1_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.54.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A18** es la de esta release.
+> Documento acumulativo. La sección **A19** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2133 casos / 149 ficheros**
-- Particiones: 21 · `plan_sha256`: `c5b631232177bd39b731493261f3768059b34bb1fd4edbf737910614dc0d0aec`
+- Inventario nominal: **2170 casos / 150 ficheros**
+- Particiones: 21 · `plan_sha256`: `136c4773d1e11bcfe23a3422ee3e1d692da726fad09beae45efacf7923e5fe4e`
 - Resultado: **PASS**
+
+---
+
+## A19 · v1.54.0 · Dónde se rompe, y qué no se borra
+
+### Qué se certifica
+
+Treinta y siete casos en `tests/test_v1540_flow_freshness.py`.
+
+**Los siete escenarios obligatorios de FLUJO (A–G).** A: live con datos nuevos.
+B: ciclo vacío conserva 405 buckets y marca STALE. C: mercado cerrado carga la
+última sesión válida. D: DIA → QQQ sin arrastre, y la sesión también forma parte
+de la clave. E: Net Flow vivo con cinta vieja. F: cinta viva con Net Flow
+ausente. G: sin histórico ni actual, **sólo entonces** SIN DATOS.
+
+**Más las reglas transversales:** un cero medido se publica como cero y se
+conserva; un error del proveedor no borra el último bueno; la prima sin agresor
+tiene su propio cubo; la pantalla operativa no escribe jerga técnica; un hueco
+corto sigue siendo LIVE porque un mercado tranquilo no es un fallo.
+
+**El diagnóstico del agresor en sus cinco estados**, parametrizado, comprobando
+que se señala el PRIMER eslabón roto y que cada uno lleva remedio.
+
+**El plan del Scanner:** sin tesis no inventa nada; una tesis completa produce
+las cuatro líneas con fuente `SCANNER`; el `thesis_id` cambia si cambia
+cualquier pieza; el precio que cruza la invalidación marca el plan invalidado
+—leyendo el nivel que el Scanner publicó, no recalculando dirección—; no conoce
+ningún ticker; y sustituye a `target`/`risk` en vez de duplicarlos.
+
+**La sesión de Londres:** entra a las 04:00 de Ecuador; el corte de Nueva York
+sigue SU horario de verano (julio vs. diciembre); Londres no se borra al empezar
+Nueva York; el acumulado sólo crece con lo medido; la clave es símbolo + fecha +
+sesión; el VWAP pondera por volumen.
+
+### Verificación en la terminal real
+
+`127.0.0.1:8839`, **0 errores de consola**.
+
+```
+SCANNER  VENTA  80/100  Entrada 534.20  INVAL 535.62  OBJ1 533.70  OBJ2 533.20  ACTIVO
+plan: ACTIVO · 4 líneas
+agresor: cadena sana (broken_at = None)
+```
+
+El TRACE dibuja `INVAL`, `ENT`, `OBJ1` y `OBJ2` **una sola vez cada una**: antes
+de la deduplicación salían `OBJ1 533.70` y `OBJ 533.70` pegadas.
+
+### Límites de esta verificación
+
+- **La cadena del agresor sale SANA aquí**, así que el caso del usuario no se
+  reproduce en este entorno. El diagnóstico es la herramienta para localizarlo
+  en su terminal LIVE.
+- **El `FlowViewModel` está probado y publicado pero aún no cableado a la
+  pantalla**: la sección sigue leyendo por la ruta anterior. Queda para la
+  siguiente entrega.
+- **El acumulado de Londres se prueba con relojes construidos.**
+- **Empaquetado certificado imposible aquí**: 3.11.15 / 22.22.2.
 
 ---
 

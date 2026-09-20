@@ -1,5 +1,31 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.54.0 · Dónde se rompe, y qué no se borra
+
+- **El agresor: «no lo sé» no era suficiente.** v1.53.0 dejó de inventar el lado
+  y las marcas salieron neutras — honesto y **no accionable**. Ahora se
+  diagnostica la cadena en cuatro eslabones y se señala **el primero** que falla:
+  la cinta no llega, llega sin lado, no cruza con la concentración, o el flujo
+  estuvo genuinamente repartido. Cada uno con su remedio.
+- **FLUJO: un ciclo vacío ya no borra lo que sí había.** La pantalla decía
+  «405 buckets · último hace 3610 min» y «PRIMA TOTAL: SIN DATOS» a la vez,
+  porque el módulo tenía **un estado global**. Ahora hay cinco estados y **LKG
+  por carril**, con clave `(symbol, session_date, dataset)` — las tres, porque un
+  LKG mal indexado enseña un número correcto en el sitio equivocado. Los siete
+  escenarios A–G están probados.
+- **El Scanner dentro de TRACE**: barra en el encabezado y sus cuatro líneas en
+  el gráfico. **El Scanner sigue siendo la única autoridad direccional**; TRACE
+  representa y no recalcula. Sin tesis lista sale `ESPERANDO` y no se dibuja
+  nada. El plan es transaccional (`thesis_id`) y **sustituye** a `target`/`risk`
+  en vez de duplicarlos.
+- **Hover sobre una línea**: nombre, precio, dirección, fuerza, fuente y
+  timestamp — dirección y fuerza sólo si el nivel las trae.
+- **TRACE más amplio**: 640 → 780 px.
+- **Sesión de Londres desde las 04:00 de `America/Guayaquil`**, con acumulado
+  propio; al empezar Nueva York, Londres **se sella, no se borra**. El corte se
+  construye en hora de Nueva York: una hora UTC fija fallaría medio año por el
+  horario de verano.
+
 ## v1.53.1 · La identidad de cada línea
 
 Había líneas dibujadas en TRACE **sin etiqueta**, y no se pueden identificar por

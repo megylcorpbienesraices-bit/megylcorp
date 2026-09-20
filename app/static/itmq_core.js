@@ -585,6 +585,13 @@
     zone:        { color: '--text-dim', label: 'Zona',         short: 'ZONA', order: 6 },
     target:      { color: '--pos',      label: 'Objetivo',     short: 'OBJ',  order: 7 },
     risk:        { color: '--neg',      label: 'Invalidación', short: 'INVAL', order: 7 },
+    // v1.54.0 · Las cuatro del PLAN del Scanner. Van con prioridad ALTA: son
+    // las que el operador mira para decidir, así que nunca pueden quedarse sin
+    // etiqueta por detrás de un centroide.
+    scanner_entry:   { color: '--accent',   label: 'ENTRADA', short: 'ENT',  order: 0 },
+    scanner_inval:   { color: '--neg',      label: 'INVAL',   short: 'INVAL', order: 0 },
+    scanner_target1: { color: '--pos',      label: 'OBJ1',    short: 'OBJ1', order: 0 },
+    scanner_target2: { color: '--pos',      label: 'OBJ2',    short: 'OBJ2', order: 0 },
   };
 
   /** Niveles que el panel de flujo comparte con TRACE. */
