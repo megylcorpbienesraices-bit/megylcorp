@@ -252,9 +252,23 @@ def norm_time_series(payload: Dict[str, Any], value_names: tuple[str, ...]) -> D
             # Sin campo neto explícito, el neto ES call - put. Devolver 0.0 aquí
             # convertía una respuesta válida en una serie plana.
             value = (call or 0.0) - (put or 0.0)
+        # v1.51.0 · `_f(value, 0.0) or 0.0` convertia un hueco en un CERO DURO.
+        #
+        # Para prima neta un cero puede ser una lectura legitima —ese minuto no se
+        # pago nada—, pero este normalizador sirve tambien a la IV, al max pain, al
+        # interes abierto y al precio, y en esos cuatro el cero es IMPOSIBLE: la IV
+        # de un subyacente no es cero, el max pain no esta en el strike 0 y el
+        # precio no es 0 dolares. Un bucket sin el campo se publicaba igualmente
+        # con valor cero, y la curva de DERIVA DE VOLATILIDAD caia al suelo y
+        # volvia a subir en sierra, cuando lo que habia era un hueco.
+        #
+        # Un hueco viaja como None y cada consumidor decide: la curva lo salta, la
+        # suma lo ignora. Lo que no puede es afirmar un cero que nadie midio.
+        measured = _f(value, None)
         out.append({
             "t": t,
-            "value": _f(value, 0.0) or 0.0,
+            "value": measured,
+            "value_measured": measured is not None,
             "call": call,
             "put": put,
             "stock_price": _f(_pick(r, "stockPrice", "underlyingPrice", "spot", "price"), None),

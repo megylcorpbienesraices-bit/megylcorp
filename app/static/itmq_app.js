@@ -623,9 +623,13 @@
         : (v.iv_rank_reason || 'sin IV rank'));
     const pc = Q.num(v.iv_percentile, NaN);
     set('volPct', Q.isNum(pc) ? `${pc.toFixed(0)}%` : '—');
+    // Un percentil de 100% junto a una amplitud de 0.00 pp decia «nunca ha estado
+    // mas alta» cuando lo cierto es «no ha estado en ningun otro sitio». Sin
+    // amplitud no hay percentil, y la razon se escribe.
     set('volPctDetail', Q.isNum(pc)
       ? `${Q.num(v.iv_samples, 0).toFixed(0)} observaciones · ${Q.fmtMinutes(Q.num(v.iv_window_minutes, 0))}`
-      : 'observaciones por debajo');
+      : (v.iv_window_degenerate ? (v.iv_window_reason || 'rango observado sin amplitud')
+        : 'observaciones por debajo'));
     const lo = Q.num(v.iv_low, NaN), hi = Q.num(v.iv_high, NaN);
     set('volRange', (Q.isNum(lo) && Q.isNum(hi)) ? `${lo.toFixed(2)} – ${hi.toFixed(2)}%` : '—');
     set('volRangeDetail', (Q.isNum(lo) && Q.isNum(hi)) ? `amplitud ${(hi - lo).toFixed(2)} pp` : 'mín – máx de la ventana');
@@ -1001,7 +1005,7 @@
       im.ready
         ? `${im.source === 'ITM_QUANT' ? 'motor' : 'proveedor'} · ${(im.strikes || []).length} strikes × ${(im.times || []).length} intervalos`
         : (im.reason || 'no disponible'));
-    chart('chartIntervalMap', () => P.heatmap(el('chartIntervalMap'), {
+    chart('chartIntervalMap', () => P.dotmap(el('chartIntervalMap'), {
       fmtY: v => v.toFixed(2),
       fmtX: v => {
         const s = String(v);
@@ -1697,7 +1701,9 @@
    * numero de observaciones. Es la otra mitad de `aggregate: 'none'`: si cada
    * strike tiene que llevar su barra, alguien tiene que reservarle sitio.
    */
-  const EXP_BAR_PX = 11;
+  // v1.51.0 · 11 px dejaba el paso por debajo del alto de una etiqueta, asi que el
+  // eje se saltaba un strike de cada dos. Con 13 cabe el numero en cada fila.
+  const EXP_BAR_PX = 13;
 
   function growForRows(id, count) {
     const host = el(id);

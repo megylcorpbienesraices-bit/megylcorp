@@ -76,6 +76,13 @@
   // Griegas del Interval Map, en el orden en que se alternan en la interfaz.
   const INTERVAL_GREEKS = ['GAMMA', 'DELTA', 'VANNA', 'CHARM'];
 
+  /* Ajuste del campo de fondo. Son propiedades de LECTURA, no de activo: el mismo
+   * suavizado y las mismas isolíneas valen para un ETF de 40 y para un índice de
+   * 5.800, porque la normalización ya es relativa al propio activo. */
+  const HEAT_BLUR = 1.9;              // celdas · manchas grandes, no granuladas
+  const HEAT_LEVELS = [0.68, 0.80, 0.90, 0.96];
+  const HEAT_ISO_ALPHA = 0.30;
+
   // Los estilos de nivel viven en el núcleo para que TRACE y el panel de flujo
   // dibujen el mismo precio con el mismo color y el mismo nombre.
   const LEVEL_STYLE = Q.LEVELS;
@@ -262,9 +269,26 @@
     // endereza antes, no dentro del bucle de píxeles.
     const upright = rowsAreStrikes ? m
       : Array.from({ length: H }, (_, si) => Array.from({ length: W }, (_, xi) => (m[xi] || [])[si]));
-    const f = AB ? AB.field(upright, {}) : null;
+    const f = AB ? AB.field(upright, { blur: HEAT_BLUR }) : null;
 
-    const NOISE = 0.55, GAMMA = 1.9;
+    /* v1.51.0 · El mapa salía como un BLOQUE saturado.
+     *
+     * La normalización es por rango-percentil, así que la celda mediana vale
+     * siempre 0.5 exacto y la mitad superior del panel se iba al tope de opacidad
+     * pasara lo que pasara. Con un suelo de 0.55 y una curva de 1.9 el resultado
+     * era verde macizo arriba, rojo macizo abajo y nada legible en medio.
+     *
+     * Tres cambios, y los tres importan:
+     *
+     *   NOISE sube a 0.62 → banda NEUTRA ancha alrededor del cero. La zona donde
+     *         no pasa nada tiene que verse vacía, no teñida.
+     *   ALPHA_MAX 0.70    → el color nunca llega a opaco. Un campo pastel deja
+     *         ver las velas y las isolíneas por encima; uno opaco las tapa, y
+     *         entonces el mapa compite con el precio en vez de acompañarlo.
+     *   GAMMA baja a 1.35 → con el tope puesto, una curva dura ya no hace falta y
+     *         sólo servía para aplanar todo el rango medio contra el techo.
+     */
+    const NOISE = 0.62, GAMMA = 1.35, ALPHA_MAX = 0.70;
     for (let yi = 0; yi < H; yi++) {
       // fila 0 del bitmap = strike más alto (el eje de precio crece hacia arriba)
       const si = H - 1 - yi;
@@ -275,11 +299,22 @@
         const rank = f ? f.intensity(v) : Math.min(1, Math.abs(v));
         const a = (rank - NOISE) / (1 - NOISE);
         img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
-        img.data[o + 3] = a <= 0 ? 0 : Math.round(255 * Math.min(1, Math.pow(a, GAMMA)));
+        img.data[o + 3] = a <= 0 ? 0
+          : Math.round(255 * ALPHA_MAX * Math.min(1, Math.pow(a, GAMMA)));
       }
     }
     ictx.putImageData(img, 0, 0);
-    S.heat = { canvas: cv, times, strikes, origin: src.origin, mode: src.mode,
+    // Isolíneas: el mismo cálculo que usa el mapa de la sección. Se guardan en
+    // coordenadas de celda y se escalan al dibujar, así el grosor de la línea no
+    // depende de cuántas celdas tenga la matriz.
+    const iso = [];
+    if (f && AB.contours) {
+      for (const level of HEAT_LEVELS) {
+        iso.push({ level, segs: AB.contours(f, level) });
+      }
+    }
+    S.heat = { canvas: cv, times, strikes, origin: src.origin, mode: src.mode, iso,
+               cols: W, rows: H,
                t0: Q.parseTime(times[0]), t1: Q.parseTime(times[times.length - 1]) };
   }
 
@@ -532,6 +567,36 @@
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(hm.canvas, xL, yTop, xR - xL, yBot - yTop);
         ctx.restore();
+
+        /* Isolíneas encima del campo.
+         *
+         * Son lo que convierte una mancha en una lectura: dicen DÓNDE ACABA una
+         * concentración. El campo solo es un degradado, y un degradado no tiene
+         * borde; con la isolínea se ve el contorno de la zona y se puede decir si
+         * el precio está dentro o fuera de ella.
+         *
+         * Se dibujan con la tinta del texto y muy finas: tienen que leerse sobre
+         * el campo sin competir con las velas.
+         */
+        if (Array.isArray(hm.iso) && hm.iso.length && hm.cols > 1 && hm.rows > 1) {
+          const cw = (xR - xL) / hm.cols, ch = (yBot - yTop) / hm.rows;
+          ctx.save();
+          ctx.lineWidth = 1;
+          ctx.lineCap = 'round';
+          for (const band of hm.iso) {
+            ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'),
+                                      HEAT_ISO_ALPHA * S.heatOpacity *
+                                      (0.55 + 0.45 * band.level));
+            ctx.beginPath();
+            for (const g of band.segs) {
+              // El campo tiene la fila 0 abajo y la pantalla la tiene arriba.
+              ctx.moveTo(xL + (g[0] + 0.5) * cw, yBot - (g[1] + 0.5) * ch);
+              ctx.lineTo(xL + (g[2] + 0.5) * cw, yBot - (g[3] + 0.5) * ch);
+            }
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
       }
     }
 
@@ -997,14 +1062,22 @@
     items.sort((a, b) => a.order - b.order);
     // La línea se dibuja para todos los niveles; la etiqueta sólo para los seis más
     // relevantes, porque con más el bloque de texto tapa la zona del precio.
-    for (const it of items) Q.levelLine(ctx, box, it.y, Q.alpha(it.color, 0.45), { dash: [6, 5] });
+    // v1.51.0 · La línea sube de 1 a 1.6 px y la opacidad de 0.45 a 0.72: sobre el
+    // campo de calor y las velas, una línea de 1 px al 45% se perdía justo en las
+    // zonas densas, que son las que hay que leer.
+    for (const it of items) {
+      Q.levelLine(ctx, box, it.y, Q.alpha(it.color, 0.72),
+                  { dash: [6, 5], width: Q.LEVEL_LINE_WIDTH });
+    }
     const shown = items.slice(0, 6);
-    const placed = Q.stackLabels(shown.map(it => ({ ...it })), 17);
+    const placed = Q.stackLabels(shown.map(it => ({ ...it })), Q.LEVEL_LABEL_GAP);
     for (const it of placed) {
       const digits = it.price >= 1000 ? 0 : 2;
-      Q.chip(ctx, box.x + 8, Q.clamp(it.y, box.y + 9, box.y + box.h - 9),
+      Q.chip(ctx, box.x + 8,
+        Q.clamp(it.y, box.y + Q.LEVEL_LABEL_H / 2, box.y + box.h - Q.LEVEL_LABEL_H / 2),
         `${it.name} ${it.price.toFixed(digits)}`,
-        { bg: Q.alpha(it.color, 0.9), color: '#06101c' });
+        { bg: Q.alpha(it.color, 0.92), color: '#06101c',
+          font: Q.LEVEL_FONT, h: Q.LEVEL_LABEL_H, padX: 7 });
     }
   }
 

@@ -101,7 +101,12 @@ def test_flow_panel_draws_the_same_structural_levels_as_trace():
     assert "Q.FLOW_LEVEL_KINDS.indexOf(l.kind) >= 0" in src
     assert "Q.levelStyle(lv.kind)" in src
     # Las etiquetas se apilan: dos niveles cercanos no pueden taparse.
-    assert "Q.stackLabels(drawn, 15)" in src
+    # v1.51.0 · El hueco entre etiquetas deja de ser un 15 escrito aqui y pasa a
+    # `Q.LEVEL_LABEL_GAP`, en el nucleo, junto a la fuente y el alto de la
+    # pastilla. TRACE, la cinta y Net Drift dibujan los MISMOS niveles: con la
+    # medida repetida en tres sitios volvian a divergir al primer ajuste.
+    assert "Q.stackLabels(drawn, Q.LEVEL_LABEL_GAP)" in src
+    assert "Q.LEVEL_FONT" in src and "Q.LEVEL_LABEL_H" in src
 
 
 def test_flow_levels_include_the_walls_and_the_gamma_flip():

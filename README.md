@@ -1,5 +1,43 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.51.0 · Un hueco deja de valer cero
+
+Ninguna fórmula cambia, y **ningún cambio es por activo**: todo vive en el
+normalizador compartido, en el componente de render o en el núcleo.
+
+- **La sierra de la DERIVA DE VOLATILIDAD era un cero inventado.** Una IV de cero
+  es imposible: eso era un hueco pintado en el suelo del eje. El fallo estaba en
+  el **normalizador** (`_f(value, 0.0) or 0.0`), no en la presentación, que es
+  donde se habían buscado los ceros hasta ahora. Afecta a las **cinco**
+  herramientas que comparten ese normalizador: en cuatro de ellas —IV, max pain,
+  interés abierto, precio— el cero es imposible; en la quinta, prima neta, puede
+  ser legítimo y por eso se distingue con `value_measured`.
+- **Y había un segundo cero en el renderizador**: un punto sin valor se dibujaba
+  en `sy(0)`. Ahora el trazo **se parte** en el hueco: se ve que falta un tramo,
+  no un desplome.
+- **`IV PERCENTIL 100 %` sobre `amplitud 0.00 pp`.** Está bien calculado y no
+  informa de nada: con todas las lecturas iguales vale 100 % siempre. Se retiene
+  junto al rank, con la causa escrita. Invierte una decisión de v1.41.5.
+- **El relieve 3D no se entendía.** Caras de dos píxeles y dos polilíneas
+  abiertas que parecían rayas sueltas. La profundidad se calculaba como fracción
+  del alto **total** del lienzo, y el perfil por strike lo hace crecer a miles de
+  píxeles. Ahora: prismas con tres caras iluminadas, suelo cerrado en fuga,
+  profundidad acotada en **píxeles absolutos** y contenedor con alto propio.
+- **Una etiqueta por strike.** El salto se medía contra un paso fijo de 15 px
+  cuando el panel crece con las filas; ahora sale del paso real.
+- **Los contornos del mapa no eran contornos**: un palito suelto por cruce, sin
+  unir con el de la celda vecina. Ahora **marching squares** en el componente
+  común, y un campo pastel con banda neutra y techo de opacidad en lugar de un
+  bloque saturado.
+- **El Interval Map de la sección vuelve a ser una rejilla de puntos.** En el
+  TRACE el mapa es **fondo** y hace falta la forma de la zona; en la sección es el
+  **sujeto** y se lee celda a celda, y ahí el diámetro del punto es la magnitud.
+- **Net Drift: muros y marcas doradas sobre el eje del PRECIO**, no sobre el de la
+  prima, y con **una sola escala** — el primer intento creó un eje nuevo y salían
+  dos escalas de precio con dominios distintos, que es peor que no dibujarlos.
+- **Rotulación de niveles definida una vez** en el núcleo y subida a 12 px; TRACE
+  y Net Drift con suelo de alto **en píxeles**.
+
 ## v1.50.0 · Lo que se mira, y dónde ocurrió
 
 Ninguna fórmula cambia. Cambia **qué se muestra y con cuánto sitio**.

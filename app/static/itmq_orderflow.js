@@ -334,13 +334,18 @@
       if (y < box.y || y > box.y + box.h) continue;
       const st = Q.levelStyle(lv.kind);
       drawn.push({ y, price: p, name: lv.name || st.label, color: Q.token(st.color, '#8494ad') });
-      Q.levelLine(ctx, box, y, Q.alpha(Q.token(st.color, '#8494ad'), 0.7));
+      Q.levelLine(ctx, box, y, Q.alpha(Q.token(st.color, '#8494ad'), 0.72),
+                  { width: Q.LEVEL_LINE_WIDTH });
     }
-    // Las etiquetas se apilan para que dos niveles cercanos no se tapen.
-    for (const it of Q.stackLabels(drawn, 15)) {
-      Q.chip(ctx, box.x + 6, Q.clamp(it.y, box.y + 9, box.y + box.h - 9),
+    // Las etiquetas se apilan para que dos niveles cercanos no se tapen, con la
+    // MISMA tipografía que TRACE y Net Drift: tres tamaños para el mismo muro
+    // harían que la pantalla no pareciera del mismo programa.
+    for (const it of Q.stackLabels(drawn, Q.LEVEL_LABEL_GAP)) {
+      Q.chip(ctx, box.x + 6,
+        Q.clamp(it.y, box.y + Q.LEVEL_LABEL_H / 2, box.y + box.h - Q.LEVEL_LABEL_H / 2),
         `${it.name} ${it.price.toFixed(it.price >= 1000 ? 0 : 2)}`,
-        { bg: Q.alpha(it.color, 0.88), color: '#06101c' });
+        { bg: Q.alpha(it.color, 0.9), color: '#06101c',
+          font: Q.LEVEL_FONT, h: Q.LEVEL_LABEL_H, padX: 7 });
     }
 
     // ── eventos de concentración sobre el precio ─────────────────────────────
@@ -1091,17 +1096,98 @@
       }
     }
 
-    // Eje derecho: precio del subyacente, en el MISMO eje temporal.
+    /* Eje derecho: precio del subyacente, en el MISMO eje temporal.
+     *
+     * v1.51.0 · Aquí cuelgan ahora los MUROS y las MARCAS DE FLUJO.
+     *
+     * El eje izquierdo de este carril mide PRIMA ACUMULADA en dólares y Call Wall
+     * es un PRECIO DE STRIKE. Colgarlos del eje izquierdo pintaría 534 dólares de
+     * prima donde hay un muro en 534 de precio: dos magnitudes compartiendo una
+     * regla, que es como se fabrica una lectura falsa.
+     *
+     * Y van en ESTE eje, no en uno nuevo: dos escalas de precio con dominios
+     * distintos en el mismo gráfico es peor que no dibujar los muros, porque las
+     * dos parecen válidas y sólo una sitúa bien la línea.
+     */
     const px = vis.filter(v => Q.isNum(v.price));
     if (px.length > 1) {
       let plo = Infinity, phi = -Infinity;
       for (const v of px) { plo = Math.min(plo, v.price); phi = Math.max(phi, v.price); }
+      // Los muros entran en el dominio: uno fuera del encuadre no se ve, y «no se
+      // ve» y «no existe» se confunden. Se acota para que un nivel muy lejano no
+      // aplaste el recorrido del precio contra una línea.
+      const span0 = Math.max(phi - plo, 0.02);
+      for (const l of (S.levels || [])) {
+        const lp = Q.num(l && l.price, NaN);
+        if (!Q.isNum(lp)) continue;
+        if (lp < plo - span0 * 3 || lp > phi + span0 * 3) continue;
+        plo = Math.min(plo, lp); phi = Math.max(phi, lp);
+      }
       const ppad = Math.max((phi - plo) * 0.18, 0.02);
       const psy = Q.scale(plo - ppad, phi + ppad, box.y + box.h, box.y);
       const priceC = Q.token('--price', '#7aa2f7');
       ctx.beginPath();
       px.forEach((v, i) => { const x = sx(v.t), y = psy(v.price); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.strokeStyle = Q.alpha(priceC, 0.85); ctx.lineWidth = 1.2; ctx.stroke();
+
+      // Muros y niveles, con la MISMA definición y la MISMA tipografía que TRACE
+      // y la cinta: un Call Wall no puede verse de tres formas distintas.
+      const wmarks = [];
+      for (const l of (S.levels || [])) {
+        const lp = Q.num(l && l.price, NaN);
+        if (!Q.isNum(lp)) continue;
+        const y = psy(lp);
+        if (y < box.y || y > box.y + box.h) continue;
+        const st = Q.levelStyle(l.kind);
+        const col = Q.token(st.color, '#8494ad');
+        Q.levelLine(ctx, box, y, Q.alpha(col, 0.8), { width: Q.LEVEL_LINE_WIDTH });
+        wmarks.push({ y, col, txt: `${st.label || l.kind} ${lp.toFixed(2)}` });
+      }
+      if (wmarks.length) {
+        ctx.save();
+        ctx.font = Q.LEVEL_FONT;
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        for (const m of Q.stackLabels(wmarks, Q.LEVEL_LABEL_GAP)) {
+          const w = ctx.measureText(m.txt).width + 14;
+          const y = Q.clamp(m.y, box.y + 10, box.y + box.h - 10);
+          ctx.fillStyle = Q.alpha(m.col, 0.2);
+          Q.roundRect(ctx, box.x + 4, y - Q.LEVEL_LABEL_H / 2, w, Q.LEVEL_LABEL_H, 4); ctx.fill();
+          ctx.strokeStyle = Q.alpha(m.col, 0.9); ctx.lineWidth = 1;
+          Q.roundRect(ctx, box.x + 4, y - Q.LEVEL_LABEL_H / 2, w, Q.LEVEL_LABEL_H, 4); ctx.stroke();
+          ctx.fillStyle = m.col;
+          ctx.fillText(m.txt, box.x + 11, y);
+        }
+        ctx.restore();
+      }
+
+      /* Marcas de flujo sobre el precio: círculo dorado donde ocurrió, flecha de
+       * sentido e importe. Las MISMAS funciones que TRACE y la cinta — dibujarlas
+       * aquí de otra forma haría que la misma marca significara dos cosas según
+       * la pantalla. */
+      const evs = (S.qflow && S.qflow.ready && Array.isArray(S.qflow.events)) ? S.qflow.events : [];
+      if (evs.length) {
+        // El pico del CICLO: con una constante, un día tranquilo saldría todo
+        // diminuto y el tamaño dejaría de informar.
+        const peak = evs.reduce((m, e) => Math.max(m, Math.abs(Q.num(e.premium, 0))), 0);
+        const used = [];
+        for (const ev of evs) {
+          const t = Q.parseTime(ev.t);
+          const pr = Q.num(ev.price, NaN);
+          if (!Q.isNum(t) || !Q.isNum(pr)) continue;
+          const x = sx(t);
+          if (x < box.x || x > box.x + box.w) continue;
+          const y = psy(pr);
+          if (y < box.y - 6 || y > box.y + box.h + 6) continue;
+          const up = flowIsBuy(ev);
+          flowHalo(ctx, x, y, evStrength(ev, peak));
+          flowArrow(ctx, x, y, up);
+          if (!used.some(u => Math.abs(u - x) < 58)) {
+            used.push(x);
+            flowAmount(ctx, x, y + (up ? -22 : 22), markerLabel(ev),
+                       up ? posC : negC);
+          }
+        }
+      }
       ctx.restore();
       // Sólo etiquetas: una segunda rejilla desalineada con la de prima haría
       // ilegibles las dos. La rejilla la manda el eje izquierdo.
@@ -1409,10 +1495,15 @@
       set('ndStateDetail', (d && d.detail) ? String(d.detail) : 'sin deriva neta en este ciclo');
       return;
     }
-    set('ndCall', Q.money(Q.num(d.cum_call_premium, 0), 1));
-    set('ndPut', Q.money(Q.num(d.cum_put_premium, 0), 1));
-    set('ndNet', Q.money(Q.num(d.cum_net_premium, 0), 1));
-    set('ndVolume', `${Q.compact(Q.num(d.cum_call_volume, 0), 1)} / ${Q.compact(Q.num(d.cum_put_volume, 0), 1)}`);
+    /* v1.51.0 · `Q.num(x, 0)` convertia un agregado AUSENTE en un cero duro, y
+     * `Q.money(0)` lo escribia como «$0.0»: la afirmacion «hoy no se acumulo
+     * prima call», que es falsa cuando lo que pasa es que el proveedor publico la
+     * serie pero no sus totales. El formateador ya devuelve «—» ante un hueco;
+     * lo que sobraba era el cero por defecto que se lo tapaba. */
+    set('ndCall', Q.money(d.cum_call_premium, 1));
+    set('ndPut', Q.money(d.cum_put_premium, 1));
+    set('ndNet', Q.money(d.cum_net_premium, 1));
+    set('ndVolume', `${Q.compact(d.cum_call_volume, 1)} / ${Q.compact(d.cum_put_volume, 1)}`);
     set('ndState', estadoDato(d.state));
     set('ndStateDetail', `${d.buckets || 0} buckets · ${d.detail || ''}`);
   }

@@ -116,14 +116,36 @@ def test_missing_history_and_missing_iv_are_reported_separately(storage):
     assert "IV ATM" in iv_rank_native(storage, "DIA", "AUTO", 0.0)["reason"]
 
 
-def test_a_flat_history_has_no_rank_but_still_has_a_percentile(storage):
-    """Rango cero: dividir por él daría infinito. El rank viaja vacío; el percentil
-    sigue siendo legítimo."""
+def test_a_flat_history_publishes_neither_rank_nor_percentile(storage):
+    """Ventana degenerada: ni rank ni percentil, y se dice por qué.
+
+    v1.51.0 · Esta prueba invierte la decisión que tomó v1.41.5, que conservaba el
+    percentil porque `(hist <= iv).mean()` sigue estando DEFINIDO con rango cero.
+    Está definido, sí, pero vale 100% siempre, y en pantalla aparecía como
+    «IV PERCENTIL 100%» justo encima de «RANGO OBSERVADO 11.69 – 11.69%, amplitud
+    0.00 pp». Un operador lee ahí «la IV nunca ha estado más alta», y lo cierto es
+    lo contrario: no ha estado en ningún otro sitio. El número es un artefacto de
+    la comparación `<=`, no una medida de dónde está la IV.
+
+    Regla GLOBAL: no depende del activo ni de la ventana de vencimiento.
+    """
     from app.core.session_memory import iv_rank_native
-    _seed(storage, "DIA", [20.0] * 60)
-    r = iv_rank_native(storage, "DIA", "AUTO", 20.0)
-    assert r["ready"] and r["rank"] is None
-    assert r["percentile"] == pytest.approx(100.0)
+    for symbol in ("DIA", "SPY", "QQQ", "IWM", "AAPL", "SOFI"):
+        _seed(storage, symbol, [20.0] * 60)
+        r = iv_rank_native(storage, symbol, "AUTO", 20.0)
+        assert r["ready"] is True, symbol
+        assert r["rank"] is None, symbol
+        assert r["percentile"] is None, symbol
+        assert r["degenerate_window"] is True, symbol
+        # La causa viaja: un hueco sin causa es indistinguible de un fallo.
+        assert "AMPLITUD" in (r["degenerate_reason"] or "").upper(), symbol
+    # Con amplitud real los dos números vuelven, en cualquier activo.
+    for symbol in ("DIA", "SPY", "AAPL"):
+        _seed(storage, symbol, list(np.linspace(16.0, 24.0, 60)), expiry_mode="WIDE")
+        ok = iv_rank_native(storage, symbol, "WIDE", 24.0)
+        assert ok["rank"] == pytest.approx(100.0), symbol
+        assert ok["percentile"] == pytest.approx(100.0), symbol
+        assert ok["degenerate_window"] is False, symbol
 
 
 def test_rank_is_scoped_to_the_expiry_window(storage):

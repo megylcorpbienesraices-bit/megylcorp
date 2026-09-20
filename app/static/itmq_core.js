@@ -512,6 +512,22 @@
     return { x: bx, y: y - h / 2, w, h };
   }
 
+  /* v1.51.0 · Rotulación de NIVELES, definida una sola vez.
+   *
+   * Las etiquetas de Call Wall, Put Wall, Zero Gamma y compañía se leían con
+   * dificultad: 10 px de texto en una pastilla de 16 px de alto, sobre un fondo
+   * con velas y campo de calor detrás. Son las referencias que se miran mil veces
+   * en una sesión, así que el tamaño tiene que dar para leerlas de un vistazo.
+   *
+   * Y va aquí, no en cada panel: TRACE, la cinta y Net Drift dibujan los MISMOS
+   * niveles, y con tres constantes repartidas volverían a divergir al primer
+   * ajuste. El hueco crece con la altura para que dos muros cercanos no se pisen.
+   */
+  const LEVEL_FONT = '700 12px ui-monospace, monospace';
+  const LEVEL_LABEL_H = 20;
+  const LEVEL_LABEL_GAP = 22;
+  const LEVEL_LINE_WIDTH = 1.6;
+
   /** Línea horizontal punteada de nivel estructural. */
   function levelLine(ctx, box, y, color, opts) {
     const o = opts || {};
@@ -572,6 +588,7 @@
     NO_DATA,
     token, alpha,
     LEVELS, FLOW_LEVEL_KINDS, levelStyle,
+    LEVEL_FONT, LEVEL_LABEL_H, LEVEL_LABEL_GAP, LEVEL_LINE_WIDTH,
     roundRect, gridY, axisX, chip, levelLine, stackLabels,
     panels: PANELS,
     renderErrors: RENDER_ERRORS,

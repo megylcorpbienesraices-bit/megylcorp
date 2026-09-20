@@ -147,14 +147,23 @@ def iv_rank_native(storage: Path, symbol: str, expiry_mode: str, current_iv: Any
 
     lo, hi = float(hist.min()), float(hist.max())
     span = hi - lo
-    rank = None if span <= 1e-9 else float(np.clip((iv - lo) / span * 100.0, 0.0, 100.0))
-    pct = float((hist <= iv).mean() * 100.0)
+    # v1.51.0 · Con un rango observado DEGENERADO —todas las lecturas iguales— ni el
+    # rank ni el percentil dicen nada. El rank ya se retenia; el percentil no, y
+    # salia 100% porque `hist <= iv` es cierto para todas. En pantalla eso se leia
+    # como «la IV nunca ha estado mas alta» junto a una amplitud de 0.00 pp, que es
+    # lo contrario: la IV no ha estado en ningun otro sitio. Se retienen los dos.
+    degenerate = span <= 1e-9
+    rank = None if degenerate else float(np.clip((iv - lo) / span * 100.0, 0.0, 100.0))
+    pct = None if degenerate else round(float((hist <= iv).mean() * 100.0), 2)
     minutes = 0.0
     if "timestamp" in df.columns and len(df) > 1:
         minutes = max(0.0, (df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).total_seconds() / 60.0)
     return {
         "ready": True, "source": "ITM_QUANT",
-        "iv": iv, "rank": rank, "percentile": round(pct, 2),
+        "iv": iv, "rank": rank, "percentile": pct,
+        "degenerate_window": bool(degenerate),
+        "degenerate_reason": ("RANGO OBSERVADO SIN AMPLITUD · "
+                              f"{n} lecturas idénticas") if degenerate else None,
         "low": lo, "high": hi, "median": float(hist.median()), "samples": n,
         "window_minutes": round(minutes, 1),
         "note": ("Rango y percentil sobre la IV ATM que este motor observó para el mismo "

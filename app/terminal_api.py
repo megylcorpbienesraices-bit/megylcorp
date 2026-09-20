@@ -698,6 +698,10 @@ def _volatilidad(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]
         "iv_rank_native": native_rank,
         "iv_rank_divergence": divergence,
         "iv_percentile": _f(native.get("percentile")) if native.get("ready") else None,
+        # Ventana degenerada: todas las lecturas identicas. Ni rank ni percentil
+        # significan nada ahi, y la seccion tiene que poder decir por que.
+        "iv_window_degenerate": bool(native.get("degenerate_window")),
+        "iv_window_reason": native.get("degenerate_reason"),
         "iv_samples": _f(native.get("samples")),
         "iv_window_minutes": _f(native.get("window_minutes")),
         "iv_low": _f(native.get("low")), "iv_high": _f(native.get("high")),

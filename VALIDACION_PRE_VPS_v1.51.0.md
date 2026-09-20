@@ -1,14 +1,130 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.50.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.51.0
 
-Release: `ITM_QUANT_v1.50.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.51.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A14** es la de esta release.
+> Documento acumulativo. La sección **A15** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2038 casos / 147 ficheros**
-- Particiones: 21 · `plan_sha256`: `ce3db8bcc6eadffecdc5737066a18ef744941e0fa2a88371896e9b8332727aaf`
+- Inventario nominal: **2056 casos / 147 ficheros**
+- Particiones: 21 · `plan_sha256`: `9fa58a0b184e19a470b60a3ea722258f500c1cd911d8f7f377eb4944fcbde998`
 - Resultado: **PASS**
+
+---
+
+## A15 · v1.51.0 · Un hueco deja de valer cero
+
+### Qué se certifica
+
+Dieciséis casos nuevos en `tests/test_v1470_adaptive_rendering.py`, más uno
+reescrito en `tests/test_v1415_native_iv_rank_and_volume_provenance.py`.
+
+**1 · Un valor ausente es un hueco, no un cero.**
+`test_an_absent_value_is_a_gap_not_a_zero`: un bucket sin el campo de IV entre
+dos que sí lo tienen sale `None` con `value_measured: False`.
+
+**2 · La regla cubre las cinco herramientas del normalizador.**
+`test_the_gap_rule_covers_every_series_of_this_normalizer`: IV, max pain, interés
+abierto, precio y prima neta. Un max pain en el strike 0 o un precio de 0 dólares
+son afirmaciones igual de falsas que una IV de 0 %.
+
+**3 · Una prima neta con call y put SIGUE siendo una medición.**
+`test_a_net_premium_with_call_and_put_is_still_measured`: 900 − 250 = 650, con
+`value_measured: True`. El cambio no puede convertir en hueco una lectura real.
+
+**4 · La curva se parte en el hueco.**
+`test_the_curve_breaks_at_a_gap_instead_of_falling_to_the_floor`: el punto se
+mapea con `NaN`, no con cero, y el trazo se reinicia por tramo.
+
+**5 · La ventana degenerada de IV no publica ni rank ni percentil.**
+`test_a_flat_history_publishes_neither_rank_nor_percentile`, sobre **seis
+activos** (DIA, SPY, QQQ, IWM, AAPL, SOFI) y comprobando además que con amplitud
+real los dos números vuelven. Invierte explícitamente la decisión de v1.41.5.
+
+**6 · Y la sección dice la causa.**
+`test_a_degenerate_iv_window_reports_its_cause_on_screen`.
+
+**7 · Los totales de Net Drift tampoco fabrican ceros.**
+`test_net_drift_totals_are_never_a_fabricated_zero`.
+
+**8 · El relieve es un sólido, no una barra con un borde.**
+`test_the_relief_is_a_solid_not_a_bar_with_an_edge`: tres caras con tres
+opacidades distintas. Sin gradación de luz no hay volumen.
+
+**9 · La fuga no puede salirse del lienzo.**
+`test_the_relief_depth_cannot_run_off_the_canvas`: acotada en píxeles absolutos
+**y** el contenedor con alto propio, no el crecido del perfil de barras.
+
+**10 · El suelo es un plano cerrado.**
+`test_the_relief_floor_is_a_closed_plane`.
+
+**11 · Los contornos son líneas continuas.**
+`test_the_contours_are_continuous_lines_not_loose_dashes`: marching squares, con
+las sillas de montar separadas en dos ramas para no inventar una conexión que el
+campo no tiene.
+
+**12 · TRACE y la sección comparten tratamiento del campo.**
+`test_trace_and_the_section_share_one_field_treatment`: mismos umbrales, mismo
+suelo de ruido, mismo techo de opacidad.
+
+**13 · El campo nunca llega a opaco.**
+`test_the_field_never_reaches_full_opacity`.
+
+**14 · El Interval Map de la sección es una rejilla de puntos.**
+`test_the_section_interval_map_is_a_dot_grid`: sin suavizar ni rellenar, con el
+diámetro como magnitud, y un hueco no se dibuja mientras que un cero medido sí.
+
+**15 · Net Drift cuelga los muros del eje del PRECIO, con UNA sola escala.**
+`test_net_drift_draws_walls_on_a_price_axis_not_on_the_premium_axis` y
+`test_net_drift_marks_the_flow_with_the_same_functions_as_the_rest`.
+
+**16 · La rotulación de niveles se define una vez.**
+`test_level_typography_is_defined_once_for_the_whole_terminal`.
+
+**17 · Los dos gráficos principales tienen suelo en píxeles.**
+`test_the_two_main_charts_have_a_floor_in_pixels`.
+
+**18 · Nada de esta release conoce un ticker.**
+`test_none_of_this_release_knows_a_ticker`: seis símbolos contra seis ficheros.
+Todo cambio es global.
+
+### El error que se cometió y se corrigió dentro de la propia release
+
+La primera implementación de los muros en Net Drift **creó un eje de precio
+nuevo**. En la captura salieron **dos columnas de precios a la derecha**, con
+dominios distintos: la mía abarcaba 530–535 porque incluía el Vol Trigger, y la
+que ya existía abarcaba 533.20–534.20. Dos escalas de precio en el mismo gráfico
+es peor que no dibujar los muros: las dos parecen válidas y sólo una sitúa bien
+la línea. Se eliminó el eje nuevo y los muros y las marcas pasaron al que ya
+había.
+
+Se detectó **mirando la captura**, no por un test. Por eso hay ahora un test que
+cuenta las escalas: `assert body.count("Q.scale(plo") == 1`.
+
+### Verificación visual
+
+Terminal real en `127.0.0.1:8795`, **0 errores de consola**, siete capturas:
+
+| Panel | Qué se ve |
+|---|---|
+| TRACE | Ocupa ~800 px de alto. Etiquetas de nivel legibles a tamaño normal. Isolíneas continuas sobre un campo pastel. |
+| EXPOSICIÓN · Relieve 3D | Prismas con volumen real, suelo en fuga, escala de valor abajo y **los 21 strikes etiquetados**. |
+| INTERÉS ABIERTO | 530.20, 530.70, 531.20, 531.70… **sin saltarse ninguno**. |
+| INTERVAL MAP | Rejilla de puntos roja/verde con el diámetro como magnitud y la línea de precio azul encima. |
+| VOLATILIDAD | `IV PERCENTIL —` con `RANGO OBSERVADO SIN AMPLITUD · 44 lecturas idénticas`. |
+| NET DRIFT | Zero Gamma, Call Wall, Δ Center, Γ Center y Put Wall en el eje del precio; marcas doradas con flecha e importe; una sola escala. |
+| FLUJO | Carril TOTAL declarando su causa en vez de quedarse mudo. |
+
+### Límites de esta verificación
+
+- **Net Drift se verificó inyectando una serie sintética** en el navegador real:
+  este entorno no tiene serie de net-drift del proveedor. Lo verificado es la
+  **geometría del render**, no el dato del proveedor.
+- **Sin cinta de opciones real**: las marcas doradas sobre flujo vivo no se han
+  podido fotografiar.
+- **Sin HTTP 200 real de `dark-pool-levels`**: sin salida ni credenciales.
+- **Empaquetado certificado imposible aquí**: 3.11.15 / 22.22.2 frente a
+  3.12.14 / 22.16.0 fail-closed.
 
 ---
 

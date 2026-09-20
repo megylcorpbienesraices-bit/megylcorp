@@ -569,6 +569,62 @@
     };
   }
 
+  /* ── Isolíneas del campo · marching squares ───────────────────────────────
+   *
+   * v1.51.0 · Los «contornos» anteriores no eran contornos. Barrían cada eje por
+   * separado y por cada cruce pintaban un palito de una celda, sin unirlo con el
+   * de al lado. El resultado era una nube de rayitas que se leía como ruido, y
+   * por eso el mapa parecía sucio en vez de tener zonas.
+   *
+   * Marching squares sí produce una línea CONTINUA: mira las cuatro esquinas de
+   * cada celda a la vez, y según cuáles superan el nivel emite el segmento que
+   * atraviesa la celda de un borde al otro. Los segmentos de celdas vecinas se
+   * encuentran en el mismo punto del borde compartido, así que la curva se cierra
+   * sola alrededor de la zona.
+   *
+   * Devuelve segmentos en COORDENADAS DE CELDA; quien dibuja los escala a su
+   * panel. Así el mismo cálculo sirve al TRACE y al mapa de la sección, que es lo
+   * que evita que los dos vuelvan a divergir.
+   */
+  function contours(f, level) {
+    const segs = [];
+    if (!f || !f.w || !f.h) return segs;
+    const w = f.w, h = f.h;
+    // La fila 0 del campo es el valor de abajo; quien dibuja decide la orientación.
+    const at = (x, y) => f.intensity(f.values[y * w + x]);
+    // Punto interpolado sobre un borde: es lo que hace que la curva sea suave y
+    // no un escalón de celda.
+    const ix = (x, a, b2) => x + (level - a) / ((b2 - a) || 1e-9);
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const tl = at(x, y + 1), tr = at(x + 1, y + 1);
+        const bl = at(x, y), br = at(x + 1, y);
+        const idx = (tl >= level ? 1 : 0) | (tr >= level ? 2 : 0)
+                  | (br >= level ? 4 : 0) | (bl >= level ? 8 : 0);
+        if (idx === 0 || idx === 15) continue;
+        const T = () => [ix(x, tl, tr), y + 1];
+        const B = () => [ix(x, bl, br), y];
+        const L = () => [x, y + (level - bl) / ((tl - bl) || 1e-9)];
+        const R = () => [x + 1, y + (level - br) / ((tr - br) || 1e-9)];
+        const push = (p, q) => segs.push([p[0], p[1], q[0], q[1]]);
+        switch (idx) {
+          case 1: case 14: push(L(), T()); break;
+          case 2: case 13: push(T(), R()); break;
+          case 3: case 12: push(L(), R()); break;
+          case 4: case 11: push(R(), B()); break;
+          case 6: case 9:  push(T(), B()); break;
+          case 7: case 8:  push(L(), B()); break;
+          // Silla de montar: dos ramas distintas cruzan la misma celda. Unirlas
+          // en una sola inventaría una conexión que el campo no tiene.
+          case 5: push(L(), T()); push(R(), B()); break;
+          case 10: push(T(), R()); push(L(), B()); break;
+          default: break;
+        }
+      }
+    }
+    return segs;
+  }
+
   /**
    * Alto (o ancho) que necesita un panel para dar a cada observación una barra
    * del grosor pedido, SIN agrupar.
@@ -587,7 +643,7 @@
 
   global.ITMQBars = {
     layout, bin, extent, describe, timeLayout, timeBins, reduceBin, grid, field,
-    extentFor, MIN_CELL_PX, FIELD_BLUR_CELLS,
+    contours, extentFor, MIN_CELL_PX, FIELD_BLUR_CELLS,
     FILL, MIN_BAR_PX, TARGET_BAR_PX, MAX_BAR_PX,
     MIN_EXTENT_PX, MAX_EXTENT_FRACTION,
   };

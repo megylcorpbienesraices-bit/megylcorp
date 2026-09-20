@@ -1,33 +1,35 @@
 {
- "version": "1.50.0",
- "release": "ITM_QUANT_v1.50.0_PRE_VPS",
+ "version": "1.51.0",
+ "release": "ITM_QUANT_v1.51.0_PRE_VPS",
  "scope": "MULTI_ASSET",
- "base_version": "1.49.0",
+ "base_version": "1.50.0",
  "focus": [
-  "EXPOSICION / INTERES ABIERTO: la ventana de strikes deja de arrastrar strikes que no pueden mover nada. Banda proporcional al subyacente + materialidad relativa; un muro real fuera de la banda NUNCA se oculta.",
-  "TRACE: la disposicion de referencia es la definitiva y GLOBAL — perfil DEX a la izquierda, mapa de intervalos continuo con contornos y velas al centro, perfil GEX a la derecha. Ningun activo tiene tratamiento propio.",
-  "MARCAS DE FLUJO: circulo dorado en el punto donde ocurrio el flujo, flecha verde/roja de compra/venta e importe. IDENTICAS en TRACE y en FLUJO DE ORDENES, desde las mismas funciones.",
-  "NET DRIFT: grafico mas grande (2.2fr), carril TOTAL propio con marcado dorado declarado (Top 3 o >=10x la media) y el valor de cada curva al final del trazo.",
-  "MAPA DE CALOR DEL TRACE: dinamico sobre la liquidez de gamma/delta/vanna/charm segun el selector, no una tabla pintada.",
-  "Ningun carril queda mudo: si hay ejes pero no hay dato, el carril declara la causa."
+  "CERO FABRICADO EN EL NORMALIZADOR: `norm_time_series` publicaba un bucket sin campo como valor CERO. Afectaba a las cinco herramientas que lo comparten; en la DERIVA DE VOLATILIDAD dibujaba una sierra que caia a 0.00 y volvia a subir. Un hueco viaja como None y la curva se PARTE en vez de desplomarse.",
+  "IV PERCENTIL: con rango observado de amplitud cero salia 100%. Se retiene junto al rank, con la causa escrita.",
+  "RELIEVE 3D reconstruido: prismas con cara frontal, superior y tapa lateral iluminadas desde una fuente, suelo cerrado en fuga y profundidad acotada en PIXELES (la fraccion sin tope mandaba la fuga fuera del lienzo cuando el perfil crecia).",
+  "INTERES ABIERTO y EXPOSICION: una etiqueta por strike. El salto se calculaba contra un paso fijo de 15 px cuando el panel crece con las filas.",
+  "MAPA DE CALOR: contornos REALES por marching squares en el componente comun, banda neutra mas ancha y techo de opacidad. Antes eran palitos sueltos por cruce y un bloque saturado.",
+  "INTERVAL MAP de la seccion: rejilla de PUNTOS con el diametro como magnitud y el precio superpuesto. El campo continuo se queda donde es el fondo (TRACE); donde el mapa es el sujeto se lee celda a celda.",
+  "NET DRIFT: muros y marcas doradas de flujo sobre el eje del PRECIO, no sobre el de la prima, y sobre UNA sola escala de precio.",
+  "ROTULACION de niveles definida una vez en el nucleo y subida de 10 a 12 px; TRACE y Net Drift con suelo de alto en pixeles."
  ],
  "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
  "quant_logic_changes": [
   "SIN CAMBIOS de formula. Ninguna metrica cambia de valor.",
-  "RECORTE DE STRIKES: es un filtro de PRESENTACION. Las filas descartadas siguen en el bundle y el panel publica strike_window con banda, total, conservados y descartados.",
-  "Las marcas doradas no crean dato: pintan el flujo ya observado con su importe real.",
-  "El carril TOTAL de Net Drift SUMA la prima del intervalo; no promedia ni cancela."
+  "UN HUECO DEJA DE VALER CERO. No es un cambio de calculo: es dejar de AFIRMAR un cero que nadie midio. Afecta a IV, max pain, interes abierto, precio y prima neta.",
+  "El percentil de IV se retiene con ventana degenerada porque `(hist <= iv).mean()` vale 100% siempre ahi: es un artefacto de la comparacion, no una medida.",
+  "El recorte de strikes y la agrupacion visual siguen siendo PRESENTACION; los agregados salen del libro entero."
  ],
  "tests": {
-  "collected": 2038,
-  "passed": 2038,
+  "collected": 2056,
+  "passed": 2056,
   "failed": 0,
   "skipped": 0,
   "errors": 0,
   "files": 147,
   "status": "PASS",
   "partitions": 21,
-  "plan_sha256": "ce3db8bcc6eadffecdc5737066a18ef744941e0fa2a88371896e9b8332727aaf"
+  "plan_sha256": "9fa58a0b184e19a470b60a3ea722258f500c1cd911d8f7f377eb4944fcbde998"
  },
  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
  "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -108,11 +110,26 @@
   "net_drift_panel_size": "MINMAX_0_2_2FR",
   "net_drift_total_lane": "SUM_PER_INTERVAL_WITH_DECLARED_GOLD_RULE",
   "net_drift_curve_labels": "VALUE_AT_THE_END_WITH_COLLISION_SEPARATION",
-  "empty_lane_reason": "EVERY_LANE_DECLARES_ITS_CAUSE_NEVER_A_MUTE_BLANK"
+  "empty_lane_reason": "EVERY_LANE_DECLARES_ITS_CAUSE_NEVER_A_MUTE_BLANK",
+  "time_series_gap": "ABSENT_VALUE_IS_NULL_NEVER_ZERO",
+  "line_gap_rendering": "THE_STROKE_BREAKS_IT_DOES_NOT_FALL_TO_THE_FLOOR",
+  "iv_degenerate_window": "NEITHER_RANK_NOR_PERCENTILE_WITH_THE_CAUSE_STATED",
+  "net_drift_totals": "ABSENT_AGGREGATE_IS_A_DASH_NOT_A_ZERO",
+  "relief_geometry": "REAL_PRISMS_LIT_FROM_ONE_SOURCE_WITH_A_CLOSED_FLOOR",
+  "relief_depth": "CLAMPED_IN_ABSOLUTE_PIXELS_NOT_ONLY_AS_A_FRACTION",
+  "relief_container": "OWN_FIXED_HEIGHT_NOT_THE_GROWN_ONE",
+  "strike_axis_labels": "SKIP_DERIVED_FROM_THE_REAL_PITCH_ONE_PER_STRIKE",
+  "field_contours": "MARCHING_SQUARES_CONTINUOUS_ISOLINES_IN_THE_SHARED_COMPONENT",
+  "field_palette": "WIDE_NEUTRAL_BAND_AND_AN_OPACITY_CEILING",
+  "section_interval_map": "DOT_GRID_DIAMETER_IS_THE_MAGNITUDE",
+  "net_drift_price_axis": "ONE_PRICE_SCALE_CARRYING_WALLS_AND_MARKERS",
+  "level_typography": "DEFINED_ONCE_IN_THE_CORE_FOR_EVERY_SCREEN",
+  "chart_height_floor": "IN_PIXELS_NOT_ONLY_AS_A_GRID_FRACTION"
  },
  "verification_limits": [
-  "SIGUE SIN HABER un HTTP 200 real de dark-pool-levels: este entorno no tiene salida a quantdata.us ni credenciales. El cuerpo enviado es el del contrato publicado y el parser cubre la respuesta documentada, pero la certificacion LIVE queda pendiente de ejecutar scripts/verify_live_quantdata.py con la API key real.",
-  "Las marcas doradas de flujo se verifican por test sobre el codigo de render: sin cinta de opciones real en este entorno no hay marcas que fotografiar. La geometria (halo, flecha, importe) si se valida en la regresion visual.",
+  "SIGUE SIN HABER un HTTP 200 real de dark-pool-levels: este entorno no tiene salida a quantdata.us ni credenciales. Pendiente de scripts/verify_live_quantdata.py con la API key real.",
+  "NET DRIFT se ha verificado visualmente INYECTANDO una serie sintetica en el navegador real, porque este entorno no tiene serie de net-drift del proveedor. Lo verificado es la GEOMETRIA del render —muros en el eje del precio, marcas doradas con flecha e importe, una sola escala—, no el dato del proveedor.",
+  "Las marcas doradas sobre cinta de opciones real no se han podido fotografiar: no hay cinta en este entorno.",
   "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2, de modo que aqui solo puede producirse un ZIP de fuentes SIN certificar."
  ]
 }

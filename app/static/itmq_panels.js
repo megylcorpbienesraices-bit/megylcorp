@@ -245,6 +245,9 @@
   /* ---------------------------------------------- barras horizontales */
 
   /** data: [{label, value}] — perfil por strike con el eje de valor abajo. */
+  // Alto minimo que necesita una etiqueta de 9 px para no tocar a la vecina.
+  const LABEL_MIN_PX = 11;
+
   function hbars(host, opts) {
     const o = Object.assign({ fmt: v => Q.signedCompact(v, 1) }, opts || {});
     const glide = new Q.Glide(150);
@@ -287,7 +290,18 @@
       ctx.beginPath(); ctx.moveTo(Math.round(zero) + .5, b.y); ctx.lineTo(Math.round(zero) + .5, b.y + b.h); ctx.stroke();
       ctx.restore();
 
-      const skip = Math.max(1, Math.ceil(draw.length / Math.max(1, Math.floor(b.h / 15))));
+      /* v1.51.0 · La etiqueta se saltaba un strike de cada dos.
+       *
+       * El salto se calculaba contra un paso FIJO de 15 px, pero el panel de
+       * strikes CRECE para dar a cada strike su propia fila, y ese paso es el que
+       * manda. Con filas de 13 px y un divisor de 15 el resultado era siempre
+       * saltar una: en pantalla se veian las barras de todos los strikes y los
+       * numeros de la mitad, que es justo lo que obliga a contar a ojo.
+       *
+       * Ahora el salto sale del paso REAL: si la fila da para escribir, se escribe.
+       * Sigue habiendo salto cuando el panel no crece —un panel fijo y apretado—,
+       * porque ahi solapar los numeros seria peor que espaciarlos. */
+      const skip = Math.max(1, Math.ceil(LABEL_MIN_PX / Math.max(1, slot)));
       ctx.save();
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
       draw.forEach((d, i) => {
@@ -392,23 +406,40 @@
       ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
       for (const s of usable) {
         const col = s.color || Q.token('--accent', '#38bdf8');
-        const pts = s.points.map(p => ({ x: sx(Q.parseTime(p.t)), y: sy(Q.num(p.v, 0)) }))
-          .filter(p => Q.isNum(p.x) && Q.isNum(p.y));
-        if (!pts.length) continue;
-        if (o.fill || s.fill) {
+        /* v1.51.0 · `sy(Q.num(p.v, 0))` mandaba al SUELO del eje todo punto sin
+         * valor. En la deriva de volatilidad eso dibujaba una sierra que bajaba a
+         * 0.00 y volvia a subir: una IV de cero es imposible, y lo que habia en
+         * esos instantes era un hueco, no una lectura.
+         *
+         * Un hueco parte el trazo. La linea vuelve a empezar despues, y se ve que
+         * falta un tramo en vez de leerse como un desplome. */
+        const segs = [];
+        let cur = [];
+        for (const p of s.points) {
+          const x = sx(Q.parseTime(p.t));
+          const v = Q.num(p.v, NaN);
+          if (!Q.isNum(x) || !Q.isNum(v)) { if (cur.length) { segs.push(cur); cur = []; } continue; }
+          cur.push({ x, y: sy(v) });
+        }
+        if (cur.length) segs.push(cur);
+        if (!segs.length) continue;
+        for (const pts of segs) {
+          if (o.fill || s.fill) {
+            ctx.beginPath();
+            pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+            ctx.lineTo(pts[pts.length - 1].x, sy(0));
+            ctx.lineTo(pts[0].x, sy(0));
+            ctx.closePath();
+            ctx.fillStyle = Q.alpha(col, 0.16); ctx.fill();
+          }
           ctx.beginPath();
           pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-          ctx.lineTo(pts[pts.length - 1].x, sy(0));
-          ctx.lineTo(pts[0].x, sy(0));
-          ctx.closePath();
-          ctx.fillStyle = Q.alpha(col, 0.16); ctx.fill();
-        }
-        ctx.beginPath();
-        pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-        ctx.strokeStyle = col; ctx.lineWidth = s.width || 1.5; ctx.lineJoin = 'round'; ctx.stroke();
-        if (pts.length === 1) {
-          ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 3.2, 0, Math.PI * 2);
-          ctx.fillStyle = col; ctx.fill();
+          ctx.strokeStyle = col; ctx.lineWidth = s.width || 1.5; ctx.lineJoin = 'round'; ctx.stroke();
+          // Un tramo de un solo punto no tiene linea que dibujar: se marca.
+          if (pts.length === 1) {
+            ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 3.2, 0, Math.PI * 2);
+            ctx.fillStyle = col; ctx.fill();
+          }
         }
       }
       ctx.restore();
@@ -500,8 +531,12 @@
       const rows = [];
       for (const p of points) {
         const t = Q.parseTime(p.t);
-        if (!Q.isNum(t)) continue;
-        rows.push({ label: Q.hhmm(t), value: Q.num(p.v, 0), t });
+        const v = Q.num(p.v, NaN);
+        // Un hueco no es una barra de altura cero: no se apila en el contenedor,
+        // porque una barra de cero sigue dibujando su presencia minima y se leeria
+        // como «aqui se midio y salio cero».
+        if (!Q.isNum(t) || !Q.isNum(v)) continue;
+        rows.push({ label: Q.hhmm(t), value: v, t });
       }
       rows.sort((a, c) => a.t - c.t);
       const plan = AB.bin(rows, b.w, { aggregate: 'sum', maxThickness: o.maxBar });
@@ -693,133 +728,185 @@
    *
    * data: [{label, value, color?}]
    */
+  /* Relieve isométrico del perfil por strike.
+   *
+   * v1.51.0 · La versión anterior era ilegible y hay que decir por qué, porque el
+   * mismo error es fácil de repetir: dibujaba caras de dos o tres píxeles —el paso
+   * de fila salía del alto del panel dividido entre TODAS las filas— y remataba
+   * con dos polilíneas de suelo que, al no cerrar ninguna superficie, se leían
+   * como rayas sueltas cruzando el gráfico.
+   *
+   * Un relieve se entiende cuando tiene tres cosas, y las tres se construyen aquí:
+   *
+   *   1. VOLUMEN REAL. Cada strike es un prisma con cara frontal, cara superior y
+   *      tapa lateral, sombreadas desde UNA fuente de luz. Sin las tres caras no
+   *      hay volumen: hay una barra con un borde.
+   *   2. SUELO. Un plano en fuga con sus líneas de valor. Sin suelo el relieve
+   *      flota y no se puede situar a qué altura está cada cresta.
+   *   3. PASO SUFICIENTE. Se agrupa hasta que cada prisma mide lo bastante para
+   *      verse; con ciento sesenta strikes en un panel fijo no cabe uno por fila,
+   *      y forzarlo es lo que producía las láminas de dos píxeles. El extremo se
+   *      conserva al agrupar, así que una cresta sigue siendo una cresta.
+   *
+   * La profundidad se acota en PÍXELES ABSOLUTOS además de en fracción: es la
+   * fracción sin tope lo que, en un panel alto, mandaba la fuga fuera del lienzo.
+   */
+  const RELIEF_MIN_DEPTH = 26;
+  const RELIEF_MAX_DEPTH = 96;
+  const RELIEF_ROW_PX = 17;      // paso objetivo entre prismas
+  const RELIEF_SKEW = 0.58;      // componente vertical de la fuga
+
   function relief(host, opts) {
-    const o = Object.assign({ fmt: v => Q.signedCompact(v, 2), depth: 0.34 }, opts || {});
+    const o = Object.assign({ fmt: v => Q.signedCompact(v, 2), depth: 0.26 }, opts || {});
     let data = [];
     const maxG = new Q.GlideValue(280);
 
     const panel = new Q.Panel(host, (ctx, env) => {
       if (!data.length) { noData(ctx, env, o.empty); return false; }
-      const b = box(env, o.margin || { l: 58, r: 20, t: 16, b: 26 });
+      const b = box(env, o.margin || { l: 62, r: 26, t: 18, b: 30 });
+      if (b.w < 80 || b.h < 70) { noData(ctx, env, 'PANEL DEMASIADO PEQUEÑO'); return false; }
 
-      /* El relieve SÍ agrupa, y por una razón distinta a la de las barras.
-       *
-       * Las barras responden «cuánto vale este strike» y por eso conservan uno
-       * por uno, con el panel creciendo. El relieve responde «qué forma tiene
-       * la estructura», y para eso no hace falta —ni cabe— una cara por
-       * strike: con ciento sesenta y seis en un panel fijo cada una mediría dos
-       * píxeles y la forma se perdería en el ruido. Se agrupa conservando el
-       * EXTREMO, así que una cresta sigue siendo una cresta.
-       */
-      const plan = AB.bin(data, b.h - Math.min(b.h * o.depth, b.w * 0.20),
-                          { aggregate: 'extreme', targetThickness: o.targetBar || 9 });
+      // Profundidad: fracción del panel, pero acotada en píxeles por los dos lados.
+      const dz = Q.clamp(Math.min(b.h * o.depth, b.w * 0.18),
+                         RELIEF_MIN_DEPTH, RELIEF_MAX_DEPTH);
+      const dy = dz * RELIEF_SKEW;
+      const plotH = b.h - dy;
+      const plotW = b.w - dz;
+      if (plotH < 40 || plotW < 60) { noData(ctx, env, 'PANEL DEMASIADO PEQUEÑO'); return false; }
+
+      const plan = AB.bin(data, plotH, { aggregate: 'extreme', targetThickness: RELIEF_ROW_PX });
       const rowsR = plan.rows;
+      const n = rowsR.length;
+      if (!n) { noData(ctx, env, o.empty); return false; }
+
       const values = rowsR.map(d => Q.num(d.value));
       const scale = robustPeak(values);
       maxG.set(scale.peak);
       const mx = Math.max(Q.num(maxG.get(), 0), 1e-9);
 
-      // Profundidad total reservada al eje isométrico. El resto del lienzo es
-      // el plano de strike × valor, que es donde se miden las magnitudes.
-      const dz = Math.min(b.h * o.depth, b.w * 0.20);
-      const plotH = b.h - dz;
-      const plotW = b.w - dz;
-      const n = rowsR.length;
       const pitch = plotH / n;
-      const bh = Math.max(1.5, pitch * AB.FILL);
+      const bh = Math.max(4, pitch * 0.66);
       const zero = b.x + plotW * 0.5;
       const sx = v => zero + Q.clamp(v / mx, -1, 1) * (plotW * 0.5);
+      // Fuga por fila: la de abajo al frente, la de arriba al fondo.
+      const ox = i => dz * (i / Math.max(1, n - 1));
+      const oy = i => -dy * (i / Math.max(1, n - 1));
+      const rowY = i => b.y + plotH - (i + 1) * pitch + oy(i);
 
-      // Suelo: la referencia sin la que un relieve flota y no se puede situar.
+      /* ── 1 · Suelo en fuga ────────────────────────────────────────────── */
+      const grid = Q.token('--grid', '#243044');
       ctx.save();
-      ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.85);
+      const ticks = Q.niceTicks(-mx, mx, 5).filter(t => Math.abs(t) <= mx);
+      ctx.strokeStyle = Q.alpha(grid, 0.5);
       ctx.lineWidth = 1;
+      for (const t of ticks) {
+        const x = sx(t);
+        ctx.beginPath();
+        ctx.moveTo(x, b.y + plotH);
+        ctx.lineTo(x + dz, b.y + plotH - dy);
+        ctx.stroke();
+      }
+      // Bordes del plano: frontal y del fondo, unidos por los laterales. Cerrar el
+      // cuadrilátero es lo que hace que se lea como un SUELO y no como dos rayas.
+      ctx.strokeStyle = Q.alpha(grid, 0.95);
       ctx.beginPath();
       ctx.moveTo(b.x, b.y + plotH);
       ctx.lineTo(b.x + plotW, b.y + plotH);
-      ctx.lineTo(b.x + plotW + dz, b.y + plotH - dz);
+      ctx.lineTo(b.x + plotW + dz, b.y + plotH - dy);
+      ctx.lineTo(b.x + dz, b.y + plotH - dy);
+      ctx.closePath();
       ctx.stroke();
+      // Plano del cero: la referencia de signo, vertical y en fuga.
+      ctx.strokeStyle = Q.alpha(Q.token('--text-mute', '#5b6880'), 0.85);
       ctx.beginPath();
-      ctx.moveTo(Math.round(zero) + 0.5, b.y);
-      ctx.lineTo(Math.round(zero) + 0.5, b.y + plotH);
-      ctx.lineTo(Math.round(zero + dz) + 0.5, b.y + plotH - dz);
+      ctx.moveTo(zero, b.y + plotH);
+      ctx.lineTo(zero + dz, b.y + plotH - dy);
       ctx.stroke();
       ctx.restore();
 
-      // De atrás hacia delante: el strike más alto se dibuja primero para que
-      // el de delante lo tape, que es lo que produce la sensación de relieve.
+      /* ── 2 · Prismas, del fondo al frente ─────────────────────────────── */
       ctx.save();
-      ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+      ctx.beginPath(); ctx.rect(b.x - 2, b.y - 2, b.w + 4, b.h + 4); ctx.clip();
+      const lift = Math.min(bh * 0.9, dz * 0.30);
+      const liftY = lift * RELIEF_SKEW;
       for (let i = n - 1; i >= 0; i--) {
         const d = rowsR[i];
         const v = Q.num(d.value);
         if (!v) continue;
-        // El desplazamiento isométrico crece con el índice: los strikes altos
-        // quedan al fondo y los bajos al frente.
-        const t = i / Math.max(1, n - 1);
-        const ox = dz * t, oy = -dz * t;
-        const y = b.y + plotH - (i + 1) * pitch + oy;
-        const x0 = Math.min(zero, sx(v)) + ox;
-        const w = Math.max(1.5, Math.abs(sx(v) - zero));
+        const dx = ox(i);
+        const y = rowY(i);
+        const xa = Math.min(zero, sx(v)) + dx;
+        const w = Math.max(2, Math.abs(sx(v) - zero));
         const col = d.color || colorFor(v, o);
 
-        // Cara superior y lateral: dan el volumen sin inventar perspectiva.
-        const lift = Math.min(bh * 0.55, dz * 0.14);
-        ctx.fillStyle = Q.alpha(col, 0.22);
+        // Cara SUPERIOR: la más clara. Es la que da la sensación de altura.
+        ctx.fillStyle = Q.alpha(col, 0.55);
         ctx.beginPath();
-        ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y);
-        ctx.lineTo(x0 + w + lift, y - lift); ctx.lineTo(x0 + lift, y - lift);
+        ctx.moveTo(xa, y);
+        ctx.lineTo(xa + w, y);
+        ctx.lineTo(xa + w + lift, y - liftY);
+        ctx.lineTo(xa + lift, y - liftY);
         ctx.closePath(); ctx.fill();
-        ctx.fillStyle = Q.alpha(col, 0.92);
-        ctx.fillRect(x0, y, w, bh);
+
+        // Tapa LATERAL del extremo: la más oscura, en el lado hacia el que crece.
+        const capX = v >= 0 ? xa + w : xa;
+        ctx.fillStyle = Q.alpha(col, 0.30);
+        ctx.beginPath();
+        ctx.moveTo(capX, y);
+        ctx.lineTo(capX + lift, y - liftY);
+        ctx.lineTo(capX + lift, y - liftY + bh);
+        ctx.lineTo(capX, y + bh);
+        ctx.closePath(); ctx.fill();
+
+        // Cara FRONTAL: la que se mide contra la escala.
+        ctx.fillStyle = Q.alpha(col, 0.95);
+        ctx.fillRect(xa, y, w, bh);
         ctx.strokeStyle = Q.alpha(col, 1);
         ctx.lineWidth = 1;
-        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y) + 0.5,
+        ctx.strokeRect(Math.round(xa) + 0.5, Math.round(y) + 0.5,
                        Math.max(1, Math.round(w) - 1), Math.max(1, Math.round(bh) - 1));
+
         if (scale.clipped && Math.abs(v) > mx) {
-          clipMark(ctx, v >= 0 ? b.x + plotW - 2 : b.x + 8, y, 1.5, bh, false, col);
+          clipMark(ctx, v >= 0 ? b.x + plotW - 2 + dx : b.x + 8 + dx, y, 1.5, bh, false, col);
         }
       }
       ctx.restore();
 
-      // Ejes: sólo las etiquetas que caben, sobre el strike real.
+      /* ── 3 · Ejes ─────────────────────────────────────────────────────── */
       ctx.save();
-      ctx.font = '9px ui-monospace, monospace';
+      ctx.font = '10px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const skip = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotH / 14))));
+      const step = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotH / 15))));
       for (let i = 0; i < n; i++) {
-        if (i % skip) continue;
-        const t = i / Math.max(1, n - 1);
-        // La etiqueta se queda en el margen: seguir el desplazamiento
-        // isométrico la metía dentro del gráfico y tapaba las propias barras.
-        // Sólo sigue la altura, que es lo que la ata a su fila.
+        if (i % step) continue;
         const lbl = rowsR[i];
-        ctx.fillText(String(lbl.grouped > 1 ? lbl.from : lbl.label),
-                     b.x - 6, b.y + plotH - (i + 0.5) * pitch - dz * t);
+        // La etiqueta se queda en el margen y sólo sigue la ALTURA de su fila:
+        // seguir también la fuga la metía dentro del gráfico tapando los prismas.
+        ctx.fillText(String(lbl.grouped > 1 ? lbl.from : lbl.label), b.x - 8, rowY(i) + bh / 2);
       }
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(o.fmt(-mx), b.x, b.y + plotH + 6);
-      ctx.textAlign = 'right';
-      ctx.fillText(o.fmt(mx), b.x + plotW, b.y + plotH + 6);
+      // Escala de valor sobre el borde frontal del suelo.
+      ctx.textBaseline = 'top';
+      for (const t of ticks) {
+        ctx.textAlign = t === ticks[0] ? 'left' : (t === ticks[ticks.length - 1] ? 'right' : 'center');
+        ctx.fillText(o.fmt(t), sx(t), b.y + plotH + 8);
+      }
       ctx.restore();
 
+      /* ── 4 · Puntero ──────────────────────────────────────────────────── */
       if (panel.pointer.inside) {
-        // El puntero se mapea deshaciendo el desplazamiento isométrico, así que
-        // señala el strike que se ve, no el que estaría sin relieve.
         let hit = -1, bestD = Infinity;
         for (let i = 0; i < n; i++) {
-          const t = i / Math.max(1, n - 1);
-          const cy = b.y + plotH - (i + 0.5) * pitch - dz * t;
+          const cy = rowY(i) + bh / 2;
           const d = Math.abs(panel.pointer.y - cy);
           if (d < bestD) { bestD = d; hit = i; }
         }
-        if (hit >= 0 && bestD <= Math.max(pitch, 6)) {
+        if (hit >= 0 && bestD <= Math.max(pitch, 7)) {
           const d = rowsR[hit];
-          Q.chip(ctx, Q.clamp(panel.pointer.x + 10, b.x, b.x + b.w - 190),
-                 Q.clamp(panel.pointer.y - 10, b.y + 8, b.y + b.h - 8),
+          Q.chip(ctx, Q.clamp(panel.pointer.x + 12, b.x, b.x + b.w - 200),
+                 Q.clamp(panel.pointer.y - 10, b.y + 10, b.y + b.h - 10),
                  AB.describe(d, o.fmt),
-                 { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
+                 { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 19 });
         }
       }
       return maxG.step(env.dt);
@@ -851,6 +938,15 @@
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
+  /* Ajuste del campo. Los MISMOS valores que usa el fondo del TRACE: el campo es
+   * el mismo dato y tiene que leerse igual en las dos pantallas. Son propiedades
+   * de lectura, no de activo — la normalización ya es relativa al propio activo. */
+  const HEAT_NOISE = 0.62;
+  const HEAT_GAMMA = 1.35;
+  const HEAT_ALPHA_MAX = 0.70;
+  const HEAT_LEVELS = [0.68, 0.80, 0.90, 0.96];
+  const HEAT_BLUR = 1.9;
+
   function heatmap(host, opts) {
     const o = Object.assign({ fmtY: v => v.toFixed(2), fmtX: v => String(v) }, opts || {});
     let rows = [], cols = [], matrix = [], price = [], peak = 0;
@@ -880,11 +976,11 @@
        * escala con interpolación bilineal. Así la superficie es continua a
        * cualquier tamaño sin dibujar una celda por píxel.
        */
-      const f = AB.field(matrix, { blur: o.blur, fillRadius: o.fillRadius });
+      const f = AB.field(matrix, { blur: o.blur === undefined ? HEAT_BLUR : o.blur, fillRadius: o.fillRadius });
       if (!f.w || !f.h) { noData(ctx, env, o.empty); return false; }
       // Percentil por debajo del cual el campo es fondo, no zona.
-      const noiseFloor = o.noiseFloor === undefined ? 0.55 : o.noiseFloor;
-      const gammaCurve = o.gamma === undefined ? 1.9 : o.gamma;
+      const noiseFloor = o.noiseFloor === undefined ? HEAT_NOISE : o.noiseFloor;
+      const gammaCurve = o.gamma === undefined ? HEAT_GAMMA : o.gamma;
 
       const posC = Q.token('--pos', '#22c55e');
       const negC = Q.token('--neg', '#ef4444');
@@ -923,7 +1019,7 @@
            */
           const a = (f.intensity(v) - noiseFloor) / (1 - noiseFloor);
           px[i + 3] = a <= 0 ? 0
-            : Math.round(255 * Math.min(1, Math.pow(a, gammaCurve)));
+            : Math.round(255 * HEAT_ALPHA_MAX * Math.min(1, Math.pow(a, gammaCurve)));
         }
       }
       fieldCtx.putImageData(fieldImage, 0, 0);
@@ -935,46 +1031,31 @@
       ctx.drawImage(fieldCanvas, 0, 0, f.w, f.h, b.x, b.y, b.w, b.h);
       ctx.restore();
 
-      // Contornos de las zonas dominantes. Marcan el borde de una concentración
-      // sin taparla, que es lo que convierte una mancha en una lectura.
-      if (o.contours !== false) {
+      /* Isolíneas del campo.
+       *
+       * v1.51.0 · Antes esto barría cada eje por separado y pintaba un palito
+       * suelto por cruce, sin unirlo con el de la celda vecina: una nube de
+       * rayitas que se leía como suciedad. Ahora sale de `AB.contours`, marching
+       * squares, que devuelve segmentos que se encuentran en los bordes
+       * compartidos y forman una curva cerrada alrededor de la zona.
+       *
+       * Es el MISMO cálculo que usa el fondo del TRACE. Dos tratamientos del
+       * mismo dato es lo que hacía que las dos pantallas no se parecieran.
+       */
+      if (o.contours !== false && AB.contours) {
         ctx.save();
         ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
         ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
         const cw0 = b.w / f.w, ch0 = b.h / f.h;
-        for (const level of (o.contourLevels || [0.80, 0.93])) {
-          ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'), level >= 0.8 ? 0.22 : 0.12);
-          /* Cruces en LOS DOS ejes.
-           *
-           * Barriendo sólo en X se obtienen segmentos verticales sueltos: la
-           * isolínea no se cierra y el resultado parece ruido en vez de un
-           * borde. Con los cruces horizontales y verticales el contorno rodea
-           * la zona, que es lo que hace legible dónde empieza y dónde acaba
-           * una concentración.
-           */
-          const at = (x, y) => f.intensity(f.values[(f.h - 1 - y) * f.w + x]);
+        for (const level of (o.contourLevels || HEAT_LEVELS)) {
+          ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'),
+                                    0.30 * (0.55 + 0.45 * level));
           ctx.beginPath();
-          for (let y = 0; y < f.h; y++) {
-            for (let x = 0; x < f.w - 1; x++) {
-              const a0 = at(x, y), a1 = at(x + 1, y);
-              if ((a0 < level) === (a1 < level)) continue;
-              const t = (level - a0) / ((a1 - a0) || 1e-9);
-              const xx = b.x + (x + 0.5 + t) * cw0;
-              const yy = b.y + (y + 0.5) * ch0;
-              ctx.moveTo(xx, yy - ch0 * 0.5);
-              ctx.lineTo(xx, yy + ch0 * 0.5);
-            }
-          }
-          for (let x = 0; x < f.w; x++) {
-            for (let y = 0; y < f.h - 1; y++) {
-              const a0 = at(x, y), a1 = at(x, y + 1);
-              if ((a0 < level) === (a1 < level)) continue;
-              const t = (level - a0) / ((a1 - a0) || 1e-9);
-              const yy = b.y + (y + 0.5 + t) * ch0;
-              const xx = b.x + (x + 0.5) * cw0;
-              ctx.moveTo(xx - cw0 * 0.5, yy);
-              ctx.lineTo(xx + cw0 * 0.5, yy);
-            }
+          for (const g of AB.contours(f, level)) {
+            // El campo tiene la fila 0 abajo; el panel la tiene arriba.
+            ctx.moveTo(b.x + (g[0] + 0.5) * cw0, b.y + b.h - (g[1] + 0.5) * ch0);
+            ctx.lineTo(b.x + (g[2] + 0.5) * cw0, b.y + b.h - (g[3] + 0.5) * ch0);
           }
           ctx.stroke();
         }
@@ -1062,5 +1143,157 @@
     };
   }
 
-  global.ITMQPanels = { bars, hbars, lines, tbars, curve, pricePrints, heatmap, relief };
+  /* ------------------------------------------- mapa de intervalos por PUNTOS */
+
+  /**
+   * INTERVAL MAP con el diseño de la herramienta original: una rejilla de puntos,
+   * uno por strike e intervalo, con el recorrido del precio encima.
+   *
+   * v1.51.0 · Esta sección tenía el mismo campo continuo que el fondo del TRACE, y
+   * ahí el campo es la representación equivocada. Las dos pantallas no responden
+   * la misma pregunta:
+   *
+   *   TRACE  · el mapa es FONDO. Va debajo de las velas y lo que hace falta es la
+   *            FORMA de la zona: dónde empieza y dónde acaba la concentración.
+   *            Un campo continuo con isolíneas es exactamente eso, y al ser
+   *            translúcido deja ver el precio por encima.
+   *   SECCIÓN· el mapa es el SUJETO. Aquí se viene a leer celda a celda: cuánto
+   *            hay en ESTE strike en ESTE intervalo. Un degradado no permite eso
+   *            —interpola entre vecinas y no se sabe dónde acaba una celda—,
+   *            mientras que un punto por celda sí: su diámetro ES la magnitud y
+   *            su hueco separa una celda de la siguiente.
+   *
+   * El dato es el mismo y la normalización también. Cambia la pregunta.
+   */
+  function dotmap(host, opts) {
+    const o = Object.assign({
+      fmtY: v => v.toFixed(2), fmtX: v => String(v),
+      empty: 'SIN MAPA DE INTERVALOS',
+    }, opts || {});
+    let rows = [], cols = [], matrix = [], price = [];
+
+    const panel = new Q.Panel(host, (ctx, env) => {
+      if (!rows.length || !cols.length || !matrix.length) { noData(ctx, env, o.empty); return false; }
+      const b = box(env, o.margin || { l: 62, r: 16, t: 14, b: 26 });
+      if (b.w < 60 || b.h < 50) { noData(ctx, env, 'PANEL DEMASIADO PEQUEÑO'); return false; }
+
+      const H = rows.length, W = cols.length;
+      // La matriz puede llegar [strike][tiempo] o traspuesta: se detecta por
+      // dimensiones, igual que en el resto del programa.
+      const rowsAreStrikes = matrix.length === H;
+      const val = (si, xi) => {
+        const v = rowsAreStrikes ? (matrix[si] || [])[xi] : (matrix[xi] || [])[si];
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      // Se reutiliza el ranker del componente común SIN suavizar ni rellenar: aquí
+      // cada celda tiene que seguir siendo ella misma.
+      const grid2 = Array.from({ length: H }, (_, si) =>
+        Array.from({ length: W }, (_, xi) => val(si, xi)));
+      const f = AB.field(grid2, { blur: 0, fillRadius: 0 });
+
+      const cw = b.w / W, ch = b.h / H;
+      const maxR = Math.max(1.1, Math.min(cw, ch) * 0.44);
+      const pos = Q.token('--heat-pos', '#22c55e');
+      const neg = Q.token('--heat-neg', '#ef4444');
+
+      // Rejilla de fondo: sin ella los puntos flotan y no se sabe a qué fila van.
+      ctx.save();
+      ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.35);
+      ctx.lineWidth = 1;
+      const yStep = Math.max(1, Math.ceil(H / Math.max(1, Math.floor(b.h / 26))));
+      for (let si = 0; si < H; si += yStep) {
+        const y = Math.round(b.y + b.h - (si + 0.5) * ch) + 0.5;
+        ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.w, y); ctx.stroke();
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+      for (let si = 0; si < H; si++) {
+        const cy = b.y + b.h - (si + 0.5) * ch;
+        for (let xi = 0; xi < W; xi++) {
+          const v = val(si, xi);
+          // Un hueco no se dibuja. Un cero MEDIDO sí: es una afirmación.
+          if (v === null) continue;
+          const rank = f.intensity(v);
+          const r = Math.max(0.7, maxR * Math.pow(rank, 0.72));
+          ctx.fillStyle = Q.alpha(v >= 0 ? pos : neg, 0.30 + 0.70 * rank);
+          ctx.beginPath();
+          ctx.arc(b.x + (xi + 0.5) * cw, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+
+      // Precio sobre los MISMOS intervalos: el mapa dice dónde estaba la
+      // exposición, y el precio por qué zonas pasó el mercado. Sin él hay que
+      // cruzar dos pantallas a ojo.
+      const lo = Q.num(rows[0]), hi = Q.num(rows[rows.length - 1]);
+      if (price.length > 1 && hi > lo) {
+        const yFor = v => b.y + b.h - ((Q.num(v) - lo) / (hi - lo)) * b.h;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        ctx.strokeStyle = Q.token('--accent', '#38bdf8');
+        ctx.lineWidth = 1.8; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        price.forEach((p, i) => {
+          const x = b.x + ((i + 0.5) / Math.max(1, price.length)) * b.w;
+          const y = yFor(p.v !== undefined ? p.v : p);
+          if (!Q.isNum(y)) return;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Ejes
+      ctx.save();
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillStyle = Q.token('--text-dim', '#8494ad');
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      for (let si = 0; si < H; si += yStep) {
+        ctx.fillText(o.fmtY(Q.num(rows[si])), b.x - 7, b.y + b.h - (si + 0.5) * ch);
+      }
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      const xStep = Math.max(1, Math.ceil(W / Math.max(1, Math.floor(b.w / 64))));
+      for (let xi = 0; xi < W; xi += xStep) {
+        ctx.fillText(o.fmtX(cols[xi]), b.x + (xi + 0.5) * cw, b.y + b.h + 7);
+      }
+      ctx.restore();
+
+      if (panel.pointer.inside && panel.pointer.x >= b.x && panel.pointer.x <= b.x + b.w
+          && panel.pointer.y >= b.y && panel.pointer.y <= b.y + b.h) {
+        const xi = Q.clamp(Math.floor((panel.pointer.x - b.x) / cw), 0, W - 1);
+        const si = Q.clamp(Math.floor((b.y + b.h - panel.pointer.y) / ch), 0, H - 1);
+        const v = val(si, xi);
+        ctx.save();
+        ctx.strokeStyle = Q.alpha(Q.token('--text', '#e6edf7'), 0.45);
+        ctx.strokeRect(Math.round(b.x + xi * cw) + 0.5, Math.round(b.y + b.h - (si + 1) * ch) + 0.5,
+                       Math.max(2, Math.round(cw)), Math.max(2, Math.round(ch)));
+        ctx.restore();
+        Q.chip(ctx, Q.clamp(panel.pointer.x + 9, b.x, b.x + b.w - 215), b.y + 12,
+          `${o.fmtY(Q.num(rows[si]))} · ${o.fmtX(cols[xi])} · ` +
+          (v === null ? 'sin observación' : Q.signedCompact(v, 2)),
+          { bg: Q.token('--panel-3', '#1b2436'), color: Q.token('--text', '#e6edf7'), h: 18 });
+      }
+      return false;
+    }, { id: (host.id || 'dots') + ':dotmap',
+         onPointer: () => panel.invalidate(), onPointerLeave: () => panel.invalidate() });
+
+    return {
+      panel,
+      set(y, x, m, p) {
+        rows = Array.isArray(y) ? y : [];
+        cols = Array.isArray(x) ? x : [];
+        matrix = Array.isArray(m) ? m : [];
+        price = Array.isArray(p) ? p : [];
+        panel.invalidate();
+      },
+      setEmpty(msg) { o.empty = msg || o.empty; panel.invalidate(); },
+    };
+  }
+
+  global.ITMQPanels = { bars, hbars, lines, tbars, curve, pricePrints, heatmap, dotmap, relief };
 })(window);

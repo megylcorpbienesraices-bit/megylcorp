@@ -275,9 +275,15 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .trace-shell { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 
 .trace-grid {
-  flex: 1; min-height: 0;
+  /* v1.51.0 · El gráfico es la seccion, no un panel de la seccion.
+     `min-height: 0` dejaba que el HUD y la tarjeta de MAPA le comieran altura
+     hasta quedarse en la mitad del alto util. Con un suelo de 640 px el TRACE
+     manda y lo de abajo se ajusta a lo que sobra. Las columnas laterales suben a
+     252 px porque los perfiles DEX y GEX se leen contra el eje de precio y a 230
+     las cifras del eje quedaban pegadas a las barras. */
+  flex: 1; min-height: 640px;
   display: grid;
-  grid-template-columns: var(--trace-side, 230px) minmax(0, 1fr) var(--trace-side, 230px);
+  grid-template-columns: var(--trace-side, 252px) minmax(0, 1fr) var(--trace-side, 252px);
   gap: 0;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -294,9 +300,12 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .trace-canvas { flex: 1; min-height: 0; position: relative; }
 .itmq-canvas { display: block; position: absolute; inset: 0; }
 
-.trace-hud { display: flex; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
-.trace-hud .kpi { flex: 1 1 128px; padding: 7px 10px; }
+/* El HUD acompaña al grafico; no compite con el por altura. */
+.trace-hud { display: flex; gap: 6px; flex-wrap: wrap; flex: 0 0 auto; }
+.trace-hud .kpi { flex: 1 1 122px; padding: 5px 9px; }
 .trace-hud .kpi b { font-size: 15px; }
+.trace-hud .kpi span { font-size: 9px; }
+.trace-hud .kpi small { font-size: 9px; }
 
 @media (max-width: 1100px) {
   .trace-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: 180px minmax(0,1fr) 180px; }
@@ -324,7 +333,11 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
      separación. La tabla de trades es un detalle bajo demanda: se le deja lo
      justo para tres o cuatro filas y crece con scroll. */
   flex: 1; min-height: 0; display: grid;
-  grid-template-rows: minmax(0, 2.2fr) minmax(0, .42fr) minmax(0, .42fr) minmax(104px, .5fr);
+  /* v1.51.0 · 2.2fr seguia saliendo corto: los dos carriles auxiliares y la tabla
+     se reparten el resto por fraccion, asi que en una ventana baja el grafico
+     principal volvia a quedarse pequeno. Un suelo de 360 px en PIXELES lo impide
+     pase lo que pase con el alto de la ventana. */
+  grid-template-rows: minmax(360px, 3.1fr) minmax(0, .38fr) minmax(0, .38fr) minmax(96px, .42fr);
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
 }
 .drift-stack[hidden], .flow-stack[hidden] { display: none; }
@@ -342,6 +355,12 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .chart { position: relative; width: 100%; height: 300px; }
 .chart.sm { height: 210px; }
 .chart.lg { height: 420px; }
+/* v1.51.0 · El relieve no puede heredar el alto CRECIDO del perfil de barras:
+   con ciento sesenta strikes ese alto llega a miles de pixeles, la fuga se
+   calculaba sobre el lienzo entero y salia fuera de la parte visible. Tiene
+   su propio alto, fijo y generoso, porque el relieve agrupa y no necesita
+   crecer. */
+.chart.relief3d { height: 560px; }
 
 /* v1.48.0 · Perfil por strike: UNA barra por strike, siempre.
    Agrupar tres strikes en una barra obliga a abrir el hover para saber cuál de

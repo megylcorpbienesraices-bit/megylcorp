@@ -1,4 +1,4 @@
-ITM QUANT v1.50.0 — MULTI ASSET ALWAYS-ON
+ITM QUANT v1.51.0 — MULTI ASSET ALWAYS-ON
 
 1) INSTALAR_WEB.bat
    Crea/actualiza el entorno Python aislado de esta carpeta.

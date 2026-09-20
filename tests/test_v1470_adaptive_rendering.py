@@ -260,11 +260,14 @@ def test_the_heatmap_draws_zones_not_dots():
     continuo, y lo que hay que leer son sus zonas y hacia dónde se mueven.
     """
     js = _read("app/static/itmq_panels.js")
-    heat = js[js.index("function heatmap("):]
+    # v1.51.0 · El corte acaba en `dotmap`, que se anade despues y SI dibuja
+    # puntos, a proposito: el fondo del TRACE es un campo y el mapa de la seccion
+    # es una rejilla de puntos. Son dos preguntas distintas sobre el mismo dato.
+    heat = js[js.index("function heatmap("):js.index("function dotmap(")]
     assert "AB.field(matrix" in heat, "el campo lo prepara el componente común"
     assert "ctx.drawImage(fieldCanvas" in heat, "superficie interpolada"
     assert "imageSmoothingEnabled = true" in heat, "sin interpolación son celdas duras"
-    assert "ctx.arc(" not in heat, "el mapa ya no se dibuja con puntos"
+    assert "ctx.arc(" not in heat, "el FONDO no se dibuja con puntos"
     assert "Math.abs(v) / peak" not in heat, "escala lineal por el máximo"
     # El lienzo del campo se reutiliza: reasignarlo en cada fotograma dispara el
     # recolector sesenta veces por segundo.
@@ -538,16 +541,23 @@ def test_the_interval_map_is_a_surface_not_a_painted_table():
     leer celda por celda justo lo que hay que leer como zona.
     """
     js = _read("app/static/itmq_panels.js")
-    # `relief` se define ANTES que `heatmap`, así que el corte va hasta el final.
-    heat = js[js.index("function heatmap("):]
+    heat = js[js.index("function heatmap("):js.index("function dotmap(")]
     assert "AB.field(matrix" in heat
     assert "imageSmoothingEnabled = true" in heat
     # Suelo de ruido: sin él, la normalización por rango deja media pantalla a
     # media opacidad y el mapa sale como un bloque macizo.
     assert "noiseFloor" in heat and "gammaCurve" in heat
-    # Contornos cerrados: barriendo sólo un eje salen segmentos sueltos que
-    # parecen ruido en vez de un borde.
-    assert heat.count("if ((a0 < level) === (a1 < level)) continue;") == 2
+    # v1.51.0 · Los contornos ya no se calculan aquí a mano.
+    #
+    # La versión anterior barría los dos ejes y por cada cruce pintaba un palito
+    # de una celda SIN unirlo con el de la vecina. Cubrir los dos ejes fue una
+    # mejora sobre cubrir uno, pero el problema de fondo seguía: eran segmentos
+    # sueltos, y en pantalla se leían como suciedad y no como el borde de una
+    # zona. Ahora sale de `AB.contours` —marching squares— que mira las cuatro
+    # esquinas de cada celda y emite el segmento que la atraviesa, de modo que
+    # los de celdas vecinas se encuentran en el borde compartido.
+    assert "if ((a0 < level) === (a1 < level)) continue;" not in heat
+    assert "AB.contours(f, level)" in heat
 
 
 def test_trace_and_the_interval_map_treat_the_same_data_the_same_way():
@@ -555,7 +565,11 @@ def test_trace_and_the_interval_map_treat_the_same_data_the_same_way():
     trace = _read("app/static/itmq_trace.js")
     body = trace[trace.index("function buildHeatBitmap("):]
     assert "AB.field(upright" in body, "TRACE usa el campo común"
-    assert "const NOISE = 0.55, GAMMA = 1.9;" in body
+    # v1.51.0 · 0.55/1.9 dejaba el mapa como un BLOQUE saturado: la normalización
+    # es por rango-percentil, así que la celda mediana vale siempre 0.5 y media
+    # pantalla se iba al tope. Banda neutra más ancha, curva más suave y un techo
+    # de opacidad que deja ver las velas y las isolíneas por encima.
+    assert "const NOISE = 0.62, GAMMA = 1.35, ALPHA_MAX = 0.70;" in body
     # Y el tratamiento propio que tenía ya no está.
     assert "Math.pow(a, 0.62)" not in body
 
@@ -1008,7 +1022,10 @@ def test_the_drift_chart_got_the_room_it_needs():
     css = _read("app/static/itmq_terminal.css")
     block = css[css.index(".drift-stack {"):]
     block = block[:block.index("}")]
-    assert "minmax(0, 2.2fr)" in block
+    # v1.51.0 · 2.2fr seguía saliendo corto en una ventana baja, porque el resto
+    # de filas se lleva su fracción pase lo que pase. El suelo en PÍXELES es lo
+    # que garantiza el alto; la fracción sólo reparte lo que sobra.
+    assert "minmax(360px, 3.1fr)" in block
 
 
 def test_every_lane_of_the_tape_declares_why_it_is_empty():
@@ -1023,3 +1040,250 @@ def test_every_lane_of_the_tape_declares_why_it_is_empty():
     # El ctx.restore() del clip tiene que ocurrir antes de escribir el texto.
     idx = body.index("if (!painted) {")
     assert "ctx.restore();" in body[idx:idx + 120]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 12 · v1.51.0 · Ningún hueco se publica como cero
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_an_absent_value_is_a_gap_not_a_zero():
+    """La sierra de la DERIVA DE VOLATILIDAD era un cero inventado.
+
+    `norm_time_series` hacía `_f(value, 0.0) or 0.0`, así que un bucket sin el
+    campo se publicaba con valor CERO. Para prima neta un cero puede ser legítimo,
+    pero este mismo normalizador sirve a la IV, al max pain, al interés abierto y
+    al precio, y en esos cuatro el cero es IMPOSIBLE.
+    """
+    from app.providers.quantdata.tools import norm_time_series
+    payload = {"data": {
+        "1758300000000": {"iv": 11.7},
+        "1758300300000": {},              # el proveedor no trajo IV en este bucket
+        "1758300600000": {"iv": 11.9},
+    }}
+    out = norm_time_series(payload, ("iv", "impliedVolatility", "drift", "value"))
+    rows = out["rows"]
+    assert len(rows) == 3
+    assert rows[0]["value"] == pytest.approx(11.7)
+    assert rows[1]["value"] is None, "el hueco NO puede valer cero"
+    assert rows[1]["value_measured"] is False
+    assert rows[2]["value"] == pytest.approx(11.9)
+
+
+def test_the_gap_rule_covers_every_series_of_this_normalizer():
+    """No es un arreglo de la IV: son las cinco herramientas que comparten el
+    normalizador. Un max pain en el strike 0 o un precio de 0 dólares serían
+    afirmaciones igual de falsas."""
+    from app.providers.quantdata.tools import norm_time_series
+    for names in (("iv", "impliedVolatility", "drift", "value"),
+                  ("maxPain", "value", "strike"),
+                  ("openInterest", "oi", "value"),
+                  ("price", "close", "value"),
+                  ("netPremium", "net", "value", "premium")):
+        out = norm_time_series({"data": {"1758300000000": {}}}, names)
+        assert out["rows"][0]["value"] is None, names
+
+
+def test_a_net_premium_with_call_and_put_is_still_measured():
+    """El cambio no puede convertir en hueco una lectura que SÍ existe: sin campo
+    neto explícito, el neto es call − put y eso es una medición."""
+    from app.providers.quantdata.tools import norm_time_series
+    out = norm_time_series({"data": {"1758300000000": {"callSum": 900.0, "putSum": 250.0}}},
+                           ("netPremium", "net", "value", "premium"))
+    row = out["rows"][0]
+    assert row["value"] == pytest.approx(650.0)
+    assert row["value_measured"] is True
+
+
+def test_the_curve_breaks_at_a_gap_instead_of_falling_to_the_floor():
+    """`sy(Q.num(p.v, 0))` mandaba el hueco al suelo del eje y dibujaba un desplome."""
+    js = _read("app/static/itmq_panels.js")
+    body = js[js.index("function lines("):js.index("function curve(")]
+    seg = body[body.index("const segs = []"):body.index("// leyenda")]
+    # El punto se mapea con NaN, no con cero: es lo que hace que el hueco sea hueco.
+    assert "Q.num(p.v, NaN)" in seg
+    assert "Q.num(p.v, 0)" not in seg, "un hueco no se dibuja en el cero"
+    assert "segs.push(cur)" in seg
+    # El trazo se reinicia por tramo, no una sola vez para toda la serie.
+    assert seg.count("for (const pts of segs)") == 1
+
+
+def test_a_degenerate_iv_window_reports_its_cause_on_screen():
+    """Sin amplitud no hay percentil, y la sección tiene que decir por qué."""
+    api = _read("app/terminal_api.py")
+    assert '"iv_window_degenerate"' in api and '"iv_window_reason"' in api
+    app = _read("app/static/itmq_app.js")
+    assert "v.iv_window_degenerate" in app and "v.iv_window_reason" in app
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 13 · v1.51.0 · Relieve, puntos, isolíneas y rotulación — GLOBAL
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_the_relief_is_a_solid_not_a_bar_with_an_edge():
+    """Un relieve sin las tres caras es una barra con un borde."""
+    js = _read("app/static/itmq_panels.js")
+    body = js[js.index("function relief("):js.index("function heatmap(")]
+    assert "Cara SUPERIOR" in body and "Tapa LATERAL" in body and "Cara FRONTAL" in body
+    # Tres opacidades distintas: sin gradación de luz no hay volumen.
+    for a in ("0.55", "0.30", "0.95"):
+        assert f"Q.alpha(col, {a})" in body, a
+
+
+def test_the_relief_depth_cannot_run_off_the_canvas():
+    """La fuga salía del panel: se calculaba como fracción del alto TOTAL, y el
+    perfil por strike hace crecer ese alto hasta miles de píxeles."""
+    js = _read("app/static/itmq_panels.js")
+    body = js[js.index("function relief("):js.index("function heatmap(")]
+    assert "RELIEF_MIN_DEPTH" in body and "RELIEF_MAX_DEPTH" in body
+    assert "Q.clamp(Math.min(b.h * o.depth, b.w * 0.18)" in body
+    # Y el contenedor del relieve tiene alto propio, no el crecido de las barras.
+    css = _read("app/static/itmq_terminal.css")
+    assert ".chart.relief3d" in css
+    html = _read("app/templates/terminal.html")
+    assert 'class="chart lg relief3d" id="chartExposureRelief"' in html
+
+
+def test_the_relief_floor_is_a_closed_plane():
+    """Dos polilíneas abiertas se leían como rayas sueltas cruzando el gráfico."""
+    js = _read("app/static/itmq_panels.js")
+    body = js[js.index("function relief("):js.index("function heatmap(")]
+    floor = body[body.index("Bordes del plano"):body.index("Plano del cero")]
+    assert "ctx.closePath()" in floor, "el suelo se cierra como cuadrilátero"
+
+
+def test_the_contours_are_continuous_lines_not_loose_dashes():
+    """Barrer cada eje por separado daba una nube de palitos que parecía ruido."""
+    ab = _read("app/static/itmq_adaptive_bars.js")
+    assert "function contours(" in ab
+    body = ab[ab.index("function contours("):ab.index("  /**\n   * Alto (o ancho)")]
+    # Marching squares mira las CUATRO esquinas a la vez; por eso los segmentos
+    # de celdas vecinas se encuentran en el borde compartido.
+    assert "const tl = at(" in body and "const bl = at(" in body
+    assert "tr = at(" in body and "br = at(" in body
+    assert "case 5:" in body and "case 10:" in body, "las sillas de montar se separan"
+    assert "contours," in ab, "se exporta desde el componente común"
+
+
+def test_trace_and_the_section_share_one_field_treatment():
+    """Dos tratamientos del mismo dato es lo que hacía que las dos pantallas no se
+    parecieran, y obliga a corregir dos veces cada ajuste."""
+    trace = _read("app/static/itmq_trace.js")
+    panels = _read("app/static/itmq_panels.js")
+    assert "AB.contours(f, level)" in trace and "AB.contours(f, level)" in panels
+    # Los mismos umbrales y el mismo tope de opacidad en los dos.
+    assert "[0.68, 0.80, 0.90, 0.96]" in trace and "[0.68, 0.80, 0.90, 0.96]" in panels
+    assert "NOISE = 0.62" in trace and "HEAT_NOISE = 0.62" in panels
+    assert "ALPHA_MAX = 0.70" in trace and "HEAT_ALPHA_MAX = 0.70" in panels
+
+
+def test_the_field_never_reaches_full_opacity():
+    """Un campo opaco tapa las velas y las isolíneas: el mapa pasa a competir con
+    el precio en vez de acompañarlo."""
+    trace = _read("app/static/itmq_trace.js")
+    assert "255 * ALPHA_MAX" in trace
+    panels = _read("app/static/itmq_panels.js")
+    assert "255 * HEAT_ALPHA_MAX" in panels
+
+
+def test_the_section_interval_map_is_a_dot_grid():
+    """En la sección el mapa es el SUJETO y se lee celda a celda; un degradado
+    interpola entre vecinas y no deja saber dónde acaba una celda."""
+    js = _read("app/static/itmq_panels.js")
+    assert "function dotmap(" in js
+    body = js[js.index("function dotmap("):js.index("global.ITMQPanels")]
+    # El diámetro ES la magnitud, y sin suavizar: cada celda sigue siendo ella.
+    assert "blur: 0, fillRadius: 0" in body
+    assert "Math.pow(rank, 0.72)" in body
+    assert "ctx.arc(" in body
+    # Un hueco no se dibuja; un cero medido sí.
+    assert "if (v === null) continue;" in body
+    assert "dotmap," in js
+    app = _read("app/static/itmq_app.js")
+    assert "P.dotmap(el('chartIntervalMap')" in app
+
+
+def test_net_drift_draws_walls_on_a_price_axis_not_on_the_premium_axis():
+    """Call Wall es un PRECIO y el eje izquierdo mide PRIMA. Compartir regla entre
+    dos magnitudes distintas es como se fabrica una lectura falsa."""
+    js = _read("app/static/itmq_orderflow.js")
+    body = js[js.index("function drawDrift("):js.index("function drawDriftCursor(")]
+    assert "const px = vis.filter(v => Q.isNum(v.price));" in body
+    assert "const psy = Q.scale(plo - ppad, phi + ppad" in body
+    assert "Q.levelLine(ctx, box, y, Q.alpha(col, 0.8)" in body
+    # Los muros entran en el dominio: uno fuera del encuadre se confundiría con
+    # uno que no existe.
+    assert "plo = Math.min(plo, lp); phi = Math.max(phi, lp);" in body
+    # UNA sola escala de precio. Dos dominios distintos en el mismo gráfico es
+    # peor que no dibujar los muros: las dos parecen válidas y sólo una sitúa
+    # bien la línea.
+    assert body.count("Q.scale(plo") == 1
+    assert "syP" not in body
+
+
+def test_net_drift_marks_the_flow_with_the_same_functions_as_the_rest():
+    """Si la marca se dibujara aquí de otra forma, significaría dos cosas distintas
+    según la pantalla."""
+    js = _read("app/static/itmq_orderflow.js")
+    body = js[js.index("function drawDrift("):js.index("function drawDriftCursor(")]
+    assert "flowHalo(ctx, x, y, evStrength(ev, peak))" in body
+    assert "flowArrow(ctx, x, y, up)" in body
+    assert "flowAmount(" in body and "markerLabel(ev)" in body
+    # Y sobre el eje del PRECIO, que es donde ocurrió el flujo.
+    assert "const y = psy(pr);" in body
+
+
+def test_level_typography_is_defined_once_for_the_whole_terminal():
+    """Tres tamaños para el mismo muro harían que la pantalla no pareciera del
+    mismo programa, y divergirían al primer ajuste."""
+    core = _read("app/static/itmq_core.js")
+    for name in ("LEVEL_FONT", "LEVEL_LABEL_H", "LEVEL_LABEL_GAP", "LEVEL_LINE_WIDTH"):
+        assert f"const {name} =" in core, name
+        assert name in core[core.index("LEVELS, FLOW_LEVEL_KINDS, levelStyle,"):], name
+    # 10 px sobre velas y campo de calor no se leía: la referencia que más se mira
+    # en una sesión tiene que verse de un vistazo.
+    assert "'700 12px ui-monospace, monospace'" in core
+    for path in ("app/static/itmq_trace.js", "app/static/itmq_orderflow.js"):
+        js = _read(path)
+        assert "Q.LEVEL_FONT" in js, path
+        assert "Q.LEVEL_LABEL_GAP" in js, path
+        assert "Q.LEVEL_LINE_WIDTH" in js, path
+
+
+def test_the_two_main_charts_have_a_floor_in_pixels():
+    """Repartir por fracción deja el gráfico pequeño en una ventana baja: el resto
+    de filas se lleva su parte pase lo que pase."""
+    css = _read("app/static/itmq_terminal.css")
+    trace = css[css.index(".trace-grid {"):css.index(".trace-col {")]
+    assert "min-height: 640px" in trace
+    drift = css[css.index(".drift-stack {"):css.index(".drift-stack[hidden]")]
+    assert "minmax(360px," in drift
+
+
+def test_none_of_this_release_knows_a_ticker():
+    """Regla absoluta: todo cambio es GLOBAL, para todos los activos."""
+    import re
+    for path in ("app/static/itmq_panels.js", "app/static/itmq_trace.js",
+                 "app/static/itmq_orderflow.js", "app/static/itmq_adaptive_bars.js",
+                 "app/core/strike_window.py", "app/core/session_memory.py"):
+        src = _read(path)
+        for sym in ("SPY", "QQQ", "IWM", "AAPL", "TSLA", "NVDA", "SPX"):
+            assert not re.search(rf"['\"]{sym}['\"]", src), (path, sym)
+    # Y el eje de strikes no puede llevar un umbral en dólares escrito a mano.
+    sw = _read("app/core/strike_window.py")
+    assert "BAND_PCT" in sw, "la banda es porcentual, no en dólares"
+
+
+def test_net_drift_totals_are_never_a_fabricated_zero():
+    """Un «$0.0» afirma que hoy no se acumuló prima; el hueco dice que no se midió.
+
+    Se destapó al inyectar una serie SIN sus agregados: el panel dibujaba la curva
+    y las tres tarjetas de arriba decían $0.0.
+    """
+    js = _read("app/static/itmq_orderflow.js")
+    body = js[js.index("function renderDriftSummary("):js.index("/* ------------------------------------------------------------- API */")
+              if "/* ------------------------------------------------------------- API */" in js
+              else js.index("function mount(")]
+    assert "Q.num(d.cum_call_premium, 0)" not in body
+    assert "Q.money(d.cum_call_premium, 1)" in body
+    assert "Q.money(d.cum_net_premium, 1)" in body
+    assert "Q.compact(d.cum_call_volume, 1)" in body
