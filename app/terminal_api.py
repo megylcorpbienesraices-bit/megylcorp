@@ -2518,11 +2518,36 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     # anónima sobre el gráfico de operativa y eso es un defecto abierto.
     auditor["level_identity"] = ((trace or {}).get("level_identity_audit")
                                  or {"ok": None, "detail": "el trace no publicó la auditoría"})
+    # ÚLTIMO VALOR BUENO · inventario real, no cobertura declarada. Contesta
+    # «¿qué está protegido y qué no?» sin leer el código, que es la pregunta que
+    # se hace cuando una sección se vacía y la de al lado no.
+    try:
+        from .core import flow_view as _FV2
+        auditor["last_known_good"] = _FV2.coverage()
+    except Exception as exc:
+        _obs_note("terminal_api:lkg_coverage", exc, severity="DEGRADED")
+        auditor["last_known_good"] = {"count": None, "detail": "inventario no disponible"}
+
+    # ── IDENTIDAD DE GENERACIÓN · v1.55.0 ───────────────────────────────────
+    #
+    # Un cambio de activo es una TRANSACCIÓN: o la pantalla entera es del activo
+    # nuevo, o sigue siendo del anterior. Lo que no puede haber es media pantalla
+    # de cada, que es lo que pasa cuando una respuesta lenta del símbolo viejo
+    # llega después de la del nuevo y se pinta encima.
+    #
+    # `symbol_epoch` ya contaba los cambios. `generation_id` lo vuelve
+    # COMPROBABLE de un vistazo y en una sola clave: símbolo y época juntos, para
+    # que el cliente descarte una respuesta con una comparación en vez de dos, y
+    # para que cada sección del bundle pueda decir a qué generación pertenece.
+    _sym = str(state.get("active_symbol") or state.get("symbol") or "").upper()
+    _epoch = state.get("symbol_epoch")
+    generation_id = f"{_sym}#{int(_epoch)}" if _epoch is not None else (_sym or None)
 
     return {
         "ready": bool(state.get("ready")),
         "symbol": state.get("active_symbol") or state.get("symbol"),
         "symbol_epoch": state.get("symbol_epoch"),
+        "generation_id": generation_id,
         "asset_name": asset.get("name"),
         "asset_kind": asset.get("kind"),
         "spot": _f(state.get("spot")),

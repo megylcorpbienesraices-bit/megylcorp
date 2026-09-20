@@ -53,6 +53,8 @@
     timeframe: '1m',
     tailMinutes: 390,
     intervalGreek: 'GAMMA',
+    // Generacion publicada por el bundle: «SIMBOLO#epoca». Ver pullBundle.
+    generation: null,
     // Vista del Interval Map: 'field' (mapa continuo, lectura) | 'raw' (puntos, diagnostico)
     intervalRender: 'field',
     intervalRenderApplied: null,
@@ -352,6 +354,26 @@
     state.busyBundle = true;
     try {
       const d = await api(`/api/terminal/bundle?timeframe=${state.timeframe}&tail_minutes=${state.tailMinutes}&interval_greek=${state.intervalGreek}`);
+
+      /* v1.55.0 · EL CAMBIO DE ACTIVO ES UNA TRANSACCIÓN.
+       *
+       * O la pantalla entera es del activo nuevo, o sigue siendo del anterior.
+       * Media pantalla de cada es lo que pasaba cuando una respuesta lenta del
+       * símbolo viejo llegaba DESPUÉS de la del nuevo: se pintaba encima y
+       * dejaba KPI de QQQ sobre un TRACE de SPY, sin que nada avisara.
+       *
+       * `generation_id` es «símbolo#época» y viaja en el bundle. Una respuesta
+       * de otra generación se descarta entera; no se mezcla ni se aprovecha «lo
+       * que sirva», porque lo que sirve y lo que no es indistinguible después.
+       */
+      const gen = String(d.generation_id || '');
+      const esperado = state.switching ? String(state.switching).toUpperCase() : null;
+      const llega = String(d.symbol || '').toUpperCase();
+      if (esperado && llega && llega !== esperado) {
+        console.debug('[BUNDLE] generacion descartada', gen, '≠', esperado);
+        return;                       // el bundle del activo viejo no se pinta
+      }
+      state.generation = gen || state.generation;
       state.bundle = d;
       state.symbol = d.symbol || state.symbol;
       state.failures = 0;

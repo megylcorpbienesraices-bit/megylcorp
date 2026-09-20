@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import base64
 import math
 import os
@@ -437,16 +438,34 @@ def _decode_plotly_typed_array(value: Any) -> Any:
     return value
 
 
-def _fig_json(fig: go.Figure, symbol: str = "DIA"):
+#: El ticker que las figuras heredadas llevan escrito en sus rotulos. Se
+#: sustituye por el activo activo al serializar. Vive aqui, con nombre, en vez
+#: de repartido por el codigo como una constante anonima.
+_LEGACY_FIGURE_TICKER = "DIA"
+#: Con BORDE DE PALABRA. `str.replace` a secas convertia «MEDIA» en «MQQQ» y
+#: «DIARIO» en «QQQRIO»: «DIA» es subcadena de palabras corrientes en espanol, y
+#: ese reemplazo corrompia rotulos en todos los activos MENOS en el que llevaba
+#: el ticker escrito, que era justo el unico que se probaba.
+_LEGACY_TICKER_RE = re.compile(rf"\b{_LEGACY_FIGURE_TICKER}\b")
+
+
+def _fig_json(fig: go.Figure, symbol: str = ""):
+    """Serializa una figura heredada con el ticker del activo ACTIVO.
+
+    v1.55.0 · Sin `if sym == "DIA"`. La rama existia como atajo y era la unica
+    comparacion contra un ticker que quedaba en produccion; sustituir DIA por
+    DIA no hace nada, asi que el atajo solo servia para tener una rama por
+    ticker. El borde de palabra hace el resto del trabajo.
+    """
     # Decode Plotly 6 typed-array JSON before it reaches native Canvas renderers.
     data=_decode_plotly_typed_array(json.loads(fig.to_json()))
-    sym=str(symbol).upper()
-    if sym=="DIA":
+    sym=str(symbol or "").upper()
+    if not sym:
         return data
     def walk(v):
         if isinstance(v,dict): return {k:walk(x) for k,x in v.items()}
         if isinstance(v,list): return [walk(x) for x in v]
-        if isinstance(v,str): return v.replace("DIA",sym)
+        if isinstance(v,str): return _LEGACY_TICKER_RE.sub(sym,v)
         return v
     return walk(data)
 

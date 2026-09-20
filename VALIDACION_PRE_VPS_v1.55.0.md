@@ -1,18 +1,18 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.54.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.55.0
 
-Release: `ITM_QUANT_v1.54.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.55.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
 > Documento acumulativo. La sección **A19** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2170 casos / 150 ficheros**
-- Particiones: 21 · `plan_sha256`: `136c4773d1e11bcfe23a3422ee3e1d692da726fad09beae45efacf7923e5fe4e`
+- Inventario nominal: **2320 casos / 159 ficheros**
+- Particiones: 21 · `plan_sha256`: `ab33d2d05d7f55d6276b1ffea0eed7d0d8d1a30e862d1f285985d85f576ce67f`
 - Resultado: **PASS**
 
 ---
 
-## A19 · v1.54.0 · Dónde se rompe, y qué no se borra
+## A19 · v1.55.0 · Dónde se rompe, y qué no se borra
 
 ### Qué se certifica
 

@@ -2728,6 +2728,24 @@
     "test_un_ciclo_vacio_no_borra_lo_que_ya_era_bueno"
    ]
   },
+  "tests/test_v1550_generation_lkg_multiasset.py": {
+   "casos": 13,
+   "tests": [
+    "test_el_bundle_declara_su_generacion",
+    "test_el_catalogo_de_instrumentos_describe_fisica_no_senales",
+    "test_el_cliente_descarta_un_bundle_de_otra_generacion",
+    "test_el_inventario_declara_la_clave_de_indexacion",
+    "test_el_inventario_lista_lo_que_realmente_hay_guardado",
+    "test_el_inventario_viaja_al_auditor",
+    "test_el_reemplazo_del_ticker_heredado_respeta_los_bordes_de_palabra",
+    "test_el_reemplazo_sin_simbolo_no_toca_nada",
+    "test_la_generacion_cambia_con_el_activo_y_con_la_epoca",
+    "test_los_ocho_activos_recorren_el_mismo_camino",
+    "test_no_queda_ninguna_comparacion_contra_un_ticker_en_produccion",
+    "test_sin_epoca_la_generacion_no_se_inventa_un_numero",
+    "test_un_valor_nulo_no_entra_en_el_inventario"
+   ]
+  },
   "tests/test_v1550_interval_map_canonical.py": {
    "casos": 15,
    "tests": [
@@ -2810,6 +2828,6 @@
    ]
   }
  },
- "total_minimo": 2307,
+ "total_minimo": 2320,
  "version": "1.54.0"
 }

@@ -184,6 +184,39 @@ def reset() -> None:
         _LKG.clear()
 
 
+def coverage(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Qué carriles tienen último valor bueno guardado, y de cuándo.
+
+    v1.55.0 · La política de frescura nació dentro de FLUJO DE ÓRDENES y sirve
+    para cualquier sección: la clave `(símbolo, sesión, dataset)` no tiene nada
+    de particular de esa pantalla. Publicar el inventario es lo que permite
+    contestar «¿qué está protegido por LKG y qué no?» sin leer el código, que es
+    la pregunta que se hace cuando una sección se vacía y otra no.
+
+    No inventa cobertura: lista lo que REALMENTE hay guardado.
+    """
+    ref = _now(now)
+    with _LOCK:
+        entradas = dict(_LKG)
+    filas = []
+    for (symbol, session_date, dataset), entry in sorted(entradas.items()):
+        filas.append({
+            "symbol": symbol, "session_date": session_date, "dataset": dataset,
+            "at": entry.get("at"), "age_minutes": _age_minutes(entry.get("at"), ref),
+        })
+    datasets = sorted({f["dataset"] for f in filas})
+    return {
+        "rows": filas,
+        "count": len(filas),
+        "datasets": datasets,
+        "symbols": sorted({f["symbol"] for f in filas}),
+        "key": "(symbol, session_date, dataset)",
+        "stale_after_minutes": STALE_AFTER_MINUTES,
+        "detail": (f"{len(filas)} carril(es) con último valor bueno"
+                   if filas else "todavía no hay ningún último valor bueno guardado"),
+    }
+
+
 def build(*, symbol: str, session_date: str, market_open: bool,
           tape: Optional[Dict[str, Any]] = None,
           net_flow: Optional[Dict[str, Any]] = None,
