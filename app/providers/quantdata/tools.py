@@ -642,9 +642,12 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
         price = _f(_pick(r, "price", "tradePrice", "executionPrice", "optionPrice"))
         if t is None or price is None:
             continue
-        size = _f(_pick(r, "size", "quantity", "volume", "contracts"), 0.0) or 0.0
+        # v1.55.0 · Sin `or 0.0`: un print cuyo tamano no llega no es un print de
+        # cero contratos. Con el cero, la prima derivada salia 0 $ y la cinta
+        # contaba una operacion que no movio dinero.
+        size = _f(_pick(r, "size", "quantity", "volume", "contracts"))
         premium = _f(_pick(r, "premium", "notional", "value", "totalPremium"), None)
-        if premium is None:
+        if premium is None and size is not None:
             # La prima de un contrato es precio × tamaño × multiplicador. Publicar
             # precio × tamaño a secas la dejaría cien veces por debajo.
             premium = price * size * 100.0

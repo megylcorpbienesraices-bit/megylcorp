@@ -1192,7 +1192,9 @@
       const p = Q.num(lv.price, NaN);
       if (!Q.isNum(p)) continue;
       const y = sy(p);
-      const st = LEVEL_STYLE[lv.kind] || { color: '--text-dim', order: 9 };
+      // v1.55.0 · Por `Q.levelStyle`, que DENUNCIA el `kind` desconocido en vez
+      // de devolver un estilo neutro con el que la linea pasa por una mas.
+      const st = Q.levelStyle(lv.kind);
       const above = y < box.y - 2, below = y > box.y + box.h + 2;
       const off = above ? -1 : below ? 1 : 0;
       items.push({
@@ -1202,6 +1204,10 @@
         // cuando el largo no cabe, y nunca sustituye a la identidad.
         name: lv.name || st.label || lv.kind,
         short: st.short || lv.name || lv.kind,
+        // Una linea sin identidad se dibuja MARCADA, para que se vea que
+        // sobra o que falta registrarla. No se disimula con el color por
+        // defecto: ese es justo el defecto que la hacia invisible.
+        unidentified: !!st.unidentified,
         color: Q.token(st.color, '#8494ad'),
         order: st.order || 9,
         away: Q.isNum(spotNow) ? p - spotNow : NaN,
@@ -1218,7 +1224,8 @@
       // El nivel fuera de ventana lleva línea más tenue: está ahí, pero no es
       // un precio que las velas estén tocando.
       Q.levelLine(ctx, box, it.y, Q.alpha(it.color, it.off ? 0.42 : 0.72),
-                  { dash: it.off ? [3, 4] : [6, 5], width: Q.LEVEL_LINE_WIDTH });
+                  { dash: it.unidentified ? [1, 4] : (it.off ? [3, 4] : [6, 5]),
+                    width: Q.LEVEL_LINE_WIDTH });
     }
     // Los de dentro primero; un muro fuera de ventana no puede quitarle el sitio
     // a uno que el precio está tocando.
@@ -1289,7 +1296,7 @@
     const hit = levelUnderPointer(box, sy, py);
     if (!hit) return;
     const lv = hit.level, id = hit.identity || {};
-    const st = LEVEL_STYLE[lv.kind] || { color: '--text-dim' };
+    const st = Q.levelStyle(lv.kind);
     const col = Q.token(st.color, '#8494ad');
     const price = Q.num(lv.price, 0);
     const lines = [
@@ -1351,6 +1358,32 @@
     const att = attributionAt(m.t);
     const lines = [m.label || '—'];
     lines.push(hit.anchored ? Q.hhmm(Q.parseTime(m.t)) : Q.hhmm(Q.parseTime(m.t)) + ' · sin vela');
+
+    /* v1.55.0 · POR QUE esta flecha dice lo que dice.
+     *
+     * La flecha sale del AGRESOR, no del tipo de contrato (una put COMPRADA es
+     * una compra). Pero un veredicto sin su soporte no se puede contrastar: al
+     * pasar el raton tiene que verse cuanta prima fue de compra, cuanta de
+     * venta, cuanta se quedo SIN LADO, y sobre que porcentaje de la prima de la
+     * ventana se esta afirmando.
+     *
+     * Dos casos que antes se veian identicos y no lo son:
+     *   COMPRA 96% dominancia · 91% con agresor   -> veredicto solido
+     *   COMPRA 96% dominancia ·  7% con agresor   -> tres prints de noventa
+     */
+    const verdicto = { BUY: 'COMPRA', SELL: 'VENTA', MIXED: 'REPARTIDO' }[String(m.aggressor || '').toUpperCase()] || 'SIN LADO';
+    const dom = Q.num(m.aggressor_dominance_pct, NaN);
+    const cov = Q.num(m.aggressor_coverage_pct, NaN);
+    lines.push(verdicto
+      + (Q.isNum(dom) ? ` · ${dom.toFixed(0)}% dominancia` : '')
+      + (Q.isNum(cov) ? ` · ${cov.toFixed(0)}% con agresor` : ''));
+    const desglose = [];
+    if (Q.isNum(Q.num(m.buy_premium, NaN))) desglose.push('C ' + Q.money(Q.num(m.buy_premium), 1));
+    if (Q.isNum(Q.num(m.sell_premium, NaN))) desglose.push('V ' + Q.money(Q.num(m.sell_premium), 1));
+    if (Q.num(m.unknown_premium, 0) > 0) desglose.push('? ' + Q.money(Q.num(m.unknown_premium), 1));
+    if (desglose.length) lines.push(desglose.join(' · '));
+    if (!Q.isNum(cov) && m.aggressor_detail) lines.push(String(m.aggressor_detail).slice(0, 52));
+
     if (att) {
       const parts = [];
       if (att.calls) parts.push(att.calls + ' call');
@@ -1359,6 +1392,7 @@
       const side = [];
       if (att.buys) side.push(att.buys + ' compra');
       if (att.sells) side.push(att.sells + ' venta');
+      if (att.unknowns) side.push(att.unknowns + ' sin lado');
       if (side.length) lines.push(side.join(' · '));
       const tags = Object.keys(att.executions || {});
       if (tags.length) lines.push(tags.join(' · '));

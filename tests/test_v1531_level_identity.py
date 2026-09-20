@@ -126,10 +126,13 @@ def test_the_same_level_tolerance_is_relative_not_in_dollars():
 
 def test_the_identity_travels_in_the_trace_bundle():
     main = _read("app/main.py")
-    assert 'payload["level_identity"] = _LI.describe(kept, symbol=symbol)' in main
-    # Y NO cambia el cálculo: se describe lo que ya se publicó.
+    # v1.55.0 · `describe` pasó a llamarse desde `audit`, que además DENUNCIA las
+    # líneas sin identidad. Lo que se comprueba sigue siendo lo mismo: que la
+    # identidad viaja en el bundle y que se describe lo YA publicado.
+    assert 'payload["level_identity"] = auditoria["rows"]' in main
+    assert 'payload["level_identity_audit"]' in main
     block = main[main.index('payload["levels"] = kept'):main.index('return walls')]
-    assert "describe(kept" in block
+    assert "_LI.audit(kept, symbol=symbol)" in block
 
 
 def test_the_auditor_shows_the_seven_columns():

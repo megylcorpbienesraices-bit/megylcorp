@@ -2654,6 +2654,24 @@
     "test_una_tesis_completa_produce_las_cuatro_lineas"
    ]
   },
+  "tests/test_v1550_aggressor_breakdown.py": {
+   "casos": 13,
+   "tests": [
+    "test_cada_print_conserva_precio_bid_ask_y_campo_del_agresor",
+    "test_cobertura_y_dominancia_son_dos_medidas_distintas",
+    "test_el_hover_escribe_el_desglose_de_prima_incluida_la_sin_lado",
+    "test_el_hover_escribe_el_veredicto_con_dominancia_y_cobertura",
+    "test_el_verdicto_se_traduce_sin_inventar_categorias",
+    "test_la_flecha_sale_del_agresor_no_del_tipo_de_contrato",
+    "test_la_marca_lleva_su_desglose_completo",
+    "test_la_prima_sin_lado_tiene_su_propio_cubo",
+    "test_sin_dominancia_la_marca_queda_repartida_no_se_inventa_un_lado",
+    "test_sin_operaciones_atribuidas_el_lado_no_se_deduce_del_precio",
+    "test_un_print_sin_tamano_no_se_convierte_en_prima_de_cero",
+    "test_una_ventana_casi_sin_clasificar_lo_declara",
+    "test_una_ventana_sin_ningun_lado_no_produce_flecha"
+   ]
+  },
   "tests/test_v1550_fabricated_zeros.py": {
    "casos": 12,
    "tests": [
@@ -2669,6 +2687,42 @@
     "test_neto_del_intervalo_existe_si_un_lado_se_midio",
     "test_neto_es_none_cuando_faltan_los_dos_lados",
     "test_nivel_sin_nocional_no_vale_cero_dolares"
+   ]
+  },
+  "tests/test_v1550_flow_view_wiring.py": {
+   "casos": 12,
+   "tests": [
+    "test_el_cliente_pide_el_modelo_y_lo_pasa_a_la_seccion",
+    "test_el_lkg_no_cruza_de_un_activo_a_otro",
+    "test_el_modelo_publica_los_carriles_por_separado",
+    "test_el_print_mayor_se_elige_por_magnitud_no_por_signo",
+    "test_la_cinta_local_sigue_siendo_el_respaldo",
+    "test_la_cobertura_del_agresor_viaja_con_el_sesgo",
+    "test_la_prima_se_reparte_solo_por_agresor_resuelto",
+    "test_la_seccion_incluye_el_modelo_en_su_salida",
+    "test_la_tarjeta_escribe_la_edad_del_dato_en_vez_de_sin_datos",
+    "test_las_tarjetas_leen_del_modelo_cuando_existe",
+    "test_sin_prints_todo_es_none_y_nada_es_cero",
+    "test_un_ciclo_vacio_no_borra_lo_que_ya_era_bueno"
+   ]
+  },
+  "tests/test_v1550_level_identity_and_walls.py": {
+   "casos": 14,
+   "tests": [
+    "test_dos_lineas_con_el_mismo_nombre_son_un_defecto_aunque_coincidan",
+    "test_el_bundle_publica_las_dos_auditorias",
+    "test_el_estilo_de_respaldo_marca_la_linea_en_vez_de_normalizarla",
+    "test_el_recuento_es_lo_que_convierte_esto_en_un_guardia",
+    "test_el_trace_publica_la_auditoria_de_identidad",
+    "test_la_linea_sin_identidad_se_dibuja_distinta",
+    "test_los_tres_consumidores_del_muro_dicen_lo_mismo",
+    "test_todos_los_kinds_que_el_renderer_dibuja_estan_en_el_registro",
+    "test_trace_y_flujo_leen_la_misma_lista_de_niveles",
+    "test_un_centimo_de_diferencia_ya_son_dos_autoridades",
+    "test_un_kind_desconocido_se_denuncia_no_se_disimula",
+    "test_un_muro_que_nadie_publica_no_rompe_la_comprobacion",
+    "test_un_nivel_del_registro_esta_identificado",
+    "test_un_nivel_que_declara_su_autoridad_tambien_esta_identificado"
    ]
   },
   "tests/test_v1550_monte_carlo_audit.py": {
@@ -2697,6 +2751,6 @@
    ]
   }
  },
- "total_minimo": 2224,
+ "total_minimo": 2263,
  "version": "1.54.0"
 }

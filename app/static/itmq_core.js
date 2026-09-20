@@ -597,8 +597,23 @@
   /** Niveles que el panel de flujo comparte con TRACE. */
   const FLOW_LEVEL_KINDS = ['flip', 'call_wall', 'put_wall', 'vol_trigger', 'hedge_wall', 'gamma', 'delta'];
 
+  /**
+   * v1.55.0 · Un `kind` que la tabla no conoce se DENUNCIA, no se disimula.
+   *
+   * Antes el respaldo devolvia `label: kind` y sin `short`, asi que la linea
+   * salia con el nombre interno del motor —o sin nada— y parecia una linea mas.
+   * Una linea anonima sobre un grafico de operativa es peor que no dibujarla:
+   * se ve, parece significar algo, y no hay forma de saber que.
+   *
+   * `unidentified` permite al renderer marcarla a la vista, y el Auditor
+   * publica el recuento en `level_identity_audit`.
+   */
   function levelStyle(kind) {
-    return LEVELS[String(kind || '')] || { color: '--text-dim', label: String(kind || ''), order: 9 };
+    const k = String(kind || '');
+    const hit = LEVELS[k];
+    if (hit) return hit;
+    return { color: '--text-dim', label: 'SIN IDENTIDAD' + (k ? ' · ' + k : ''),
+             short: '?', order: 9, unidentified: true };
   }
 
   /* --------------------------------------------------------------- export */

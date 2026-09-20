@@ -1685,10 +1685,18 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
                                    "lines": []}
     try:
         from .core import level_identity as _LI
-        payload["level_identity"] = _LI.describe(kept, symbol=symbol)
+        # v1.55.0 · Ademas de describir, DENUNCIA. Una lista larga de filas
+        # correctas esconde bien las dos que no lo son, asi que el recuento de
+        # lineas sin identidad viaja aparte y el Auditor lo puede leer de un
+        # vistazo. Mientras `unidentified` no sea cero, hay un defecto abierto.
+        auditoria = _LI.audit(kept, symbol=symbol)
+        payload["level_identity"] = auditoria["rows"]
+        payload["level_identity_audit"] = {k: v for k, v in auditoria.items() if k != "rows"}
     except Exception as exc:
         _obs_note("main:level_identity", exc, severity="DEGRADED")
         payload["level_identity"] = []
+        payload["level_identity_audit"] = {"ok": False, "unidentified": None,
+                                           "detail": "la identidad de niveles no se pudo resolver"}
     return walls
 
 

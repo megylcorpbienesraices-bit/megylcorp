@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import math
 
 from .core import session_resolver
+from .core.obs import note as _obs_note
 
 
 def _f(v: Any, default: float | None = None) -> float | None:
@@ -1317,8 +1318,29 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
     net_flow_block = intel.get("net_flow") if isinstance(intel, dict) else None
     net_flow_rows = (net_flow_block or {}).get("rows") if isinstance(net_flow_block, dict) else None
 
+    # ── FlowViewModel · politica UNICA de frescura ───────────────────────────
+    #
+    # v1.55.0 · Hasta aqui la seccion tenia un estado GLOBAL: si el ultimo ciclo
+    # venia vacio, TODO se vaciaba, y en pantalla convivian «405 buckets» con
+    # tres tarjetas diciendo SIN DATOS. Dos afirmaciones contrarias sobre el
+    # mismo dato.
+    #
+    # Ahora cada carril lleva su propio ultimo valor bueno, indexado por
+    # (simbolo, fecha de sesion, dataset), y dice si lo que muestra es de este
+    # ciclo o de hace diez minutos. «No llego nada nuevo» y «no hay nada» dejan
+    # de dibujarse igual.
+    unconsolidated = _order_flow_block(intel, "options_order_flow_raw")
+    consolidated = _order_flow_block(intel, "options_order_flow")
+    tape_rows = unconsolidated.get("rows") or consolidated.get("rows") or []
+    tape = _tape_totals(tape_rows)
+    tape["buckets"] = tape_rows or None
+    view_model = _flow_view_model(symbol, state, tape, net_flow_rows, qflow)
+
     return {
         "symbol": symbol,
+        # El modelo que la seccion CONSUME. Las tarjetas leen de aqui su valor,
+        # su estado y su edad; no vuelven a deducirlos por su cuenta.
+        "view_model": view_model,
         "net_flow": {
             "ready": bool(net_flow_rows),
             "rows": list(net_flow_rows or []),
@@ -1327,8 +1349,8 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
             "display": None if net_flow_rows else "SIN DATOS",
         },
         "net_drift": drift,
-        "order_flow_consolidated": _order_flow_block(intel, "options_order_flow"),
-        "order_flow_unconsolidated": _order_flow_block(intel, "options_order_flow_raw"),
+        "order_flow_consolidated": consolidated,
+        "order_flow_unconsolidated": unconsolidated,
         "qflow": qflow,
         "qflow_concentration": {
             "events": qflow.get("events") or [],
@@ -1344,6 +1366,150 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
         "note": ("Una sola sección de flujo. Net Drift es del endpoint oficial; QFLOW "
                  "es cálculo propio de ITM QUANT sobre datos del proveedor."),
     }
+
+
+def _tape_totals(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Primas de la cinta, repartidas SOLO por agresor resuelto.
+
+    Un `CALL` no es una compra y un `PUT` no es una venta: lo que decide el lado
+    es quien cruzo el spread. La prima cuyo print no trae agresor no se reparte
+    a ningun lado — se queda en su propio cubo, visible, en vez de inclinar el
+    sesgo hacia el lado que toque por azar.
+
+    Si no hubo NINGUN print, todas las magnitudes salen `None`, no cero: «no se
+    negocio prima» es una conclusion y aqui no hay con que sostenerla.
+    """
+    from .core.aggressor import BUY, SELL
+
+    buy = sell = unknown = total = None
+    prints = 0
+    volume = None
+    largest = None
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        prints += 1
+        prem = _f(r.get("premium"))
+        size = _f(r.get("size"))
+        if size is not None:
+            volume = size if volume is None else volume + size
+        if prem is None:
+            continue
+        mag = abs(prem)
+        total = mag if total is None else total + mag
+        agg = str(r.get("aggressor") or "").upper()
+        if agg == BUY:
+            buy = mag if buy is None else buy + mag
+        elif agg == SELL:
+            sell = mag if sell is None else sell + mag
+        else:
+            unknown = mag if unknown is None else unknown + mag
+        if largest is None or mag > abs(_f(largest.get("premium")) or 0.0):
+            largest = {"t": r.get("t"), "premium": prem, "strike": r.get("strike"),
+                       "option_type": r.get("option_type"), "aggressor": r.get("aggressor"),
+                       "execution": r.get("execution")}
+    classified = None
+    if buy is not None or sell is not None:
+        classified = (buy or 0.0) + (sell or 0.0)
+    return {
+        "buy_premium": buy, "sell_premium": sell, "total_premium": total,
+        "unknown_premium": unknown, "largest_print": largest,
+        "volume": volume, "prints": (rows or None) and list(rows or [])[:400] or None,
+        "print_count": prints,
+        # Cobertura del agresor: un 8 % clasificado no sostiene la misma lectura
+        # que un 95 %, y esa cifra tiene que viajar junto al sesgo.
+        "aggressor_coverage_pct": (None if not total else round(100.0 * (classified or 0.0) / total, 2)),
+        "classified_premium": classified,
+    }
+
+
+def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str, Any]:
+    """¿Los tres sitios donde sale un muro dicen el MISMO precio?
+
+    v1.55.0 · El Wall Engine ya resuelve los muros una sola vez, pero «hay una
+    autoridad» es una afirmacion de arquitectura y esto la vuelve comprobable.
+    El defecto original no fue que el calculo estuviera mal: fue que cada seccion
+    llamaba a `structural_walls()` con su propio frame, asi que el mismo nombre
+    señalaba dos strikes distintos en dos pantallas a la vez y ninguna avisaba.
+
+    Se comparan los tres consumidores:
+
+        MOTOR    trace['walls'][lado]['strike']     lo que resolvio el Wall Engine
+        TRACE    trace['levels'] con ese `kind`     la linea que se dibuja
+        RESUMEN  resumen[lado]                      la cifra de la tarjeta
+
+    La comparacion es EXACTA sobre el precio publicado: un muro es un strike, no
+    una estimacion, asi que una diferencia de un centimo ya es dos autoridades.
+    """
+    walls = (trace or {}).get("walls") or {}
+    levels = [lv for lv in ((trace or {}).get("levels") or []) if isinstance(lv, dict)]
+    res = resumen or {}
+    rows = []
+    for side in ("call_wall", "put_wall"):
+        engine = _f((walls.get(side) or {}).get("strike"))
+        drawn = [_f(lv.get("price")) for lv in levels if lv.get("kind") == side]
+        card = _f(res.get(side))
+        # Mas de una linea con el mismo `kind` YA es el defecto, aunque coincidan.
+        duplicated = len(drawn) > 1
+        values = [v for v in ([engine] + drawn + [card]) if v is not None]
+        agree = (not duplicated) and (len(set(values)) <= 1)
+        rows.append({
+            "side": side,
+            "engine": engine,
+            "trace_levels": drawn,
+            "resumen": card,
+            "authority": "ITMQ_WALL_ENGINE",
+            "source_mode": (walls.get(side) or {}).get("source_mode"),
+            "duplicated_lines": duplicated,
+            "agree": agree,
+            "detail": ("" if agree else
+                       "mas de una linea con el mismo nombre" if duplicated else
+                       "el motor, la linea dibujada y la tarjeta no coinciden"),
+        })
+    ok = all(r["agree"] for r in rows)
+    return {
+        "ok": ok, "rows": rows,
+        "detail": ("los muros coinciden en motor, TRACE y RESUMEN" if ok else
+                   "hay mas de una autoridad de muros en pantalla"),
+        "note": ("TRACE y FLUJO DE ORDENES dibujan la MISMA lista `levels`, asi "
+                 "que comprobarla una vez los cubre a los dos."),
+    }
+
+
+def _flow_view_model(symbol: str, state: Dict[str, Any], tape: Dict[str, Any],
+                     net_flow_rows: Any, qflow: Dict[str, Any]) -> Dict[str, Any]:
+    """Arma el FlowViewModel con la sesion y el estado de mercado reales.
+
+    `tape` y `net_flow` son DATASETS DISTINTOS y entran por separado: la ausencia
+    de uno no puede vaciar al otro. Mezclarlos era la causa de que Net Flow
+    desapareciera cuando la cinta venia sin prints.
+    """
+    from .core import flow_view as _FV
+    from .core import session_mode as _SM
+    from .providers.quantdata.tools import last_valid_session_date as _session
+
+    try:
+        ses = _SM.resolve()
+        market_open = ses["mode"] in (_SM.LONDON_MONITOR, _SM.NEW_YORK)
+        session_date = ses["trading_date"] if market_open else _session()
+        model = _FV.build(
+            symbol=symbol, session_date=session_date, market_open=market_open,
+            tape=tape,
+            net_flow={"series": list(net_flow_rows) if net_flow_rows else None},
+            qflow={"markers": (qflow or {}).get("markers") or None},
+        )
+        model["session_mode"] = ses["mode"]
+        model["aggressor_coverage_pct"] = tape.get("aggressor_coverage_pct")
+        return model
+    except Exception as exc:
+        _obs_note("terminal_api:flow_view_model", exc, severity="DEGRADED")
+        return {"symbol": symbol, "freshness": {"status": _flow_view_error_state()},
+                "error": f"{type(exc).__name__}"}
+
+
+def _flow_view_error_state() -> str:
+    from .core import flow_view as _FV
+    return _FV.PROVIDER_ERROR
 
 
 def _order_flow_block(intel: Dict[str, Any], key: str) -> Dict[str, Any]:
@@ -2344,6 +2510,13 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
                  "nada sobre los otros dos, y presentarlos juntos hacía parecer "
                  "rota la sección entera teniendo dos de tres sanos."),
     }
+    # v1.55.0 · AUTORIDAD ÚNICA DE MUROS, comprobada y no sólo declarada.
+    resumen_block = _resumen(state, trace, intel)
+    auditor["walls"] = wall_consistency(trace, resumen_block)
+    # IDENTIDAD DE LÍNEAS. Mientras `unidentified` no sea cero, hay una línea
+    # anónima sobre el gráfico de operativa y eso es un defecto abierto.
+    auditor["level_identity"] = ((trace or {}).get("level_identity_audit")
+                                 or {"ok": None, "detail": "el trace no publicó la auditoría"})
 
     return {
         "ready": bool(state.get("ready")),
@@ -2360,7 +2533,7 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         "publication_blocked": bool(trace.get("blocked")),
         "publication_blocked_motive": trace.get("publication_blocked_motive"),
         "candle_source": trace.get("candle_source"),
-        "resumen": _resumen(state, trace, intel),
+        "resumen": resumen_block,
         "exposicion": _exposicion(trace, state, intel),
         "open_interest": _open_interest(trace, state, intel),
         "volatilidad": _volatilidad(state, intel),

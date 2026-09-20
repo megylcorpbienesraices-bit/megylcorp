@@ -492,6 +492,16 @@ def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -
         total = buy + sell
         e["buy_premium"] = round(buy, 2)
         e["sell_premium"] = round(sell, 2)
+        # v1.55.0 · El desglose COMPLETO viaja con la marca: cuanta prima fue de
+        # compra, cuanta de venta, cuanta se quedo sin lado, con cuantas
+        # operaciones y con que cobertura. Sin esto, «COMPRA» es una etiqueta que
+        # no se puede contrastar con nada al pasar el raton.
+        e["unknown_premium"] = _f(d.get("unknown_premium"))
+        e["trades"] = d.get("trades")
+        e["buys"] = d.get("buys")
+        e["sells"] = d.get("sells")
+        e["unknowns"] = d.get("unknowns")
+        e["aggressor_coverage_pct"] = _f(d.get("aggressor_coverage_pct"))
         e["aggressor_source"] = "ORDER_FLOW_TAPE"
         if total <= 0:
             # Hubo operaciones pero ninguna con lado agresor utilizable: la cinta
@@ -508,8 +518,11 @@ def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -
         else:
             e["aggressor"] = "BUY" if buy >= sell else "SELL"
         e["aggressor_confidence"] = round(share, 4)
+        e["aggressor_dominance_pct"] = round(100.0 * share, 2)
+        cov = _f(d.get("aggressor_coverage_pct"))
         e["aggressor_detail"] = (f"compra {buy:,.0f} vs venta {sell:,.0f} "
-                                 f"en {d.get('trades', 0)} operaciones")
+                                 f"en {d.get('trades', 0)} operaciones"
+                                 + ("" if cov is None else f" · {cov:.0f}% con agresor"))
 
 
 def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -538,7 +551,15 @@ def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "aggressor": agg,
             "aggressor_source": e.get("aggressor_source"),
             "aggressor_confidence": e.get("aggressor_confidence"),
+            "aggressor_dominance_pct": e.get("aggressor_dominance_pct"),
+            "aggressor_coverage_pct": e.get("aggressor_coverage_pct"),
             "aggressor_detail": e.get("aggressor_detail"),
+            # El desglose que sostiene la flecha, para poder leerlo en el hover.
+            "buy_premium": e.get("buy_premium"),
+            "sell_premium": e.get("sell_premium"),
+            "unknown_premium": e.get("unknown_premium"),
+            "trades": e.get("trades"), "buys": e.get("buys"),
+            "sells": e.get("sells"), "unknowns": e.get("unknowns"),
             "arrow": arrow, "premium": premium,
             "label": f"{arrow} ${premium / 1e6:.1f}M",
             "share_of_peak": e.get("share_of_peak"),
@@ -605,6 +626,11 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
         puts = [t for t in trades if t["option_type"].startswith("P")]
         buys = [t for t in trades if t["direction"] > 0]
         sells = [t for t in trades if t["direction"] < 0]
+        # v1.55.0 · Las operaciones SIN lado agresor son su propio grupo.
+        # Antes no se contaban en ningun sitio, asi que una ventana con noventa
+        # prints sin cotizacion y diez clasificados se presentaba con la misma
+        # cara que una con cien clasificados: «compra 4,2 M vs venta 0,3 M».
+        unknowns = [t for t in trades if t["direction"] == 0]
         by_exec: Dict[str, int] = {}
         for t in trades:
             tag = _execution_tag(t.get("execution"))
@@ -623,8 +649,16 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
             "put_premium": round(sum(t["premium"] or 0.0 for t in puts), 2),
             "buy_premium": round(sum(t["premium"] or 0.0 for t in buys), 2),
             "sell_premium": round(sum(t["premium"] or 0.0 for t in sells), 2),
+            "unknown_premium": round(sum(abs(t["premium"] or 0.0) for t in unknowns), 2),
             "calls": len(calls), "puts": len(puts),
-            "buys": len(buys), "sells": len(sells),
+            "buys": len(buys), "sells": len(sells), "unknowns": len(unknowns),
+            # Que porcentaje de la PRIMA de la ventana llego con lado agresor.
+            # Es lo que separa un veredicto sostenido de uno sostenido por tres
+            # prints de los noventa que hubo.
+            "aggressor_coverage_pct": (
+                None if not trades else
+                round(100.0 * sum(abs(t["premium"] or 0.0) for t in buys + sells)
+                      / max(sum(abs(t["premium"] or 0.0) for t in trades), 1e-9), 2)),
             "executions": by_exec,
             "dominant_strike": (None if dominant is None else
                                 {"strike": dominant[0], "premium": round(dominant[1], 2)}),

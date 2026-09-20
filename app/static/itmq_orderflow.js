@@ -78,6 +78,9 @@
     // NET DRIFT oficial de Quant Data. Estado propio y separado de `qflow`,
     // `buckets` y de cualquier magnitud de exposición: no comparte serie ni escala.
     drift: null,
+    // FlowViewModel: politica UNICA de frescura por carril. Cuando viaja, las
+    // tarjetas leen de el; si no, se recalculan de la cinta local como antes.
+    flowView: null,
     driftPick: NaN,   // instante seleccionado sobre la curva
     panel: 'tape',    // tape | drift
 
@@ -1673,7 +1676,79 @@
     renderDriftPick();
   }
 
+  /**
+   * v1.55.0 · Las tarjetas leen el FlowViewModel cuando existe.
+   *
+   * El defecto que esto elimina: la seccion tenia un estado GLOBAL, asi que un
+   * ciclo sin prints la vaciaba entera y en pantalla convivian
+   *
+   *     ESTADO            DATO ANTIGUO · 405 buckets · ultimo hace 3610 min
+   *     PRIMA TOTAL       SIN DATOS
+   *
+   * dos afirmaciones contrarias sobre el mismo dato. El modelo trae cada carril
+   * con SU ultimo valor bueno y SU edad, asi que una tarjeta puede decir «$1,2M
+   * · ultimo dato 15:42» mientras otra sigue en vivo. «No llego nada nuevo» y
+   * «no hay nada» dejan de dibujarse igual.
+   *
+   * La cinta local sigue siendo el calculo cuando el modelo no viaja: no se
+   * pierde nada si el backend es antiguo.
+   */
+  function renderSummaryFromModel(vm) {
+    const set = (id, v) => { const x = document.getElementById(id); if (x) x.textContent = v; };
+    const P = vm.premiums || {};
+    // Un carril SIN_DATOS escribe SIN DATOS; uno viejo escribe su valor, porque
+    // un valor de hace diez minutos sigue siendo informacion y un hueco no.
+    const val = (lane) => {
+      if (!lane) return 'SIN DATOS';
+      if (lane.current == null) return 'SIN DATOS';
+      return Q.money(lane.current, 1);
+    };
+    const buy = P.buy || null, sell = P.sell || null;
+    set('ofTotalPremium', val(P.total));
+    set('ofBuyPremium', val(buy));
+    set('ofSellPremium', val(sell));
+    const neto = (buy && buy.current != null) || (sell && sell.current != null)
+      ? Q.money((buy && buy.current || 0) - (sell && sell.current || 0), 1) : 'SIN DATOS';
+    set('ofNetPremium', neto);
+    // La nota de cada tarjeta dice si lo que se ve es de ahora o de antes.
+    const nota = (lane, porDefecto) => (lane && lane.screen_note) ? lane.screen_note : porDefecto;
+    set('ofBuyNote', nota(buy, 'agresor en ask'));
+    set('ofSellNote', nota(sell, 'agresor en bid'));
+
+    const cov = Q.num(vm.aggressor_coverage_pct, NaN);
+    const unk = P.unclassified && P.unclassified.current;
+    const tape = vm.tape || {};
+    const n = (tape.meta && tape.meta.count) || 0;
+    set('ofPrintCount', n > 0
+      ? `${n} prints${Q.isNum(cov) ? ` · ${cov.toFixed(0)}% con agresor` : ''}`
+        + (unk ? ` · ${Q.money(unk, 1)} sin clasificar` : '')
+        + (tape.screen_note ? ` · ${tape.screen_note}` : '')
+      : (tape.screen_note || 'sin cinta observada'));
+
+    const big = P.largest_print && P.largest_print.current;
+    set('ofBiggest', big ? Q.money(Math.abs(Q.num(big.premium, 0)), 1) : '—');
+    set('ofBiggestDetail', big
+      ? `${Q.hhmm(Q.parseTime(big.t))} · ${String(big.option_type || '').toUpperCase()} ${Q.num(big.strike) || ''} · ${big.aggressor || ''}`
+      : '—');
+
+    // El sesgo se mide sobre la prima CLASIFICADA. Dividir por el total diluia
+    // el sesgo hacia EQUILIBRADO justo cuando la cinta llega sin cotizacion.
+    const b = (buy && buy.current) || 0, sl = (sell && sell.current) || 0;
+    const clasificada = b + sl;
+    const bias = clasificada > 0 ? (b - sl) / clasificada : 0;
+    set('ofBias', clasificada <= 0
+      ? ((P.total && P.total.current) ? 'SIN CLASIFICAR' : '—')
+      : (bias > 0.12 ? 'COMPRADOR' : bias < -0.12 ? 'VENDEDOR' : 'EQUILIBRADO'));
+  }
+
+  function applyFlowView(vm) {
+    S.flowView = (vm && typeof vm === 'object' && vm.premiums) ? vm : null;
+    renderSummary();
+    return S.flowView;
+  }
+
   function renderSummary() {
+    if (S.flowView) { renderSummaryFromModel(S.flowView); return; }
     const set = (id, v) => { const x = document.getElementById(id); if (x) x.textContent = v; };
     let buy = 0, sell = 0, total = 0, biggest = null;
     let unknown = 0;
@@ -1727,6 +1802,6 @@
     for (const p of Object.values(S.panels)) if (p) p.invalidate();
   }
 
-  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, setPanel, setGoldRule,
+  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, applyFlowView, setPanel, setGoldRule,
     setMinPremium, setMode, setFollow, state: S };
 })(window);

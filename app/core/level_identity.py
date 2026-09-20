@@ -191,6 +191,14 @@ def _persistence(symbol: str, kind: str, price: float, now: datetime) -> Dict[st
             "moved_this_cycle": bool(prev is not None and moved)}
 
 
+#: Lo que se publica cuando una linea dibujada NO tiene identidad en el motor.
+#: No es una etiqueta decorativa: es una DENUNCIA. Una linea sin nombre sobre un
+#: grafico de operativa se ve, parece significar algo y no hay forma de saber
+#: que. Mientras esto aparezca en el Auditor, hay un defecto sin cerrar.
+UNIDENTIFIED = "UNIDENTIFIED_LEVEL"
+IDENTIFIED = "IDENTIFIED"
+
+
 def describe(levels: List[Dict[str, Any]], *, symbol: str,
              now: Optional[datetime] = None) -> List[Dict[str, Any]]:
     """Identidad de cada nivel publicado. NO calcula ni renombra nada.
@@ -234,8 +242,36 @@ def describe(levels: List[Dict[str, Any]], *, symbol: str,
             # Un `kind` que el renderer no conoce se pinta con el color por
             # defecto y sin nombre. Es exactamente el caso que hay que ver.
             "known_to_registry": origin is not None,
+            # DENUNCIA explicita. Una linea es identificable cuando el motor
+            # dice de donde sale (registro) O ella misma declara su autoridad.
+            # Las dos cosas ausentes = linea anonima sobre un grafico de dinero.
+            "identity_status": (IDENTIFIED if (origin is not None or lv.get("authority"))
+                                else UNIDENTIFIED),
         })
     return out
+
+
+def audit(levels: List[Dict[str, Any]], *, symbol: str,
+          now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Identidad de cada linea MAS el recuento de las que no la tienen.
+
+    El recuento es lo que convierte esto en un guardia: `describe` solo describe,
+    y una lista larga de filas correctas esconde bien las dos que no lo son.
+    """
+    rows = describe(levels, symbol=symbol, now=now)
+    sin_identidad = [r for r in rows if r["identity_status"] == UNIDENTIFIED]
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "unidentified": len(sin_identidad),
+        "unidentified_kinds": sorted({r["type"] for r in sin_identidad}),
+        "ok": not sin_identidad,
+        "detail": ("todas las lineas dibujadas tienen identidad del motor"
+                   if not sin_identidad else
+                   f"{len(sin_identidad)} linea(s) sin identidad: "
+                   + ", ".join(sorted({r['type'] or 'SIN_KIND' for r in sin_identidad}))),
+        "symbol": str(symbol or "").upper(),
+    }
 
 
 def reset() -> None:

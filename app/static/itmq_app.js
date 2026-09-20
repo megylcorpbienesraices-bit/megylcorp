@@ -359,6 +359,10 @@
       // NET DRIFT OFICIAL de Quant Data. Va aparte de QFLOW a propósito: son dos
       // magnitudes distintas, de dos endpoints distintos, y no se sustituyen.
       try { Flow.applyNetDrift(d.net_drift); } catch (err) { console.error('[FLOW] applyNetDrift', err); }
+      // v1.55.0 · FlowViewModel: el estado y la edad de CADA carril de FLUJO DE
+      // ORDENES. Sin el, un ciclo sin prints vaciaba la seccion entera y las
+      // tarjetas decian SIN DATOS al lado de un estado que contaba 405 buckets.
+      try { Flow.applyFlowView((d.flujo_ordenes || {}).view_model); } catch (err) { console.error('[FLOW] applyFlowView', err); }
       renderAll(d);
       const q = Q.num(d.data_quality, NaN);
       if (state.switching) {
