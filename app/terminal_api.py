@@ -1094,8 +1094,26 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
                        else (own_notional if (own_notional and data_state == _DL.DATA_OK) else None)))
     _count = (len(marks) or int(_f(lp.get("off_exchange_count"), 0) or 0)) or None
 
+    # ── 6 · DarkPoolViewModel · la ÚNICA salida que consume la pantalla ──────
+    #
+    # Se arma desde los TRES carriles del proveedor y nada más. Las zonas de
+    # liquidez propias y la clasificación por venue siguen viajando en `audit`,
+    # pero ya no pueden decidir si esta sección tiene datos: eran capas DERIVADAS
+    # bloqueando a la fuente DIRECTA, y por eso el Auditor decía «608 filas» al
+    # lado de un panel que decía SIN DATOS.
+    from .core import dark_pool_view as _DPV
+    from .providers.quantdata.tools import last_valid_session_date as _session
+    view_model = _DPV.build(
+        flow_block=_qd_block(intel, "dark_flow"),
+        levels_block=_qd_block(intel, "dark_pool_levels"),
+        prints_block=_qd_block(intel, "equity_prints"),
+        spot=spot,
+        session={"resolved": _session(), "authority": "MarketSessionResolver"},
+    )
+
     return {
-        "ready": ready,
+        "ready": ready or bool(view_model.get("ready")),
+        "view_model": view_model,
         "state": data_state,
         "data_state_detail": _hub_dp.get("detail") or None,
         "source_mode": _hub_dp.get("source_mode"),

@@ -1,5 +1,37 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.52.0 · El lado agresor, y el dato que ya estaba
+
+Ninguna fórmula cambia. **Sí cambia la clasificación del lado agresor**, que
+estaba produciendo lecturas invertidas.
+
+- **`AT_BID` se clasificaba como COMPRA.** La regla comparaba el prefijo del
+  valor contra una letra suelta —`"A"`— y `AT_BID` empieza por A, pero es el
+  **vendedor** cruzando el spread. Ahora la clasificación vive en
+  `app/core/aggressor.py`, busca por subcadena y tiene una prueba por valor.
+- **Una PUT comprada se marcaba como VENTA.** La marca leía `side`, que el motor
+  calcula como dominancia de prima por tipo de contrato: mide **qué contrato
+  pesó más**, no **quién agredió**. Un intervalo dominado por calls puede ser
+  calls *vendidas*. Ahora son dos campos, `premium_side` y `aggressor`, y la
+  interfaz sólo mira el segundo, que sale de la cinta de order-flow.
+- **Sin agresor conocido no se elige lado**: rombo neutro. `flowSide` devuelve
+  tres estados, no un booleano — es el cambio de tipo lo que hace imposible el
+  defecto.
+- **Dark Pool: el dato llegaba y la pantalla decía SIN DATOS.** Dos causas.
+  `dark-flow` publica las acciones en **`size`** y el normalizador las buscaba
+  por heurística («dark», «offExchange»), así que 608 filas salían con volumen
+  `None`. Y los paneles colgaban de la clasificación por venue, una capa
+  **derivada** bloqueando a la fuente **directa**. Ahora hay un
+  `DarkPoolViewModel` único desde los tres carriles del proveedor.
+- **`equity-prints` pide `sessionDate`** resuelto a la última sesión válida, y
+  el % fuera de bolsa **no se estima**: sin universo dark + lit completo va en
+  SIN DATOS.
+- **Relieve 3D**: una fila por strike, secuencia completa, con el panel creciendo.
+- **Mapa dinámico**: las ocho opciones verificadas en la terminal real. Un mapa
+  sin dato declara su causa en vez de quedarse en blanco.
+- **Cambio de activo**: ráfaga de arranque acotada por plazo, alcance y salida
+  anticipada. Antes la pantalla tardaba minutos en llenarse.
+
 ## v1.51.0 · Un hueco deja de valer cero
 
 Ninguna fórmula cambia, y **ningún cambio es por activo**: todo vive en el

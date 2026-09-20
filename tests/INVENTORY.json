@@ -2491,7 +2491,7 @@
     "test_aggregation_keeps_range_extreme_count_and_members",
     "test_an_absent_value_is_a_gap_not_a_zero",
     "test_both_strike_panels_declare_what_they_trimmed",
-    "test_dark_flow_resolves_its_volume_field_from_the_real_response",
+    "test_dark_flow_maps_the_contract_instead_of_guessing_the_field",
     "test_dark_pool_levels_sends_the_documented_contract",
     "test_dark_pool_shows_the_lanes_that_do_have_data",
     "test_every_lane_of_the_tape_declares_why_it_is_empty",
@@ -2558,8 +2558,40 @@
     "test_trace_and_the_section_share_one_field_treatment",
     "test_volatility_drift_is_not_published_as_zero_without_a_measurement"
    ]
+  },
+  "tests/test_v1520_aggressor_and_dark_pool.py": {
+   "casos": 57,
+   "tests": [
+    "test_a_balanced_bucket_is_mixed_not_a_side",
+    "test_a_derived_layer_can_no_longer_block_the_direct_source",
+    "test_a_missing_map_declares_its_cause_instead_of_going_blank",
+    "test_a_response_without_size_is_a_schema_mismatch_not_a_zero",
+    "test_a_symbol_change_opens_a_bounded_burst",
+    "test_a_value_naming_both_sides_is_not_a_side",
+    "test_an_unattributed_concentration_declares_that_it_has_no_side",
+    "test_call_dominance_is_not_a_buy",
+    "test_dark_flow_maps_the_contract_without_guessing",
+    "test_equity_prints_asks_for_a_real_session",
+    "test_every_dynamic_map_option_has_a_destination",
+    "test_every_lane_declares_its_state_with_a_cause",
+    "test_no_module_classifies_the_side_on_its_own",
+    "test_the_aggressor_is_classified_exactly",
+    "test_the_burst_is_bounded_on_all_three_sides",
+    "test_the_burst_only_covers_what_draws_the_screen",
+    "test_the_chain_carries_every_value_unchanged_to_the_view_model",
+    "test_the_contract_type_never_becomes_a_direction",
+    "test_the_dark_vwap_weights_by_shares",
+    "test_the_frontend_draws_no_arrow_without_a_known_side",
+    "test_the_marker_arrow_follows_the_aggressor_not_the_contract",
+    "test_the_off_exchange_share_is_never_estimated",
+    "test_the_provider_row_carries_the_verdict_and_the_field_it_came_from",
+    "test_the_section_reads_the_view_model_and_not_the_derived_layers",
+    "test_the_symbol_change_is_still_transactional",
+    "test_the_unambiguous_field_wins_over_the_ambiguous_one",
+    "test_trades_without_a_declared_side_are_not_counted_as_balanced"
+   ]
   }
  },
- "total_minimo": 2056,
- "version": "1.51.0"
+ "total_minimo": 2113,
+ "version": "1.52.0"
 }

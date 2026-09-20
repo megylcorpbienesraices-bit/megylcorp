@@ -547,8 +547,11 @@
     main.set(expRows);
 
     // El relieve lee EL MISMO perfil: dos vistas de un dato, nunca dos datos.
+    // Y crece igual que las barras: una fila por strike, sin saltarse ninguno.
+    // El alto extra es el de la fuga isométrica, que no cabe dentro de las filas.
+    growForRows('chartExposureRelief', expRows.length, RELIEF_ROW_PX, 140);
     const expRelief = chart('chartExposureRelief', () => P.relief(el('chartExposureRelief'), {
-      fmt: v => Q.signedCompact(v, 2), empty: 'SIN ESTRUCTURA',
+      fmt: v => Q.signedCompact(v, 2), empty: 'SIN ESTRUCTURA', aggregate: 'none',
     }));
     expRelief.set(expRows);
     applyExpView();
@@ -714,22 +717,38 @@
 
   function renderDarkPool(d) {
     const dp = d.dark_pool || {};
-    // Sin datos NO se publica un 0: un cero aquí afirma «hoy no hubo dark pool»,
-    // que es una conclusión, no un hueco. El backend ya manda `null` en ese caso.
-    const cnt = Q.num(dp.count, NaN);
-    const not = Q.num(dp.notional, NaN);
+    /* v1.52.0 · La sección lee el DarkPoolViewModel y nada más.
+     *
+     * El Auditor decía «Dark Flow 608 filas · Dark Pool Levels 349 filas» y los
+     * paneles decían SIN DATOS al mismo tiempo, porque los KPI colgaban de la
+     * clasificación por venue y de las zonas de liquidez propias: capas
+     * DERIVADAS bloqueando a la fuente DIRECTA. Ahora los tres carriles del
+     * proveedor llegan ya sumados en `view_model`, y las capas propias siguen
+     * existiendo sólo en `audit`.
+     */
+    const vm = dp.view_model || {};
+    const k = vm.kpis || {};
+    const st = vm.status || {};
+
+    const cnt = Q.num(k.dark_print_count, NaN);
+    const not = Q.num(k.dark_notional, NaN);
     set('dpCount', Q.isNum(cnt) ? Q.compact(cnt, 0) : 'SIN DATOS');
     set('dpNotional', Q.isNum(not) ? Q.money(not, 1) : 'SIN DATOS');
-    set('dpLevel', Q.isNum(Q.num(dp.dominant_level, NaN)) ? Q.num(dp.dominant_level).toFixed(2) : '—');
-    set('dpLevelDetail', Q.isNum(Q.num(dp.dominant_notional, NaN))
-      ? Q.money(dp.dominant_notional, 1)
-      : motivoVacio(dp.reason || dp.state, '—'));
+    set('dpLevel', Q.isNum(Q.num(k.dominant_level, NaN)) ? Q.num(k.dominant_level).toFixed(2) : '—');
+    set('dpLevelDetail', Q.isNum(Q.num(k.dominant_notional, NaN))
+      ? Q.money(k.dominant_notional, 1)
+      : ((st.dark_pool_levels || {}).detail || motivoVacio(dp.reason || dp.state, '—')));
 
     const candles = dp.candles || [];
     const last = candles.length ? Q.num(candles[candles.length - 1].c, NaN) : NaN;
-    const vw = Q.num(dp.vwap, NaN);   // lo calcula el backend sobre las mismas velas
+    // VWAP oscuro: Σ(precio × acciones) / Σ(acciones) sobre prints DARK_POOL. Si
+    // no hay prints clasificados, cae al VWAP de las velas, declarado como tal.
+    const vwDark = Q.num(k.dark_vwap, NaN);
+    const vw = Q.isNum(vwDark) ? vwDark : Q.num(dp.vwap, NaN);
     set('dpVwap', Q.isNum(vw) ? vw.toFixed(2) : '—');
-    set('dpVwapDetail', (Q.isNum(vw) && Q.isNum(last)) ? `${last >= vw ? 'precio sobre VWAP' : 'precio bajo VWAP'}` : '—');
+    set('dpVwapDetail', !Q.isNum(vw) ? 'sin prints oscuros con los que ponderar'
+      : `${Q.isNum(last) ? (last >= vw ? 'precio sobre VWAP' : 'precio bajo VWAP') : 'VWAP oscuro'}`
+        + (Q.isNum(vwDark) ? ' · prints DARK_POOL' : ' · velas (respaldo)'));
 
     // Sin denominador, el notional off-exchange no dice nada: 40 M$ es mucho o poco
     // según si el total de large prints fueron 60 M$ o 4.000 M$.
@@ -737,35 +756,42 @@
     // mismo: Quant Data la mide sobre todo el volumen de la sesión; la
     // clasificación por venue, sólo sobre los large prints que la cinta dejó ver.
     // Publicar el número sin decir cuál es lo hace inutilizable.
-    const share = Q.num(dp.off_exchange_share_pct, NaN);
-    const src = String(dp.off_exchange_share_source || '');
+    // El porcentaje NO se estima. `dark-flow` sólo trae lo off-exchange, así que
+    // ahí no existe denominador; hace falta el universo completo de prints
+    // dark + lit. Sin él va en SIN DATOS, nunca en 0%.
+    const share = Q.num(k.dark_share_pct, NaN);
     set('dpShare', Q.isNum(share) ? `${share.toFixed(1)}%` : 'SIN DATOS');
-    set('dpShareDetail', !Q.isNum(share)
-      ? motivoVacio(dp.reason, 'sin volumen con el que comparar')
-      : (src === 'QUANTDATA_DARK_FLOW'
-        ? `${Q.compact(Q.num(dp.dark_volume, 0), 1)} de ${Q.compact(Q.num(dp.total_volume, 0), 1)} acc`
-        : `${Q.money(dp.off_exchange_notional, 1)} de ${Q.money(dp.large_print_notional, 1)} en prints grandes`));
+    set('dpShareDetail', Q.isNum(share)
+      ? `${String(k.dark_share_basis || '').toLowerCase().replace(/_/g, ' ')}`
+      : (k.dark_share_reason || 'sin volumen con el que comparar'));
 
     // Auditoría: las dos medidas, una al lado de la otra. Dos vías independientes
     // que coinciden valen más que una sola; si no coinciden, eso es información.
-    const dv = Q.num(dp.dark_volume, NaN);
+    const dv = Q.num(k.dark_volume, NaN);
+    const flowSt = st.dark_flow || {};
     set('dpDarkVolume', Q.isNum(dv) ? `${Q.compact(dv, 1)} acc` : 'SIN DATOS');
     set('dpDarkVolumeDetail', Q.isNum(dv)
-      ? `${(dp.flow || []).length} intervalos observados`
-      : motivoVacio(dp.reason || dp.state, 'sin volumen oscuro en este ciclo'));
+      ? `${Q.num((vm.flow || {}).count, 0).toFixed(0)} intervalos observados`
+      // SCHEMA_MISMATCH es distinto de «no vino nada»: el proveedor respondió y
+      // el contrato no encaja. Decirlo con ese nombre es lo que permite arreglarlo.
+      : (flowSt.detail || motivoVacio(dp.reason || dp.state, 'sin volumen oscuro en este ciclo')));
 
     // Cobertura por vía, en lenguaje de análisis: el nombre de la herramienta
     // del proveedor y la causa exacta viven en el Auditor, no aquí.
+    // Cobertura desde el ESTADO de cada carril del proveedor, no desde las capas
+    // derivadas: un carril con filas cuenta como cubierto aunque la clasificación
+    // por venue no haya confirmado nada.
     const VIA = { dark_flow: 'flujo oscuro', dark_pool_levels: 'niveles', equity_prints: 'impresiones' };
-    const diag = dp.diagnosis || {};
-    const live = (diag.lanes_live || []).map(k => VIA[k] || k);
-    const broken = (diag.lanes_broken || []).map(k => VIA[k] || k);
-    set('dpCoverage', live.length ? `${live.length}/3` : '—');
+    const live = [], broken = [];
+    for (const key of ['dark_flow', 'dark_pool_levels', 'equity_prints']) {
+      const lane = st[key] || {};
+      (lane.state === 'DATA_OK' ? live : broken).push(VIA[key] || key);
+    }
+    set('dpCoverage', vm.coverage || '—');
     set('dpCoverageDetail', live.length
       ? (broken.length ? `con dato: ${live.join(' · ')} · sin dato: ${broken.join(' · ')}`
                        : `con dato: ${live.join(' · ')}`)
-      : (diag.screen === 'MERCADO CERRADO' ? 'mercado cerrado: no hay sesión que medir'
-                                           : 'ninguna vía con dato en este ciclo'));
+      : ((st.dark_flow || {}).detail || 'ninguna vía con dato en este ciclo'));
 
     const audit = dp.audit || {};
     const dpp = Q.num(audit.delta_pp, NaN);
@@ -774,15 +800,18 @@
       ? `estructura ${Q.num(audit.provider_dark_share_pct, 0).toFixed(1)}% · cinta ${Q.num(audit.venue_classification_share_pct, 0).toFixed(1)}%`
       : 'sólo una de las dos vías tiene dato');
 
-    const big = dp.off_exchange_largest || null;
+    const big = k.largest_print || dp.off_exchange_largest || null;
     const bigNot = big ? Q.num(big.notional, NaN) : NaN;
     set('dpBiggest', Q.isNum(bigNot) ? Q.money(bigNot, 1) : '—');
     set('dpBiggestDetail', big
-      ? `${Q.isNum(Q.num(big.price, NaN)) ? Q.num(big.price).toFixed(2) : '—'} · ${Q.compact(Q.num(big.size, 0), 0)} acc · ${esc(String(big.venue || big.exchange_name || big.exchange || '—'))}`
-      : '—');
+      ? `${Q.isNum(Q.num(big.price, NaN)) ? Q.num(big.price).toFixed(2) : '—'} · ${Q.compact(Q.num(big.shares !== undefined ? big.shares : big.size, 0), 0)} acc · ${esc(String(big.venue || big.exchange_name || big.exchange || '—'))}`
+      : ((st.equity_prints || {}).detail || '—'));
 
+    // Los niveles del proveedor mandan; los propios sólo si aquéllos no vinieron.
+    const vmLevels = (vm.levels || []).length ? vm.levels : (dp.levels || []);
     chart('chartDarkPool', () => P.pricePrints(el('chartDarkPool'), { empty: 'SIN OFF-EXCHANGE CONFIRMADO EN LA SESIÓN' }))
-      .set(candles, dp.prints || [], (dp.levels || []).slice(0, 6).map(l => ({ name: 'DP', price: l.price })));
+      .set(candles, (vm.prints || []).length ? vm.prints : (dp.prints || []),
+           vmLevels.slice(0, 6).map(l => ({ name: 'DP', price: l.price })));
 
     fillTable('tblDarkPoolPrints', dp.off_exchange_top || [], p => {
       const px = Q.num(p.price, NaN), vwapRef = Q.num(dp.vwap, NaN);
@@ -1705,19 +1734,26 @@
   // eje se saltaba un strike de cada dos. Con 13 cabe el numero en cada fila.
   const EXP_BAR_PX = 13;
 
-  function growForRows(id, count) {
+  // El relieve necesita más paso que una barra plana: cada prisma tiene cara
+  // superior además de frontal, y con el paso de las barras las caras se pisan.
+  const RELIEF_ROW_PX = 19;
+
+  function growForRows(id, count, rowPx, extra) {
     const host = el(id);
     if (!host || !window.ITMQBars) return;
-    const need = window.ITMQBars.extentFor(count, { targetThickness: EXP_BAR_PX });
+    const need = window.ITMQBars.extentFor(count, { targetThickness: rowPx || EXP_BAR_PX });
     // Nunca por debajo del alto de tarjeta: con pocos strikes el panel no debe
     // encogerse hasta parecer roto.
-    host.style.height = Math.max(300, need + 42) + 'px';
+    host.style.height = Math.max(300, need + (extra === undefined ? 42 : extra)) + 'px';
   }
 
   /** Barras o relieve. El dato es el mismo; cambia la pregunta que responde. */
   function applyExpView() {
     const scroll = el('chartExposureScroll');
-    const relief = el('chartExposureRelief');
+    // El relieve vive ahora en su propio contenedor con scroll: crece con los
+    // strikes igual que las barras, así que el que se muestra u oculta es el
+    // contenedor, no el lienzo.
+    const relief = el('chartExposureReliefScroll') || el('chartExposureRelief');
     if (!scroll || !relief) return;
     const bars = state.expView !== 'relief';
     scroll.style.display = bars ? '' : 'none';

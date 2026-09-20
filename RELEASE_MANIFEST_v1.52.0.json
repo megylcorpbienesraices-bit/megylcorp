@@ -1,35 +1,36 @@
 {
- "version": "1.51.0",
- "release": "ITM_QUANT_v1.51.0_PRE_VPS",
+ "version": "1.52.0",
+ "release": "ITM_QUANT_v1.52.0_PRE_VPS",
  "scope": "MULTI_ASSET",
- "base_version": "1.50.0",
+ "base_version": "1.51.0",
  "focus": [
-  "CERO FABRICADO EN EL NORMALIZADOR: `norm_time_series` publicaba un bucket sin campo como valor CERO. Afectaba a las cinco herramientas que lo comparten; en la DERIVA DE VOLATILIDAD dibujaba una sierra que caia a 0.00 y volvia a subir. Un hueco viaja como None y la curva se PARTE en vez de desplomarse.",
-  "IV PERCENTIL: con rango observado de amplitud cero salia 100%. Se retiene junto al rank, con la causa escrita.",
-  "RELIEVE 3D reconstruido: prismas con cara frontal, superior y tapa lateral iluminadas desde una fuente, suelo cerrado en fuga y profundidad acotada en PIXELES (la fraccion sin tope mandaba la fuga fuera del lienzo cuando el perfil crecia).",
-  "INTERES ABIERTO y EXPOSICION: una etiqueta por strike. El salto se calculaba contra un paso fijo de 15 px cuando el panel crece con las filas.",
-  "MAPA DE CALOR: contornos REALES por marching squares en el componente comun, banda neutra mas ancha y techo de opacidad. Antes eran palitos sueltos por cruce y un bloque saturado.",
-  "INTERVAL MAP de la seccion: rejilla de PUNTOS con el diametro como magnitud y el precio superpuesto. El campo continuo se queda donde es el fondo (TRACE); donde el mapa es el sujeto se lee celda a celda.",
-  "NET DRIFT: muros y marcas doradas de flujo sobre el eje del PRECIO, no sobre el de la prima, y sobre UNA sola escala de precio.",
-  "ROTULACION de niveles definida una vez en el nucleo y subida de 10 a 12 px; TRACE y Net Drift con suelo de alto en pixeles."
+  "LADO AGRESOR · autoridad unica en app/core/aggressor.py. Se comparaba el PREFIJO del valor contra una letra suelta, asi que `AT_BID` —el vendedor cruzando el spread— se clasificaba como COMPRA por empezar por «A».",
+  "LADO AGRESOR · la marca de flujo dibujaba flecha VERDE de compra cuando la concentracion venia con `side: CALL`, y ese campo es DOMINANCIA DE PRIMA por tipo de contrato, no direccion. Una put comprada es una COMPRA y salia marcada como venta.",
+  "LADO AGRESOR · sin agresor conocido NO se elige lado: rombo neutro. Una flecha inventada sobre un grafico de operativa puede costar dinero.",
+  "DARK POOL · `dark-flow` publica las acciones en `size` y el normalizador las buscaba por heuristica («dark», «offExchange»). Con 608 filas reales, las 608 salian con volumen None. Mapeo determinista del contrato.",
+  "DARK POOL · DarkPoolViewModel unico. Los paneles colgaban de EQUITY_TAPE + VENUE_CONFIRMED y de las zonas de liquidez propias: capas DERIVADAS bloqueando a la fuente DIRECTA.",
+  "DARK POOL · equity-prints pide `sessionDate` resuelto a la ultima sesion valida; fuera de horario devolvia vacio y se publicaba como MARKET_CLOSED con cero prints.",
+  "RELIEVE 3D · una fila por strike, con el panel creciendo. Con 62 strikes agrupaba y el eje numeraba de 2.5 en 2.5.",
+  "MAPA DINAMICO · las 8 opciones verificadas en la terminal real. Un mapa sin dato declara su causa en vez de quedarse en blanco.",
+  "CAMBIO DE ACTIVO · rafaga de arranque acotada: con presupuesto de regimen permanente la pantalla tardaba minutos en llenarse."
  ],
  "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
  "quant_logic_changes": [
   "SIN CAMBIOS de formula. Ninguna metrica cambia de valor.",
-  "UN HUECO DEJA DE VALER CERO. No es un cambio de calculo: es dejar de AFIRMAR un cero que nadie midio. Afecta a IV, max pain, interes abierto, precio y prima neta.",
-  "El percentil de IV se retiene con ventana degenerada porque `(hist <= iv).mean()` vale 100% siempre ahi: es un artefacto de la comparacion, no una medida.",
-  "El recorte de strikes y la agrupacion visual siguen siendo PRESENTACION; los agregados salen del libro entero."
+  "CAMBIA LA CLASIFICACION DEL LADO AGRESOR, y eso corrige lecturas que estaban INVERTIDAS: `AT_BID` pasa de COMPRA a VENTA, y una concentracion dominada por calls deja de marcarse como compra cuando la cinta dice que fueron calls vendidas.",
+  "`premium_side` (CALL_DOMINANT / PUT_DOMINANT) y `aggressor` (BUY / SELL / MIXED / UNKNOWN) son campos DISTINTOS. Confundirlos era el error.",
+  "El % fuera de bolsa deja de estimarse: sin universo completo dark + lit va en None con su causa."
  ],
  "tests": {
-  "collected": 2056,
-  "passed": 2056,
+  "collected": 2113,
+  "passed": 2113,
   "failed": 0,
   "skipped": 0,
   "errors": 0,
-  "files": 147,
+  "files": 148,
   "status": "PASS",
   "partitions": 21,
-  "plan_sha256": "9fa58a0b184e19a470b60a3ea722258f500c1cd911d8f7f377eb4944fcbde998"
+  "plan_sha256": "3a0d6cd29768502d17b988996ee8c68b8985ef172672bb0fa8af1d684e718e8a"
  },
  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
  "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -124,12 +125,26 @@
   "section_interval_map": "DOT_GRID_DIAMETER_IS_THE_MAGNITUDE",
   "net_drift_price_axis": "ONE_PRICE_SCALE_CARRYING_WALLS_AND_MARKERS",
   "level_typography": "DEFINED_ONCE_IN_THE_CORE_FOR_EVERY_SCREEN",
-  "chart_height_floor": "IN_PIXELS_NOT_ONLY_AS_A_GRID_FRACTION"
+  "chart_height_floor": "IN_PIXELS_NOT_ONLY_AS_A_GRID_FRACTION",
+  "aggressor_authority": "SINGLE_MODULE_SUBSTRING_MATCH_NEVER_A_SHORT_PREFIX",
+  "aggressor_at_bid": "WAS_CLASSIFIED_AS_BUY_NOW_SELL",
+  "aggressor_contract_type": "CALL_AND_PUT_ARE_NOT_DIRECTIONS",
+  "aggressor_unknown": "NEUTRAL_DIAMOND_NEVER_A_DEFAULT_SIDE",
+  "concentration_side": "PREMIUM_DOMINANCE_AND_AGGRESSOR_ARE_SEPARATE_FIELDS",
+  "dark_flow_contract": "DETERMINISTIC_SIZE_NOTIONALVALUE_TRADECOUNT_STOCKPRICE",
+  "dark_flow_schema": "MISSING_SIZE_IS_SCHEMA_MISMATCH_NEVER_ZERO",
+  "dark_pool_view_model": "SINGLE_OUTPUT_BUILT_FROM_THE_THREE_PROVIDER_LANES",
+  "dark_pool_derived_layers": "AUDIT_ONLY_THEY_NO_LONGER_GATE_THE_SECTION",
+  "equity_prints_session": "EXPLICIT_LAST_VALID_SESSION_DATE",
+  "off_exchange_share": "ONLY_WITH_A_COMPLETE_DARK_PLUS_LIT_UNIVERSE",
+  "relief_resolution": "ONE_ROW_PER_STRIKE_PANEL_GROWS",
+  "dynamic_map_fallback": "DECLARED_ENGINE_FALLBACK_AND_A_STATED_CAUSE",
+  "symbol_switch_burst": "BOUNDED_BY_TIME_SCOPE_AND_EARLY_EXIT"
  },
  "verification_limits": [
-  "SIGUE SIN HABER un HTTP 200 real de dark-pool-levels: este entorno no tiene salida a quantdata.us ni credenciales. Pendiente de scripts/verify_live_quantdata.py con la API key real.",
-  "NET DRIFT se ha verificado visualmente INYECTANDO una serie sintetica en el navegador real, porque este entorno no tiene serie de net-drift del proveedor. Lo verificado es la GEOMETRIA del render —muros en el eje del precio, marcas doradas con flecha e importe, una sola escala—, no el dato del proveedor.",
-  "Las marcas doradas sobre cinta de opciones real no se han podido fotografiar: no hay cinta en este entorno.",
-  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2, de modo que aqui solo puede producirse un ZIP de fuentes SIN certificar."
+  "El lado agresor se verifica valor a valor sobre el clasificador y sobre la cadena del normalizador, incluidos los casos que la version anterior invertia. NO se ha podido contrastar contra una cinta real en este entorno: no hay credenciales ni salida al proveedor.",
+  "DARK POOL: la cadena RAW -> NORMALIZED -> VIEWMODEL se comprueba valor a valor con la forma publicada del contrato. La ejecucion contra el proveedor real queda pendiente de la terminal del usuario, que ya la tiene LIVE.",
+  "Las 8 opciones del MAPA DINAMICO se han ejercitado en la terminal real: 7 pintan campo con isolineas y VANNA declara que no hay mapa. Con proveedor LIVE las cuatro griegas deberian venir del Interval Map en vez del respaldo del motor.",
+  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2."
  ]
 }

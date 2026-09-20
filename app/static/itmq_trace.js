@@ -104,6 +104,7 @@
              call: new Q.Glide(140), put: new Q.Glide(140) },
     breakdown: false,        // NETO (false) · CALL+PUT (true)
     heatField: 'gamma',
+    heatReason: '',
     heatOpacity: 0.55,
     perspective: 'MM',
     expiry: 'ALL',
@@ -199,16 +200,34 @@
    * manchas continuas, y el coste por frame es un único drawImage.
    */
   /** De dónde sale la matriz del fondo: Interval Map del proveedor o motor. */
+  /* v1.52.0 · El motor tiene intensidad propia para algunas griegas. Se usa como
+   * RESPALDO DECLARADO cuando el proveedor no sirve ese mapa para el activo, en
+   * vez de dejar el fondo en blanco sin decir nada. VANNA no tiene respaldo: el
+   * motor no la calcula, y eso se dice con esas palabras. */
+  const ENGINE_FALLBACK = {
+    GAMMA: 'gamma_intensity',
+    DELTA: 'delta_intensity',
+    CHARM: 'charm_intensity',
+  };
+
   function heatSource() {
     const d = S.data || {};
     const field = HEATFIELDS[S.heatField];
-    if (!field) return null;
+    if (!field) { S.heatReason = ''; return null; }
+
+    const h = d.heatmap_history;
+    const engineMatrix = key => {
+      if (!h || h.ready !== true) return null;
+      const m = h[key];
+      return (Array.isArray(m) && m.length) ? m : null;
+    };
 
     if (field.greek) {
       const maps = d.interval_maps || {};
       const im = maps[field.greek];
       if (im && im.ready === true && Array.isArray(im.intensity) && im.intensity.length
           && (im.strikes || []).length && (im.times || []).length) {
+        S.heatReason = '';
         return {
           matrix: im.intensity, strikes: im.strikes, times: im.times,
           // `source` y `source_mode` viajan para el HUD; no se pinta el endpoint.
@@ -216,13 +235,32 @@
           stamp: (im.times || []).slice(-1)[0] || '',
         };
       }
+      // Respaldo del motor, DECLARADO. Antes esto era un `return null` mudo y el
+      // fondo se quedaba en blanco sin que nada explicara por qué.
+      const fb = ENGINE_FALLBACK[field.greek];
+      const m = fb && engineMatrix(fb);
+      if (m) {
+        S.heatReason = '';
+        return {
+          matrix: m, strikes: h.strikes || [], times: h.times || [],
+          origin: 'ITM_QUANT', mode: 'FALLBACK', stamp: h.incremental_key || '',
+        };
+      }
+      S.heatReason = (im && im.reason)
+        ? `${field.label}: ${im.reason}`
+        : (fb ? `${field.label}: sin mapa del proveedor y sin historia propia suficiente`
+              : `${field.label}: el proveedor no sirve este mapa para este activo y el motor no lo calcula`);
       return null;
     }
 
-    const h = d.heatmap_history;
-    if (!h || h.ready !== true) return null;
-    const m = h[field.key];
-    if (!Array.isArray(m) || !m.length) return null;
+    const m = engineMatrix(field.key);
+    if (!m) {
+      S.heatReason = (!h || h.ready !== true)
+        ? `${field.label}: ${(h && h.reason) || 'sin historia estructural todavía'}`
+        : `${field.label}: la historia estructural no incluye esta capa`;
+      return null;
+    }
+    S.heatReason = '';
     return {
       matrix: m, strikes: h.strikes || [], times: h.times || [],
       origin: 'ITM_QUANT', mode: 'DERIVED', stamp: h.incremental_key || '',
@@ -846,13 +884,30 @@
    *
    * Se dibuja en el punto exacto en que ocurrió, sobre el precio.
    */
-  /** ¿Compra o venta? El agresor manda; el lado del contrato es el respaldo. */
-  function flowIsBuy(ev) {
-    const dir = String((ev && (ev.direction || ev.aggressor || ev.side)) || '').toUpperCase();
-    if (dir === 'BUY' || dir === 'ASK' || dir === 'CALL') return true;
-    if (dir === 'SELL' || dir === 'BID' || dir === 'PUT') return false;
-    return Q.num(ev && ev.premium, 0) >= 0;
+  /* ¿COMPRA, VENTA o ni una cosa ni otra?
+   *
+   * v1.52.0 · Esta función devolvía «compra» cuando el evento traía CALL y
+   * «venta» cuando traía PUT, y eso era FALSO de dos maneras a la vez:
+   *
+   *   · `side` es DOMINANCIA DE PRIMA por tipo de contrato, no dirección. Un
+   *     intervalo dominado por calls puede estar formado íntegramente por calls
+   *     VENDIDAS —venta de volatilidad, lectura bajista o neutra— y la pantalla
+   *     dibujaba una flecha verde de compra encima.
+   *   · Comprar una PUT es una COMPRA. Marcarla como venta por ser put invierte
+   *     el sentido de la operación que se está señalando.
+   *
+   * El único campo que habla de dirección es `aggressor`, que el motor resuelve
+   * desde la cinta de order-flow. Y cuando no se conoce, NO se elige un lado:
+   * se devuelve null y la marca se dibuja neutra. Una flecha inventada sobre un
+   * gráfico de operativa puede costar dinero; un rombo que dice «no sé» no.
+   */
+  function flowSide(ev) {
+    const agg = String((ev && ev.aggressor) || '').toUpperCase();
+    if (agg === 'BUY') return true;
+    if (agg === 'SELL') return false;
+    return null;   // MIXED, UNKNOWN o ausente → sin lado
   }
+
 
   /** Cuánto pesa una marca, de 0 a 1, dentro de lo visible en este ciclo. */
   function markerStrength(ev) {
@@ -895,6 +950,24 @@
 
   /** Flecha de sentido: verde compra, rojo venta. La forma ya la distingue. */
   function flowArrow(ctx, x, y, up) {
+    /* v1.52.0 · `up === null` significa que NO se conoce el lado agresor.
+     *
+     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
+     * evento sin lado salía pintado como compra o como venta según un valor por
+     * defecto. Ahora un lado desconocido se dibuja como ROMBO neutro. Quien mire
+     * el gráfico ve que ahí hubo una concentración y que su dirección no está
+     * confirmada, en vez de leer una dirección que nadie midió. */
+    if (up === null || up === undefined) {
+      const mute = Q.token('--text-dim', '#8494ad');
+      ctx.save();
+      ctx.fillStyle = mute;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
+      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      return mute;
+    }
     const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
     const t = up ? -1 : 1;
     ctx.save();
@@ -906,8 +979,7 @@
     ctx.moveTo(x, y + t * 13);
     ctx.lineTo(x - 5.5, y + t * 6);
     ctx.lineTo(x + 5.5, y + t * 6);
-    ctx.closePath();
-    ctx.fill();
+    ctx.closePath(); ctx.fill();
     ctx.restore();
     return col;
   }
@@ -945,10 +1017,11 @@
     for (const m of marks) {
       const t = Q.parseTime(m.t);
       if (!Q.isNum(t)) continue;
-      // v1.50.0 · La flecha dice COMPRA o VENTA, no CALL o PUT. El agresor es
-      // lo que el operador necesita leer; el lado del contrato ya viaja en el
-      // detalle que abre el hover.
-      const up = flowIsBuy(m);
+      // v1.52.0 · La flecha dice COMPRA o VENTA sólo cuando el AGRESOR se conoce.
+      // `null` = no se midió el lado, y entonces se dibuja rombo neutro: una
+      // flecha inventada sobre un gráfico de operativa puede costar dinero.
+      const up = flowSide(m);
+      const above = up !== false;
       const hit = candleAt(t);
 
       let x, y, anchored;
@@ -957,7 +1030,7 @@
         x = sx(hit.t + hit.bar / 2);
         const hi = Q.num(hit.candle.h, NaN), lo = Q.num(hit.candle.l, NaN);
         const close = Q.num(hit.candle.c, NaN);
-        y = sy(up ? (Q.isNum(hi) ? hi : close) : (Q.isNum(lo) ? lo : close));
+        y = sy(above ? (Q.isNum(hi) ? hi : close) : (Q.isNum(lo) ? lo : close));
         anchored = true;
       } else {
         const px = Q.num(m.price, NaN);
@@ -981,8 +1054,8 @@
       ctx.save();
       ctx.globalAlpha = a;
       const r = flowHalo(ctx, x, y, markerStrength(m));
-      const col = flowArrow(ctx, x, up ? y - r : y + r, up);
-      if (label) flowAmount(ctx, x, up ? y - r - 22 : y + r + 22, label, col);
+      const col = flowArrow(ctx, x, above ? y - r : y + r, up);
+      if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
       ctx.restore();
       const dy = up ? -(r + 22) : (r + 22);
 
@@ -1360,10 +1433,13 @@
     // Origen del fondo, en lenguaje de análisis: nunca el nombre del endpoint.
     const hf = HEATFIELDS[S.heatField];
     set('traceHeatFieldLabel', hf ? hf.label : '—');
+    // Sin mapa NO se escribe «SIN DATOS» a secas: se escribe POR QUÉ. Un fondo en
+    // blanco sin causa es indistinguible de un fallo de render, y con ocho
+    // opciones en el selector hay que poder saber cuál de ellas no tiene dato.
     set('traceHeatSource', S.heat
       ? (S.heat.mode === 'DIRECT_PROVIDER' ? 'estructura de opciones'
          : S.heat.mode === 'FALLBACK' ? 'estructura propia (respaldo)' : 'modelo propio')
-      : 'SIN DATOS');
+      : (S.heatField === 'off' ? 'mapa apagado' : (S.heatReason || 'SIN DATOS')));
     const ql = (d.qflow || {}).level;
     set('traceQflowLevel', ql && Q.isNum(Q.num(ql.price, NaN))
       ? Q.num(ql.price).toFixed(Q.num(ql.price) >= 1000 ? 0 : 2) : '—');

@@ -640,7 +640,7 @@ def test_flow_markers_are_golden_with_an_arrow_and_an_amount():
         assert "function flowHalo(" in js, f"{rel}: falta el círculo dorado"
         assert "function flowArrow(" in js, f"{rel}: falta la flecha de sentido"
         assert "function flowAmount(" in js, f"{rel}: falta la cifra"
-        assert "function flowIsBuy(" in js, f"{rel}: el sentido es COMPRA/VENTA"
+        assert "function flowSide(" in js, f"{rel}: el sentido es COMPRA/VENTA"
         halo = js[js.index("function flowHalo("):js.index("function flowArrow(")]
         assert "createRadialGradient" in halo, "el halo separa la marca del fondo"
         assert "7 + 11 * k" in halo, "el radio dice cuánto"
@@ -659,29 +659,30 @@ def test_flow_markers_are_golden_with_an_arrow_and_an_amount():
     assert "'▲'" not in body and "'▼'" not in body
 
 
-def test_dark_flow_resolves_its_volume_field_from_the_real_response():
-    """«608 intervalos · 0.0 acc» no se puede corregir sin saber qué llegó."""
+def test_dark_flow_maps_the_contract_instead_of_guessing_the_field():
+    """v1.52.0 · Invierte la decisión de v1.49.0.
+
+    Entonces el volumen oscuro se resolvía «descubriendo» qué campo lo
+    representaba, buscando nombres que contuvieran «dark» u «offExchange». La
+    idea era sobrevivir a un proveedor que cambiara de nombre, y el precio fue
+    no encontrar el nombre REAL: el contrato publica las acciones en `size`, que
+    no contiene ninguna de esas palabras. Con 608 filas descargadas, las 608
+    salían con volumen None y la sección decía SIN DATOS.
+
+    Cuando existe contrato publicado, adivinar sólo puede acertar por casualidad.
+    """
     from app.providers.quantdata.tools import norm_dark_flow
-
-    # Nombre declarado.
-    a = norm_dark_flow({"buckets": [
-        {"timestamp": "2026-09-19T14:30:00Z", "darkVolume": 12000, "totalVolume": 50000}]})
-    assert a["rows"][0]["dark_volume"] == 12000
-    assert a["field_map"]["dark_volume"] == "darkVolume"
-
-    # Nombre DISTINTO: se deriva de la propia respuesta y se declara cuál.
-    b = norm_dark_flow({"buckets": [
-        {"timestamp": "2026-09-19T14:30:00Z", "offExchangeShares": 9000,
-         "consolidatedShares": 40000}]})
-    assert b["rows"][0]["dark_volume"] == 9000
-    assert b["field_map"]["dark_volume"] == "offExchangeShares"
-
-    # Ningún campo sirve: `None`, NUNCA cero, y se dice qué campos llegaron.
-    c = norm_dark_flow({"buckets": [
-        {"timestamp": "2026-09-19T14:30:00Z", "stockPrice": 516.2}]})
-    assert c["rows"][0]["dark_volume"] is None
-    assert c["volume_field_resolved"] is False
-    assert "stockPrice" in c["observed_fields"]
+    out = norm_dark_flow({"data": {"1758297600000": {
+        "notionalValue": 35_842_110.0, "size": 69428,
+        "tradeCount": 412, "stockPrice": 516.20}}})
+    assert out["field_map"]["dark_volume"] == "size"
+    assert out["rows"][0]["dark_volume"] == 69428
+    assert out["schema_state"] == "CONTRACT_OK"
+    # Los alias antiguos siguen valiendo como RESPALDO declarado.
+    legacy = norm_dark_flow({"data": {"1758297600000": {
+        "darkVolume": 1000, "darkNotional": 5000, "stockPrice": 10.0}}})
+    assert legacy["rows"][0]["dark_volume"] == 1000
+    assert legacy["field_map"]["dark_volume"] == "darkVolume"
 
 
 def test_absent_dark_volume_is_not_summed_as_zero():
@@ -1025,7 +1026,8 @@ def test_the_drift_chart_got_the_room_it_needs():
     # v1.51.0 · 2.2fr seguía saliendo corto en una ventana baja, porque el resto
     # de filas se lleva su fracción pase lo que pase. El suelo en PÍXELES es lo
     # que garantiza el alto; la fracción sólo reparte lo que sobra.
-    assert "minmax(360px, 3.1fr)" in block
+    # v1.52.0 · 360 px seguía siendo poco con ocho KPI encima.
+    assert "minmax(520px, 4.2fr)" in block
 
 
 def test_every_lane_of_the_tape_declares_why_it_is_empty():
@@ -1256,7 +1258,7 @@ def test_the_two_main_charts_have_a_floor_in_pixels():
     trace = css[css.index(".trace-grid {"):css.index(".trace-col {")]
     assert "min-height: 640px" in trace
     drift = css[css.index(".drift-stack {"):css.index(".drift-stack[hidden]")]
-    assert "minmax(360px," in drift
+    assert "minmax(520px," in drift
 
 
 def test_none_of_this_release_knows_a_ticker():

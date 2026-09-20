@@ -377,11 +377,14 @@
          * color ya no se confunde con el de la línea de precio, que es lo que
          * pasaba cuando el color era lo único que distinguía CALL de PUT.
          */
-        const up = flowIsBuy(ev);
+        // `null` = lado agresor DESCONOCIDO. Se dibuja arriba, como una
+        // compra, pero con rombo neutro: la posición no afirma nada, la forma sí.
+        const up = flowSide(ev);
+        const above = up !== false;
         const r = flowHalo(ctx, x, y, evStrength(ev, qPeak));
-        const col = flowArrow(ctx, x, up ? y - r : y + r, up);
+        const col = flowArrow(ctx, x, above ? y - r : y + r, up);
         const label = markerLabel(ev);
-        if (label) flowAmount(ctx, x, up ? y - r - 22 : y + r + 22, label, col);
+        if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
       }
       ctx.restore();
     }
@@ -735,13 +738,30 @@
    * rojo que las velas, y una marca sobre una vela de su color desaparecía
    * dentro de ella. La flecha no se confunde con nada.
    */
-  /** ¿Compra o venta? El agresor manda; el lado del contrato es el respaldo. */
-  function flowIsBuy(ev) {
-    const dir = String((ev && (ev.direction || ev.aggressor || ev.side)) || '').toUpperCase();
-    if (dir === 'BUY' || dir === 'ASK' || dir === 'CALL') return true;
-    if (dir === 'SELL' || dir === 'BID' || dir === 'PUT') return false;
-    return Q.num(ev && ev.premium, 0) >= 0;
+  /* ¿COMPRA, VENTA o ni una cosa ni otra?
+   *
+   * v1.52.0 · Esta función devolvía «compra» cuando el evento traía CALL y
+   * «venta» cuando traía PUT, y eso era FALSO de dos maneras a la vez:
+   *
+   *   · `side` es DOMINANCIA DE PRIMA por tipo de contrato, no dirección. Un
+   *     intervalo dominado por calls puede estar formado íntegramente por calls
+   *     VENDIDAS —venta de volatilidad, lectura bajista o neutra— y la pantalla
+   *     dibujaba una flecha verde de compra encima.
+   *   · Comprar una PUT es una COMPRA. Marcarla como venta por ser put invierte
+   *     el sentido de la operación que se está señalando.
+   *
+   * El único campo que habla de dirección es `aggressor`, que el motor resuelve
+   * desde la cinta de order-flow. Y cuando no se conoce, NO se elige un lado:
+   * se devuelve null y la marca se dibuja neutra. Una flecha inventada sobre un
+   * gráfico de operativa puede costar dinero; un rombo que dice «no sé» no.
+   */
+  function flowSide(ev) {
+    const agg = String((ev && ev.aggressor) || '').toUpperCase();
+    if (agg === 'BUY') return true;
+    if (agg === 'SELL') return false;
+    return null;   // MIXED, UNKNOWN o ausente → sin lado
   }
+
 
   function evStrength(ev, peak) {
     const v = Math.abs(Q.num(ev && ev.premium, NaN));
@@ -773,6 +793,24 @@
   }
 
   function flowArrow(ctx, x, y, up) {
+    /* v1.52.0 · `up === null` significa que NO se conoce el lado agresor.
+     *
+     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
+     * evento sin lado salía pintado como compra o como venta según un valor por
+     * defecto. Ahora un lado desconocido se dibuja como ROMBO neutro. Quien mire
+     * el gráfico ve que ahí hubo una concentración y que su dirección no está
+     * confirmada, en vez de leer una dirección que nadie midió. */
+    if (up === null || up === undefined) {
+      const mute = Q.token('--text-dim', '#8494ad');
+      ctx.save();
+      ctx.fillStyle = mute;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
+      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      return mute;
+    }
     const col = up ? Q.token('--pos', '#22c55e') : Q.token('--neg', '#ef4444');
     const t = up ? -1 : 1;
     ctx.save();
@@ -1178,13 +1216,13 @@
           if (x < box.x || x > box.x + box.w) continue;
           const y = psy(pr);
           if (y < box.y - 6 || y > box.y + box.h + 6) continue;
-          const up = flowIsBuy(ev);
+          const up = flowSide(ev);
+          const above = up !== false;
           flowHalo(ctx, x, y, evStrength(ev, peak));
-          flowArrow(ctx, x, y, up);
+          const acol = flowArrow(ctx, x, y, up);
           if (!used.some(u => Math.abs(u - x) < 58)) {
             used.push(x);
-            flowAmount(ctx, x, y + (up ? -22 : 22), markerLabel(ev),
-                       up ? posC : negC);
+            flowAmount(ctx, x, y + (above ? -22 : 22), markerLabel(ev), acol);
           }
         }
       }

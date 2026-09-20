@@ -637,6 +637,13 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             # La prima de un contrato es precio × tamaño × multiplicador. Publicar
             # precio × tamaño a secas la dejaría cien veces por debajo.
             premium = price * size * 100.0
+        # v1.52.0 · El lado agresor lo resuelve `app.core.aggressor`, autoridad
+        # única. Aquí se comparaba el PREFIJO del valor contra una letra suelta,
+        # y por eso `AT_BID` —el vendedor cruzando el spread— se clasificaba como
+        # COMPRA: empieza por «A». Esa inversión sale directamente en una flecha
+        # verde sobre el gráfico de operativa.
+        from ...core.aggressor import from_row as _agg_from_row
+        verdict, agg_field = _agg_from_row(r)
         side = str(_pick(r, "side", "aggressor", "direction", "tradeSide") or "UNKNOWN").upper()
         out.append({
             "t": t,
@@ -647,10 +654,14 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "price": price,
             "size": size,
             "premium": premium,
+            # `side` es el valor CRUDO del proveedor, tal cual, para diagnóstico.
+            # No se usa para decidir la dirección.
             "side": side,
-            # +1 comprador en ask, −1 vendedor en bid, 0 sin clasificar. Es el mismo
-            # convenio que usa el carril de agresión, para que no haya dos lenguajes.
-            "direction": 1 if side.startswith(("BUY", "ASK", "A")) else -1 if side.startswith(("SELL", "BID", "B")) else 0,
+            "aggressor": verdict,
+            "aggressor_field": agg_field,
+            # +1 comprador en ask, −1 vendedor en bid, 0 sin clasificar. Es el
+            # mismo convenio en todo el programa, resuelto en un solo sitio.
+            "direction": 1 if verdict == "BUY" else -1 if verdict == "SELL" else 0,
             "execution": str(_pick(r, "executionType", "execution", "tradeType", "condition") or "").upper(),
             "spot": _f(_pick(r, "stockPrice", "underlyingPrice", "spot")),
             # v1.43.0 · Greeks POR CONTRATO tal y como los publica el proveedor.
@@ -734,20 +745,57 @@ def resolve_numeric_field(row: Dict[str, Any], names: tuple, *, contains: tuple 
 
 
 def norm_dark_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Flujo de dark pool tal y como lo publica Quant Data.
+    """Dark Flow de Quant Data, con el MAPEO DEL CONTRATO, sin heurística.
 
-    `POST /v1/equities/tool/dark-flow` entrega el volumen ejecutado fuera de bolsa
-    por intervalo. Es una fuente DIRECTA: el proveedor ya sabe qué ejecución fue
-    off-exchange. Inferirlo del campo `venue` de la cinta de otro proveedor es una
-    aproximación que depende de que ese proveedor publique el venue y de que el
-    código de venue se interprete bien; sirve como auditoría, no como única vía.
+    ── El fallo que esto elimina ────────────────────────────────────────────
+
+    v1.45.0 resolvía el volumen oscuro "descubriendo" qué campo lo representaba:
+
+        resolve_numeric_field(r, ("darkVolume", "darkPoolVolume",
+                                  "offExchangeVolume", "volume"),
+                              contains=("dark", "offexchange", "off_exchange"))
+
+    El contrato publicado de `dark-flow` define el bucket con cuatro campos:
+
+        notionalValue   dólares off-exchange del intervalo
+        size            ACCIONES off-exchange del intervalo
+        tradeCount      número de impresiones
+        stockPrice      precio de referencia del intervalo
+
+    `size` no estaba en la lista de nombres y no contiene «dark» ni
+    «offExchange», así que NINGUNA de las dos vías lo encontraba. Con 608
+    intervalos reales descargados, `dark_volume` salía `None` en los 608 y la
+    sección mostraba SIN DATOS teniendo el dato delante.
+
+    La heurística era el error de fondo, no la lista: cuando existe contrato
+    publicado, adivinar el campo sólo puede acertar por casualidad. Aquí el
+    mapeo es determinista.
+
+    ── Qué pasa si el contrato no se cumple ─────────────────────────────────
+
+    Si una respuesta que debería traer `size` no lo trae, eso NO es cero
+    acciones: es un desajuste de esquema, y se declara `SCHEMA_MISMATCH` con
+    los campos que sí llegaron. Un cero afirmaría que no hubo volumen oscuro.
+
+    Se aceptan además los alias históricos como RESPALDO DECLARADO —una cuenta
+    con una versión anterior del endpoint sigue funcionando—, pero el campo que
+    acabó sirviendo viaja siempre en `field_map`.
     """
     rows = _rows(payload, "buckets", "series", "points", "timeline", "flow") or _keyed_rows(payload, "timestamp")
     out: List[Dict[str, Any]] = []
-    # Qué campo acabó sirviendo cada magnitud, y qué campos trajo la respuesta.
-    # Es lo que convierte un «0.0 acc» inexplicable en algo sobre lo que actuar.
     field_map: Dict[str, str] = {}
     observed_fields: set = set()
+    schema_misses = 0
+
+    def _contract(r: Dict[str, Any], canonical: str, *aliases: str) -> tuple[Optional[float], Optional[str]]:
+        """El campo del contrato primero; los alias sólo como respaldo declarado."""
+        for key in (canonical, *aliases):
+            if key in r:
+                v = _f(r.get(key), None)
+                if v is not None:
+                    return v, key
+        return None, None
+
     for r in rows:
         if not isinstance(r, dict):
             continue
@@ -755,49 +803,73 @@ def norm_dark_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
         if t is None:
             continue
         observed_fields.update(str(k) for k in r)
-        price = _f(_pick(r, "stockPrice", "price", "underlyingPrice"), None)
+
+        # size = ACCIONES off-exchange. Es el campo del contrato, no un alias.
+        shares, shares_key = _contract(r, "size", "darkVolume", "darkPoolVolume",
+                                       "offExchangeVolume", "shares")
+        notional, notional_key = _contract(r, "notionalValue", "darkNotional",
+                                           "notional", "dollarVolume")
+        prints, prints_key = _contract(r, "tradeCount", "trades", "printCount", "count")
+        price, price_key = _contract(r, "stockPrice", "price", "underlyingPrice")
         if price is not None and price <= 0:
             price = None
-        # El volumen oscuro por nombre declarado y, si el proveedor usa otro,
-        # derivado de la propia respuesta dejando dicho cuál se usó.
-        dark, dark_key = resolve_numeric_field(
-            r, ("darkVolume", "darkPoolVolume", "offExchangeVolume", "volume"),
-            contains=("dark", "offexchange", "off_exchange"))
-        total, total_key = resolve_numeric_field(
-            r, ("totalVolume", "litAndDarkVolume", "consolidatedVolume"),
-            contains=("total", "consolidated"))
-        lit, _lit_key = resolve_numeric_field(
-            r, ("litVolume", "exchangeVolume"), contains=("lit",))
-        if total is None and lit is not None and dark is not None:
-            total = lit + dark
-        if dark_key:
-            field_map["dark_volume"] = dark_key
+
+        if shares_key:
+            field_map["dark_volume"] = shares_key
+        if notional_key:
+            field_map["dark_notional"] = notional_key
+        if prints_key:
+            field_map["dark_prints"] = prints_key
+        if price_key:
+            field_map["stock_price"] = price_key
+        if shares is None:
+            schema_misses += 1
+
+        # El contrato de dark-flow NO publica volumen total ni lit: todo lo que
+        # entrega es off-exchange. Derivar un porcentaje sobre un total que no
+        # existe sería inventarlo, así que viaja en None y la sección lo dice.
+        total, total_key = _contract(r, "totalVolume", "litAndDarkVolume", "consolidatedVolume")
+        lit, lit_key = _contract(r, "litVolume", "exchangeVolume")
+        if total is None and lit is not None and shares is not None:
+            total = lit + shares
         if total_key:
             field_map["total_volume"] = total_key
+
         out.append({
             "t": t,
-            # `None` y no 0.0: si el proveedor no publica volumen oscuro en este
-            # intervalo, la sección lo dice en vez de afirmar que fue cero.
-            "dark_volume": dark,
+            # `None` y no 0.0: un intervalo sin el campo NO es un intervalo sin
+            # volumen oscuro.
+            "dark_volume": shares,
+            "dark_shares": shares,
             "lit_volume": lit,
             "total_volume": total,
-            "dark_notional": _f(_pick(r, "darkNotional", "notional", "dollarVolume"), None),
-            "dark_share_pct": (round(100.0 * dark / total, 4)
-                               if (dark is not None and total and total > 0) else None),
+            "dark_notional": notional,
+            "dark_prints": None if prints is None else int(prints),
+            "dark_share_pct": (round(100.0 * shares / total, 4)
+                               if (shares is not None and total and total > 0) else None),
             "stock_price": price,
         })
+
     out.sort(key=lambda x: x["t"])
     measured = sum(1 for r in out if r.get("dark_volume") is not None)
+    # Filas que llegaron pero ninguna con el campo de acciones: el contrato no se
+    # cumple y hay que decirlo con ese nombre, nunca con un cero.
+    schema_mismatch = bool(out) and measured == 0
     return {
-        "ready": bool(out), "rows": out, "count": len(out),
+        "ready": bool(out),
+        "rows": out,
+        "count": len(out),
         "source": "QUANTDATA_DARK_FLOW",
-        # Diagnóstico para el Auditor: con qué campo se leyó cada magnitud,
-        # cuántos intervalos traen volumen y qué campos publicó el proveedor.
-        # Sin esto, «608 intervalos · 0.0 acc» no se puede corregir.
+        "contract": "notionalValue|size|tradeCount|stockPrice",
         "field_map": dict(field_map),
         "observed_fields": sorted(observed_fields)[:40],
         "intervals_with_volume": measured,
+        "intervals_without_volume": schema_misses,
         "volume_field_resolved": bool(field_map.get("dark_volume")),
+        "schema_state": "SCHEMA_MISMATCH" if schema_mismatch else "CONTRACT_OK",
+        "schema_detail": (
+            f"{len(out)} intervalos sin `size`; campos recibidos: "
+            f"{', '.join(sorted(observed_fields)[:12])}" if schema_mismatch else ""),
     }
 
 
@@ -1545,7 +1617,13 @@ def build_catalog() -> Dict[str, QuantDataTool]:
         QuantDataTool(
             "equity_prints", "Dark Pool / Equities", "Prints de equity",
             ("/v1/equities/tool/equity-prints",),
-            lambda t: {"limit": 250, **_tf(t)},
+            # v1.52.0 · `sessionDate` explícito, resuelto a la última sesión
+            # VÁLIDA. Sin él, fuera de horario el proveedor devuelve vacío y la
+            # sección lo publicaba como MARKET_CLOSED con cero prints, que se lee
+            # como «no hubo dark pool» cuando lo que pasa es que no se le pidió
+            # ninguna sesión concreta. Un fin de semana tiene la sesión del
+            # viernes, y esa sí tiene prints.
+            lambda t: {"limit": 250, "sessionDate": last_valid_session_date(), **_tf(t)},
             norm_prints, "MEDIUM"),
         # v1.42.7 · El flujo de dark pool del proveedor es una fuente DIRECTA. Antes
         # la sección sólo podía inferirlo del campo `venue` de la cinta de otro

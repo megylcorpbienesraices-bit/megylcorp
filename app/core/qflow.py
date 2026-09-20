@@ -195,6 +195,10 @@ def build_qflow(rows: Any, *, symbol: str, now: Optional[datetime] = None,
     threshold = concentration_threshold([c["gross"] for c in clean], symbol=sym)
     events = _concentration_events(clean, threshold)
     attribution = attribute_events(events, order_flow, tool=order_flow_tool)
+    # El AGRESOR real de cada concentración, desde la cinta de order-flow. Tiene
+    # que resolverse ANTES de las marcas: una marca que dice «compra» sin haber
+    # mirado quién agredió es una afirmación inventada sobre el mercado.
+    apply_aggressor(events, attribution)
     markers = _markers(events)
 
     call_total = sum(c["call"] for c in clean if c["call"] is not None) or None
@@ -287,7 +291,17 @@ def _concentration_events(clean: List[Dict[str, Any]], threshold) -> List[Dict[s
             "t": c["ts"].isoformat(),
             "premium": round(c["gross"], 2),
             "net": round(c["net"], 2),
+            # OJO · `side` es DOMINANCIA DE PRIMA por tipo de contrato, no
+            # dirección. Un bucket «CALL» es un bucket donde pesó más la prima de
+            # calls; puede estar formado enteramente por calls VENDIDAS. Quien
+            # necesite compra/venta tiene que leer `aggressor`, nunca esto.
+            "premium_side": "CALL_DOMINANT" if c["net"] > 0 else "PUT_DOMINANT" if c["net"] < 0 else "BALANCED",
             "side": "CALL" if c["net"] > 0 else "PUT" if c["net"] < 0 else "MIXED",
+            # Se rellenan en `apply_aggressor` con la cinta. Hasta entonces, el
+            # lado agresor NO se conoce y así se publica.
+            "aggressor": "UNKNOWN",
+            "aggressor_source": "UNATTRIBUTED",
+            "aggressor_confidence": None,
             "price": c["price"],
             "share_of_peak": round(c["gross"] / peak, 4) if peak > 0 else None,
             "asset_units": threshold.scale.get("unit") and round(
@@ -309,6 +323,85 @@ def _robust_z(value: float, scale: Dict[str, Any]) -> Optional[float]:
     return round((float(value) - float(median)) / sigma, 3)
 
 
+# Cuánto tiene que pesar un lado sobre el otro para llamarlo COMPRA o VENTA.
+#
+# Con 55/45 la etiqueta sería ruido: casi todo bucket tiene un lado algo mayor.
+# A partir de 2:1 en prima agredida, decir «aquí mandó la compra» es una lectura
+# defendible; por debajo el bucket estaba repartido y se dice MIXED.
+AGGRESSOR_DOMINANCE = 2.0
+
+
+def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -> None:
+    """Resuelve COMPRA / VENTA de cada concentración con la cinta real.
+
+    ── Por qué existe esta función ──────────────────────────────────────────
+
+    Hasta v1.51.0 la interfaz dibujaba una flecha VERDE de compra cuando el
+    evento traía ``side == "CALL"``, y ``side`` se calcula así:
+
+        "CALL" if net > 0 else "PUT" if net < 0
+
+    donde ``net`` es prima de calls menos prima de puts del intervalo. Eso mide
+    QUÉ CONTRATO pesó más, no QUIÉN AGREDIÓ. Son cosas distintas y confundirlas
+    es un error con consecuencias:
+
+      · Un intervalo dominado por calls puede estar formado íntegramente por
+        calls VENDIDAS —una venta de volatilidad, lectura bajista o neutra— y
+        la pantalla lo marcaba como compra.
+      · Comprar una PUT es una COMPRA. El mapeo anterior la marcaba como venta
+        por el solo hecho de ser una put.
+
+    El lado agresor real está en la cinta de ``order-flow``, que ya se cruza con
+    cada concentración en ``attribute_events``: ahí se suman ``buy_premium`` y
+    ``sell_premium`` de las operaciones de la ventana. Esta función lleva ese
+    veredicto al evento.
+
+    Cuando la cinta no cubre el bucket, el lado NO se inventa: se queda en
+    ``UNKNOWN`` y la interfaz dibuja una marca neutra. Es preferible decir «no
+    sé de qué lado fue» a pintar una flecha que puede costar dinero.
+    """
+    if not events:
+        return
+    by_t = {}
+    for d in (attribution or {}).get("events") or []:
+        if isinstance(d, dict) and d.get("t") is not None and d.get("matched"):
+            by_t[str(d["t"])] = d
+
+    for e in events:
+        d = by_t.get(str(e.get("t")))
+        if d is None:
+            e["aggressor"] = "UNKNOWN"
+            e["aggressor_source"] = "UNATTRIBUTED"
+            e["aggressor_confidence"] = None
+            e["aggressor_detail"] = "sin operaciones de la cinta en la ventana del bucket"
+            continue
+        buy = abs(float(d.get("buy_premium") or 0.0))
+        sell = abs(float(d.get("sell_premium") or 0.0))
+        total = buy + sell
+        e["buy_premium"] = round(buy, 2)
+        e["sell_premium"] = round(sell, 2)
+        e["aggressor_source"] = "ORDER_FLOW_TAPE"
+        if total <= 0:
+            # Hubo operaciones pero ninguna con lado agresor utilizable: la cinta
+            # no siempre trae el agresor. Un cero aquí no es «repartido», es
+            # «no medido», y se distinguen.
+            e["aggressor"] = "UNKNOWN"
+            e["aggressor_confidence"] = None
+            e["aggressor_detail"] = (f"{d.get('trades', 0)} operaciones sin lado agresor "
+                                     "declarado por el proveedor")
+            continue
+        share = max(buy, sell) / total
+        if buy >= sell * AGGRESSOR_DOMINANCE:
+            e["aggressor"] = "BUY"
+        elif sell >= buy * AGGRESSOR_DOMINANCE:
+            e["aggressor"] = "SELL"
+        else:
+            e["aggressor"] = "MIXED"
+        e["aggressor_confidence"] = round(share, 4)
+        e["aggressor_detail"] = (f"compra {buy:,.0f} vs venta {sell:,.0f} "
+                                 f"en {d.get('trades', 0)} operaciones")
+
+
 def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Marcas para el gráfico de precio y para el panel de flujo.
 
@@ -321,10 +414,21 @@ def _markers(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out = []
     for e in events:
         side = e.get("side")
-        arrow = "▲" if side == "CALL" else "▼" if side == "PUT" else "◆"
+        # v1.52.0 · La flecha sale del AGRESOR, no del tipo de contrato.
+        #
+        # Antes era «▲ si CALL, ▼ si PUT», que es una afirmación sobre la
+        # dirección hecha a partir de un dato que no habla de dirección. Ahora:
+        # ▲ compra, ▼ venta, ◆ repartido o desconocido.
+        agg = str(e.get("aggressor") or "UNKNOWN").upper()
+        arrow = "▲" if agg == "BUY" else "▼" if agg == "SELL" else "◆"
         premium = float(e.get("premium") or 0.0)
         out.append({
             "t": e.get("t"), "price": e.get("price"), "side": side,
+            "premium_side": e.get("premium_side"),
+            "aggressor": agg,
+            "aggressor_source": e.get("aggressor_source"),
+            "aggressor_confidence": e.get("aggressor_confidence"),
+            "aggressor_detail": e.get("aggressor_detail"),
             "arrow": arrow, "premium": premium,
             "label": f"{arrow} ${premium / 1e6:.1f}M",
             "share_of_peak": e.get("share_of_peak"),
@@ -437,7 +541,11 @@ def _trade(r: Dict[str, Any]) -> Dict[str, Any]:
     side = str(r.get("side") or "").upper()
     direction = r.get("direction")
     if not isinstance(direction, (int, float)):
-        direction = 1 if side.startswith(("BUY", "ASK", "A")) else -1 if side.startswith(("SELL", "BID", "B")) else 0
+        # v1.52.0 · Misma autoridad que el normalizador. La comparación por
+        # prefijo corto que había aquí clasificaba `AT_BID` como compra.
+        from .aggressor import from_row as _agg_from_row, direction as _agg_dir
+        verdict, _ = _agg_from_row(r)
+        direction = 1 if verdict == "BUY" else -1 if verdict == "SELL" else _agg_dir(side)
     return {
         "t": r.get("t"),
         "option_type": str(r.get("option_type") or "").upper(),

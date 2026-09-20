@@ -111,7 +111,11 @@ def test_dark_pool_section_renders_the_new_fields():
     for el_id in ("dpShare", "dpShareDetail", "dpBiggest", "dpBiggestDetail", "tblDarkPoolPrints"):
         assert f'id="{el_id}"' in html, el_id
     app = _read("app/static/itmq_app.js")
-    assert "off_exchange_share_pct" in app and "tblDarkPoolPrints" in app
+    # v1.52.0 · La sección lee el DarkPoolViewModel, no la clasificación por
+    # venue. `off_exchange_share_pct` salía de esa capa DERIVADA y era la que
+    # bloqueaba la pantalla: el Auditor decía «608 filas» y el panel «SIN DATOS».
+    assert "dp.view_model" in app and "tblDarkPoolPrints" in app
+    assert "k.dark_share_pct" in app, "el % sale del modelo, con su base declarada"
 
 
 def test_dark_pool_kpi_grid_matches_its_card_count():

@@ -337,7 +337,11 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
      se reparten el resto por fraccion, asi que en una ventana baja el grafico
      principal volvia a quedarse pequeno. Un suelo de 360 px en PIXELES lo impide
      pase lo que pase con el alto de la ventana. */
-  grid-template-rows: minmax(360px, 3.1fr) minmax(0, .38fr) minmax(0, .38fr) minmax(96px, .42fr);
+  /* v1.52.0 · 360 px seguía saliendo corto en pantalla completa: con el bloque
+     de ocho KPI encima, el gráfico se quedaba en poco más de un tercio del alto
+     útil. 520 px de suelo y 4.2fr de reparto; los dos carriles auxiliares y la
+     tabla se conforman con lo que sobra, que es lo justo para lo que son. */
+  grid-template-rows: minmax(520px, 4.2fr) minmax(0, .30fr) minmax(0, .30fr) minmax(88px, .34fr);
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
 }
 .drift-stack[hidden], .flow-stack[hidden] { display: none; }

@@ -102,11 +102,12 @@
     <div class="grid c2">
       <article class="card">
         <header><h2>FLUJO DE OPCIONES · SESIÓN</h2><span class="pill" id="pillFlow">—</span></header>
-        <div class="chart sm" id="chartNetFlow"></div>
+        <div class="chart lg" id="chartNetFlow"></div>
       </article>
       <article class="card">
         <header><h2>NET DRIFT · CALL / PUT ACUMULADO</h2><span class="pill" id="pillDrift">—</span></header>
-        <div class="chart sm" id="chartNetDrift"></div>
+        <!-- Tres curvas superpuestas necesitan alto para separarse. -->
+        <div class="chart lg" id="chartNetDrift"></div>
       </article>
     </div>
 
@@ -368,7 +369,10 @@
       <div class="chart-scroll" id="chartExposureScroll">
         <div class="chart lg" id="chartExposure"></div>
       </div>
-      <div class="chart lg relief3d" id="chartExposureRelief" style="display:none"></div>
+      <!-- El relieve crece igual que las barras: una fila por strike. -->
+      <div class="chart-scroll" id="chartExposureReliefScroll" style="display:none">
+        <div class="chart lg relief3d" id="chartExposureRelief"></div>
+      </div>
     </article>
     <div class="grid c2">
       <article class="card">

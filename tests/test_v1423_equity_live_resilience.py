@@ -98,7 +98,15 @@ def test_windows_atomic_store_does_not_attempt_directory_fsync():
 def test_quantdata_page_lane_is_bounded_and_not_motor_authority():
     src = text("app/providers/quantdata/intelligence.py")
     assert "PAGE_MAX_CONCURRENCY = 2" in src
-    assert "asyncio.Semaphore(PAGE_MAX_CONCURRENCY)" in src
+    # v1.52.0 · La concurrencia sigue acotada, pero ahora tiene DOS valores: el
+    # de régimen permanente y el de la ráfaga que se abre al cambiar de activo,
+    # donde no hay nada en pantalla que proteger. Sigue siendo un semáforo con
+    # una constante declarada, nunca ilimitado.
+    assert "asyncio.Semaphore(BURST_CONCURRENCY if burst else PAGE_MAX_CONCURRENCY)" in src
+    assert "BURST_CONCURRENCY = 5" in src
+    # Y la ráfaga está acotada por plazo, alcance y salida anticipada.
+    assert "BURST_SECONDS" in src and "BURST_MAX_PRIORITY" in src
+    assert "self._burst_until = 0.0" in src
     assert "ENGINE_SHARED_KEYS" in src
     assert "carril del motor" in src
 

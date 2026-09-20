@@ -32,6 +32,27 @@ from ...core.data_hub_runtime import HUB_RUNTIME
 
 PAGE_MAX_CONCURRENCY = 2
 
+# ── Arranque tras un cambio de activo ────────────────────────────────────────
+#
+# Al cambiar de símbolo se vacía todo, así que las ~30 herramientas quedan
+# vencidas a la vez. En régimen permanente se sirven con presupuesto corto
+# —4 por ciclo cuando no hay telemetría de cuota fiable—, concurrencia 2 y
+# 15 s entre ciclos: unos DOS MINUTOS hasta tener la pantalla entera.
+#
+# Ese ritmo es el correcto en régimen permanente, donde la pantalla ya está
+# dibujada y machacar la API no aporta nada. No lo es justo después de un
+# cambio: ahí NO HAY NADA en pantalla, y el coste de una ráfaga está
+# justificado porque es la diferencia entre ver el activo nuevo al momento o
+# mirar una pantalla vacía dos minutos.
+#
+# La ráfaga es acotada por los tres lados: sólo cubre lo que DIBUJA la
+# pantalla (prioridad 0 y 1), dura un número de segundos fijo, y se apaga sola
+# en cuanto esa prioridad está servida. Nunca toca la reserva del motor.
+BURST_SECONDS = 25.0
+BURST_MAX_PRIORITY = 1
+BURST_CONCURRENCY = 5
+BURST_CYCLE_SECONDS = 1.2
+
 # Orden de carga tras un cambio de activo. Número más bajo = se pide antes.
 #
 #   0 · lo que dibuja el gráfico principal y sus niveles
@@ -72,6 +93,7 @@ class QuantDataIntelligence:
         self._fetched_at: Dict[str, float] = {}
         self._running = False
         self._cycle = 0
+        self._burst_until = 0.0
         # Época del símbolo: avanza en cada cambio de activo y ata cada respuesta
         # al ticker que la pidió.
         self._epoch = 0
@@ -133,8 +155,14 @@ class QuantDataIntelligence:
         # sembrada por una consulta previa y ser más vieja que este cambio.
         RAW_CACHE.clear_symbol(previous)
         RAW_CACHE.clear_symbol(sym)
+        # Ráfaga de arranque: lo que dibuja la pantalla, ya.
+        self._burst_until = time.monotonic() + BURST_SECONDS
         if self.settings.configured:
             self._wake.set()
+
+    def _bursting(self) -> bool:
+        """¿Estamos en la ventana de arranque tras un cambio de activo?"""
+        return time.monotonic() < getattr(self, "_burst_until", 0.0)
 
     async def _loop(self) -> None:
         self._running = True
@@ -146,7 +174,12 @@ class QuantDataIntelligence:
                 raise
             except Exception as exc:
                 _obs_note("quantdata_intelligence:refresh", exc, severity="DEGRADED")
-            delay = max(5.0, CADENCE["FAST"] - (time.monotonic() - started))
+            # Durante la ráfaga el ciclo se acorta: con 15 s entre rondas y 4
+            # herramientas por ronda, ver el activo nuevo entero costaba minutos.
+            if self._bursting():
+                delay = BURST_CYCLE_SECONDS
+            else:
+                delay = max(5.0, CADENCE["FAST"] - (time.monotonic() - started))
             try:
                 self._wake.clear()
                 await asyncio.wait_for(self._wake.wait(), timeout=delay)
@@ -191,6 +224,21 @@ class QuantDataIntelligence:
 
             # 2 · El resto se pide dentro del presupuesto que deja el motor.
             allowed = QUOTA.budget_for_pages(len(remaining_due))
+            burst = self._bursting()
+            if burst:
+                # Sólo lo que dibuja la pantalla entra en la ráfaga. Las noticias
+                # y los gainers/losers esperan al ciclo normal: no hay ninguna
+                # prisa en ellos y gastarían el turno de la exposición.
+                priority_due = [t for t in remaining_due
+                                if _PRIORITY.get(t.key, _PRIORITY_DEFAULT) <= BURST_MAX_PRIORITY]
+                if priority_due:
+                    remaining_due = priority_due
+                    allowed = max(allowed, len(priority_due))
+                else:
+                    # Ya está servido lo que importa: la ráfaga se apaga sola sin
+                    # esperar a que se cumpla su plazo.
+                    self._burst_until = 0.0
+                    burst = False
             # v1.44.0 · Los datos CRÍTICOS primero.
             #
             # Con presupuesto corto, ordenar sólo por antigüedad hacía que tras un
@@ -207,7 +255,7 @@ class QuantDataIntelligence:
                 # puede hacer parecer degradado al proveedor aunque el carril del motor
                 # siga sano. Dos en paralelo mantiene la UI diligente sin martillar la
                 # API ni consumir conexiones innecesarias.
-                sem = asyncio.Semaphore(PAGE_MAX_CONCURRENCY)
+                sem = asyncio.Semaphore(BURST_CONCURRENCY if burst else PAGE_MAX_CONCURRENCY)
 
                 async def _bounded(tool: QuantDataTool) -> None:
                     async with sem:

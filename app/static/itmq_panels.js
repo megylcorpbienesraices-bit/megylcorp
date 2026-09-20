@@ -774,7 +774,22 @@
       const plotW = b.w - dz;
       if (plotH < 40 || plotW < 60) { noData(ctx, env, 'PANEL DEMASIADO PEQUEÑO'); return false; }
 
-      const plan = AB.bin(data, plotH, { aggregate: 'extreme', targetThickness: RELIEF_ROW_PX });
+      /* v1.52.0 · UNA FILA POR STRIKE, igual que las barras.
+       *
+       * El relieve agrupaba «porque para ver la forma no hacen falta todas las
+       * caras». Es cierto para la forma y falso para leer: con 62 strikes
+       * agrupados de dos en dos el eje numeraba 540.00, 537.50, 535.00… y hay
+       * que contar a ojo para saber en qué strike está cada cresta. El strike es
+       * la unidad de lectura aquí también.
+       *
+       * Cuando el llamador hace crecer el panel —`aggregate: 'none'`— cada
+       * strike tiene su fila y su etiqueta. Si el panel es fijo y no cabe, se
+       * agrupa conservando el EXTREMO, porque láminas de dos píxeles serían
+       * peor que agrupar. */
+      const plan = AB.bin(data, plotH, {
+        aggregate: o.aggregate || 'extreme',
+        targetThickness: RELIEF_ROW_PX,
+      });
       const rowsR = plan.rows;
       const n = rowsR.length;
       if (!n) { noData(ctx, env, o.empty); return false; }
@@ -877,7 +892,9 @@
       ctx.font = '10px ui-monospace, monospace';
       ctx.fillStyle = Q.token('--text-dim', '#8494ad');
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const step = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotH / 15))));
+      // El salto sale del PASO REAL, no de un divisor fijo: si la fila da para
+      // escribir el número, se escribe. Con el panel crecido eso es siempre.
+      const step = Math.max(1, Math.ceil(LABEL_MIN_PX / Math.max(1, pitch)));
       for (let i = 0; i < n; i++) {
         if (i % step) continue;
         const lbl = rowsR[i];

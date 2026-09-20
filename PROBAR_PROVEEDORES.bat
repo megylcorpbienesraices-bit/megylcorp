@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 echo ============================================================
-echo ITM QUANT v1.51.0 - PRUEBA DE FLUJO REAL DE PROVEEDORES
+echo ITM QUANT v1.52.0 - PRUEBA DE FLUJO REAL DE PROVEEDORES
 echo ============================================================
 echo.
 set /p ITMQ_PROVIDER_SYMBOL=Simbolo a probar [DIA]: 

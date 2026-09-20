@@ -1,14 +1,115 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.51.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.52.0
 
-Release: `ITM_QUANT_v1.51.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.52.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A15** es la de esta release.
+> Documento acumulativo. La sección **A16** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2056 casos / 147 ficheros**
-- Particiones: 21 · `plan_sha256`: `9fa58a0b184e19a470b60a3ea722258f500c1cd911d8f7f377eb4944fcbde998`
+- Inventario nominal: **2113 casos / 148 ficheros**
+- Particiones: 21 · `plan_sha256`: `3a0d6cd29768502d17b988996ee8c68b8985ef172672bb0fa8af1d684e718e8a`
 - Resultado: **PASS**
+
+---
+
+## A16 · v1.52.0 · El lado agresor, y el dato que ya estaba
+
+### Qué se certifica
+
+Fichero nuevo `tests/test_v1520_aggressor_and_dark_pool.py`, 57 casos.
+
+**1 · El lado agresor, valor a valor.** 30 casos parametrizados, incluidos los
+dos que la versión anterior **invertía**: `AT_BID` y `ABOVE_BID` pasan de COMPRA
+a VENTA. También `MID` y `MIDPOINT` (sin agresor, no compra) y `CALL`/`PUT` (el
+tipo de contrato no es una dirección).
+
+**2 · El campo inequívoco gana al ambiguo.** `aggressor` antes que `side`,
+porque en algunas respuestas `side` es el tipo de contrato.
+
+**3 · Ningún módulo clasifica por su cuenta.** Se comprueba sobre el código que
+la comparación por prefijo corto ya no existe en el normalizador ni en QFLOW.
+
+**4 · Dominancia de prima ≠ dirección.** Un intervalo `CALL_DOMINANT` con
+120.000 de compra y 980.000 de venta sale `aggressor: SELL`.
+
+**5 · Un bucket repartido es MIXED**, no un lado.
+
+**6 · Sin cinta en la ventana, `UNKNOWN` con su causa.** Y cero prima agredida
+es «no medido», no «repartido».
+
+**7 · La flecha sigue al agresor.** Una put **comprada** lleva ▲; una call
+**vendida**, ▼; lo desconocido y lo repartido, ◆.
+
+**8 · El frontend no dibuja flecha sin lado conocido.** Se comprueba que
+`flowSide` sólo mira `ev.aggressor`, que no menciona `CALL`, `PUT` ni `premium`,
+y que devuelve `null`.
+
+**9 · Dark Flow mapea el contrato.** `field_map` sale exactamente
+`{dark_volume: size, dark_notional: notionalValue, dark_prints: tradeCount,
+stock_price: stockPrice}`.
+
+**10 · Sin `size` es SCHEMA_MISMATCH**, no cero.
+
+**11 · La cadena entera, valor a valor.** Tres buckets reales y tres niveles
+reales: `69428 → 69428 → 69428`, agregados que son la suma exacta, nivel
+dominante por notional y distancia al spot derivada.
+
+**12 · Una capa derivada ya no bloquea a la fuente directa.** Se comprueba
+además sobre el código que el modelo no lee `large_prints`,
+`off_exchange_liquidity_zones` ni `venue_classification`.
+
+**13 · Cada carril declara su estado con causa**: `NO_PROVIDER_DATA`,
+`PROVIDER_ERROR`, `SCHEMA_MISMATCH`.
+
+**14 · El % fuera de bolsa no se estima**, y con prints dark + lit sí se mide.
+
+**15 · El VWAP oscuro pondera por acciones.**
+
+**16 · Equity Prints pide una sesión real**, y un fin de semana resuelve al
+viernes.
+
+**17 · La ráfaga de arranque está acotada** por plazo, alcance y salida
+anticipada, y el cambio de símbolo **sigue siendo transaccional**: la época
+avanza antes de tocar nada.
+
+**18 · Las ocho opciones del mapa tienen destino**, y un mapa sin dato declara
+su causa en vez de quedarse en blanco.
+
+### Verificación en la terminal real
+
+`127.0.0.1:8803` y `:8807`, **0 errores de consola**.
+
+Las ocho opciones del MAPA DINÁMICO, ejercitadas una por una:
+
+```
+OPCIÓN       ETIQUETA       ORIGEN DECLARADO                    CAMPO
+gamma        GAMMA          estructura propia (respaldo)        10x21 · 94 seg
+delta        DELTA          estructura propia (respaldo)        10x21 · 95 seg
+vanna        VANNA          SIN INTERVAL MAP NI HISTORIA        sin campo
+charm        CHARM          estructura propia (respaldo)        10x21 · 85 seg
+joint        Γ + Δ          modelo propio                       10x21 · 93 seg
+net_oi       OI NETO        modelo propio                       10x21 · 68 seg
+net_volume   VOLUMEN NETO   modelo propio                       10x21 · 72 seg
+off          —              mapa apagado                        sin campo
+```
+
+Siete pintan campo con isolíneas; VANNA es la única sin dato **y lo declara**.
+
+Relieve 3D: panel crecido a 665 px con scroll, y el eje numera la secuencia
+completa —530.20, 530.70, 531.20, 531.70…— sin saltarse ningún strike.
+
+### Límites de esta verificación
+
+- **El lado agresor no se ha contrastado contra una cinta real**: este entorno no
+  tiene credenciales ni salida al proveedor. Se verifica el clasificador valor a
+  valor y la cadena del normalizador.
+- **La cadena de Dark Pool** se comprueba con la forma publicada del contrato; la
+  ejecución contra el proveedor real queda en la terminal del usuario, que ya
+  está LIVE.
+- **Con proveedor LIVE** las cuatro griegas deberían venir del Interval Map en
+  vez del respaldo del motor; aquí el respaldo es lo que hay.
+- **Empaquetado certificado imposible aquí**: 3.11.15 / 22.22.2 frente a
+  3.12.14 / 22.16.0 fail-closed.
 
 ---
 
