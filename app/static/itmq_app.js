@@ -53,6 +53,9 @@
     timeframe: '1m',
     tailMinutes: 390,
     intervalGreek: 'GAMMA',
+    // Vista del Interval Map: 'field' (mapa continuo, lectura) | 'raw' (puntos, diagnostico)
+    intervalRender: 'field',
+    intervalRenderApplied: null,
     expView: 'bars',
     catalog: [],
     calendar: null,
@@ -1045,20 +1048,44 @@
     // El mapa crece con los strikes, igual que el perfil: con noventa filas en
     // un panel fijo la celda mide cuatro píxeles y el diámetro deja de informar.
     growForRows('chartIntervalMap', (im.strikes || []).length, 9, 46);
-    chart('chartIntervalMap', () => P.dotmap(el('chartIntervalMap'), {
+
+    /* v1.55.0 · UNA rejilla canónica, DOS propósitos, y el principal es el mapa.
+     *
+     * El Interval Map mide un CAMPO: la exposición varía de forma continua entre
+     * strikes vecinos y entre intervalos vecinos. Dibujarlo como una nube de
+     * puntos obliga a leer celda por celda justo lo que hay que leer como zona
+     * —dónde está la concentración, qué forma tiene y hacia dónde migra— y con
+     * noventa strikes el punto mide cuatro píxeles y su diámetro deja de decir
+     * nada.
+     *
+     * Los puntos NO desaparecen: pasan a ser la vista de diagnóstico, rotulada
+     * RAW, donde cada celda es un valor crudo comprobable uno a uno. Las dos
+     * leen la MISMA rejilla (`im.strikes` × `im.times` × `im.matrix`), así que
+     * no puede haber dos mapas distintos con el mismo nombre.
+     */
+    const imFmtX = v => {
+      const s = String(v);
+      // Marcas ISO completas o etiquetas ya cortas del proveedor.
+      const m = /T(\d{2}:\d{2})/.exec(s);
+      return m ? m[1] : s.slice(0, 5);
+    };
+    const imRaw = state.intervalRender === 'raw';
+    // Cambiar de vista cambia el TIPO de panel, así que el anterior se suelta:
+    // dos paneles sobre el mismo lienzo se pisarían el bitmap.
+    if (state.intervalRenderApplied !== state.intervalRender) {
+      dropChart('chartIntervalMap');
+      state.intervalRenderApplied = state.intervalRender;
+    }
+    chart('chartIntervalMap', () => (imRaw ? P.dotmap : P.heatmap)(el('chartIntervalMap'), {
       fmtY: v => v.toFixed(2),
-      fmtX: v => {
-        const s = String(v);
-        // Marcas ISO completas o etiquetas ya cortas del proveedor.
-        const m = /T(\d{2}:\d{2})/.exec(s);
-        return m ? m[1] : s.slice(0, 5);
-      },
+      fmtX: imFmtX,
       empty: 'INTERVAL MAP NO DISPONIBLE',
     })).set(im.strikes || [], im.times || [], im.matrix || [], im.price || []);
     // El mapa se describe por lo que MIDE, no por quién lo sirve. La forma del
     // payload y el nombre del proveedor son diagnóstico y viven en el Auditor.
     set('imNote', im.ready
       ? `${im.label || 'exposición'} por intervalo · ${im.cells || 0} celdas`
+        + (imRaw ? ' · VISTA RAW: una celda = un valor crudo del proveedor' : '')
         + (im.source_mode === 'FALLBACK' ? ' · estructura propia (respaldo)' : '')
       : 'Sin mapa de intervalos disponible para este activo en este ciclo.');
   }
@@ -1840,6 +1867,19 @@
     if (!bars && r) { r.panel.resize(); r.panel.invalidate(); }
   }
 
+  /** Suelta un panel para poder montar otro TIPO sobre el mismo lienzo.
+   *
+   * Sin esto, cambiar el Interval Map de mapa continuo a puntos dejaba el panel
+   * anterior vivo sobre el mismo host y los dos se pisaban el bitmap. */
+  function dropChart(id) {
+    const c = state.charts[id];
+    if (!c) return;
+    try { c.panel && c.panel.destroy && c.panel.destroy(); } catch (err) { console.debug('[CHART] drop', id, err); }
+    const host = el(id);
+    if (host) host.innerHTML = '';
+    delete state.charts[id];
+  }
+
   function chart(id, factory) {
     if (!state.charts[id]) {
       const host = el(id);
@@ -1925,6 +1965,11 @@
     el('expMetric')?.addEventListener('change', () => { if (state.bundle) renderExposicion(state.bundle); });
     // La griega del Interval Map la resuelve el backend: cambiarla pide bundle nuevo.
     el('imGreek')?.addEventListener('change', e => { state.intervalGreek = e.target.value; pullBundle(); });
+    // La vista NO viaja al servidor: es la misma rejilla dibujada de dos maneras.
+    el('imRender')?.addEventListener('change', e => {
+      state.intervalRender = e.target.value === 'raw' ? 'raw' : 'field';
+      if (state.bundle) renderEscenarios(state.bundle);
+    });
     segment('expAxis', () => { if (state.bundle) renderExposicion(state.bundle); });
     // Barras o relieve: no pide datos nuevos, sólo cambia qué se dibuja con los
     // que ya hay.

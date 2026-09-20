@@ -641,6 +641,13 @@
             <option value="DELTA">Delta · DEX</option>
             <option value="CHARM">Charm · CHEX</option>
           </select>
+          <!-- v1.55.0 · El MAPA CONTINUO es la vista de lectura; los PUNTOS son
+               la vista de diagnóstico (celda a celda, valor crudo). No son dos
+               estilos: son dos propósitos, y por eso el segundo va rotulado. -->
+          <select class="ctl" id="imRender" title="Vista del Interval Map">
+            <option value="field">Mapa continuo</option>
+            <option value="raw">Puntos · RAW</option>
+          </select>
           <span class="pill" id="imPill">—</span>
         </div>
       </header>

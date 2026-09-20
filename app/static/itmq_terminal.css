@@ -322,7 +322,20 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .trace-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .trace-col + .trace-col { border-left: 1px solid var(--border); }
 .trace-col > header {
-  display: flex; align-items: center; gap: 7px; padding: 6px 8px;
+  /* v1.55.0 · ALTURA FIJA E IDÉNTICA EN LAS TRES COLUMNAS.
+   *
+   * Los tres paneles comparten una sola escala de precio, construida sobre la
+   * ALTURA DEL LIENZO de cada uno. Las cabeceras laterales llevan un `select`
+   * (~24 px) y la central un `pill` (~20 px), así que el lienzo central era unos
+   * cuatro píxeles más alto que los laterales y el mismo precio caía en una fila
+   * distinta en cada panel: la barra de DEX del strike 517 no se apoyaba en la
+   * línea de 517 del centro.
+   *
+   * Cuatro píxeles no se ven al mirar la cabecera y sí se ven al leer un muro
+   * contra su barra, que es para lo que existe esta pantalla. La altura se fija
+   * aquí para que los tres lienzos midan exactamente lo mismo. */
+  height: 36px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 7px; padding: 0 8px;
   border-bottom: 1px solid var(--border); background: var(--panel-2); flex: 0 0 auto;
 }
 .trace-col > header .label { white-space: nowrap; }
@@ -370,7 +383,13 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
      de ocho KPI encima, el gráfico se quedaba en poco más de un tercio del alto
      útil. 520 px de suelo y 4.2fr de reparto; los dos carriles auxiliares y la
      tabla se conforman con lo que sobra, que es lo justo para lo que son. */
-  grid-template-rows: minmax(520px, 4.2fr) minmax(0, .30fr) minmax(0, .30fr) minmax(88px, .34fr);
+  /* v1.55.0 · 520 -> 660 px y 4.2fr -> 6fr. Con las tres curvas acumuladas
+     —CALL, PUT y NETO— superpuestas, lo que se lee es su SEPARACIÓN, y a 520 px
+     con los ocho KPI encima seguían saliendo pegadas en la mitad de la sesión en
+     que el neto se acerca a cero, que es justo cuando hace falta distinguirlas.
+     Los dos carriles auxiliares bajan a .24fr: dicen «en qué minuto», y para eso
+     les sobra. */
+  grid-template-rows: minmax(660px, 6fr) minmax(0, .24fr) minmax(0, .24fr) minmax(88px, .30fr);
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
 }
 .drift-stack[hidden], .flow-stack[hidden] { display: none; }

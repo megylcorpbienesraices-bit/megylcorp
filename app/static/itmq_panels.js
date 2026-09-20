@@ -1163,24 +1163,24 @@
   /* ------------------------------------------- mapa de intervalos por PUNTOS */
 
   /**
-   * INTERVAL MAP con el diseño de la herramienta original: una rejilla de puntos,
-   * uno por strike e intervalo, con el recorrido del precio encima.
+   * INTERVAL MAP · vista RAW. Una rejilla de puntos, uno por strike e intervalo,
+   * con el recorrido del precio encima.
    *
-   * v1.51.0 · Esta sección tenía el mismo campo continuo que el fondo del TRACE, y
-   * ahí el campo es la representación equivocada. Las dos pantallas no responden
-   * la misma pregunta:
+   * v1.51.0 la hizo la vista PRINCIPAL de la sección, con este razonamiento: en
+   * TRACE el mapa es FONDO y hace falta la FORMA de la zona, mientras que en la
+   * sección el mapa es el SUJETO y se viene a leer celda a celda, cosa que un
+   * degradado no permite porque interpola entre vecinas.
    *
-   *   TRACE  · el mapa es FONDO. Va debajo de las velas y lo que hace falta es la
-   *            FORMA de la zona: dónde empieza y dónde acaba la concentración.
-   *            Un campo continuo con isolíneas es exactamente eso, y al ser
-   *            translúcido deja ver el precio por encima.
-   *   SECCIÓN· el mapa es el SUJETO. Aquí se viene a leer celda a celda: cuánto
-   *            hay en ESTE strike en ESTE intervalo. Un degradado no permite eso
-   *            —interpola entre vecinas y no se sabe dónde acaba una celda—,
-   *            mientras que un punto por celda sí: su diámetro ES la magnitud y
-   *            su hueco separa una celda de la siguiente.
+   * v1.55.0 la mueve a DIAGNÓSTICO, sin quitarla. Con noventa strikes por ciento
+   * sesenta intervalos el punto mide cuatro píxeles y su diámetro deja de
+   * informar: la lectura de zona —dónde está la concentración, qué forma tiene y
+   * hacia dónde migra— se pierde justo en el mapa que existe para contarla. El
+   * mapa continuo pasa a ser la vista principal y ésta queda rotulada RAW, que
+   * es donde sigue siendo insustituible: comprobar un valor crudo, celda a
+   * celda, contra la respuesta del proveedor.
    *
-   * El dato es el mismo y la normalización también. Cambia la pregunta.
+   * Las dos leen la MISMA rejilla canónica y la MISMA normalización. Cambia la
+   * pregunta, no el dato.
    */
   function dotmap(host, opts) {
     const o = Object.assign({

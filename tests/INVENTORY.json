@@ -2706,6 +2706,26 @@
     "test_un_ciclo_vacio_no_borra_lo_que_ya_era_bueno"
    ]
   },
+  "tests/test_v1550_interval_map_canonical.py": {
+   "casos": 15,
+   "tests": [
+    "test_cada_perfil_por_strike_crece_en_vez_de_agrupar",
+    "test_cambiar_de_vista_suelta_el_panel_anterior",
+    "test_el_mapa_continuo_es_la_vista_principal",
+    "test_el_panel_crece_para_dar_una_fila_por_strike",
+    "test_el_recorte_de_strikes_es_por_el_centro_donde_esta_el_precio",
+    "test_el_recorte_es_contiguo_y_no_se_salta_strikes",
+    "test_la_etiqueta_se_salta_por_el_paso_real_no_por_uno_fijo",
+    "test_la_intensidad_se_normaliza_con_la_escala_del_propio_activo",
+    "test_la_misma_rejilla_para_las_cuatro_griegas",
+    "test_la_rejilla_tiene_siempre_la_misma_forma",
+    "test_la_vista_no_viaja_al_servidor",
+    "test_las_dos_vistas_leen_la_misma_rejilla",
+    "test_los_puntos_siguen_disponibles_rotulados_raw",
+    "test_ningun_simbolo_toma_un_camino_distinto",
+    "test_sin_dato_no_se_publica_una_rejilla_de_ceros"
+   ]
+  },
   "tests/test_v1550_level_identity_and_walls.py": {
    "casos": 14,
    "tests": [
@@ -2749,8 +2769,25 @@
     "test_toda_trayectoria_arranca_en_el_spot",
     "test_un_nivel_imposible_se_descarta_en_vez_de_publicarse"
    ]
+  },
+  "tests/test_v1550_trace_layout_and_drift.py": {
+   "casos": 12,
+   "tests": [
+    "test_el_grafico_de_trace_tiene_suelo_en_pixeles",
+    "test_el_relieve_lee_el_mismo_perfil_que_las_barras",
+    "test_la_curva_acumulada_se_lleva_el_sitio",
+    "test_la_flecha_de_la_marca_sale_del_agresor",
+    "test_la_prima_y_el_precio_no_comparten_regla",
+    "test_las_marcas_de_flujo_se_anclan_por_instante_y_precio",
+    "test_las_tres_cabeceras_de_trace_miden_lo_mismo",
+    "test_las_tres_columnas_de_trace_comparten_fila_de_rejilla",
+    "test_los_muros_de_net_drift_salen_de_la_misma_autoridad_que_trace",
+    "test_los_tres_paneles_usan_la_misma_escala_de_precio",
+    "test_net_drift_tiene_exactamente_un_eje_de_precio",
+    "test_trace_mide_su_propia_alineacion_en_marcha"
+   ]
   }
  },
- "total_minimo": 2263,
+ "total_minimo": 2290,
  "version": "1.54.0"
 }

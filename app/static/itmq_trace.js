@@ -1719,12 +1719,38 @@
 
   function intervalGreeks() { return INTERVAL_GREEKS.slice(); }
 
+  /**
+   * v1.55.0 · ¿Los tres paneles comparten DE VERDAD el eje de precio?
+   *
+   * La escala es una sola —`priceScale`, sobre `S.priceLo`/`S.priceHi`— pero se
+   * aplica sobre la ALTURA DEL LIENZO de cada panel. Si un lienzo mide cuatro
+   * píxeles más que otro, el mismo precio cae en una fila distinta en cada uno y
+   * la barra de DEX del strike 517 no se apoya en la línea de 517 del centro.
+   *
+   * Nadie ve esos cuatro píxeles mirando la cabecera; se ven leyendo un muro
+   * contra su barra, que es para lo que existe esta pantalla. Por eso se mide en
+   * marcha y se publica: una alineación rota deja de ser invisible.
+   */
+  function alignment() {
+    const h = id => { const n = document.getElementById(id); return n ? Math.round(n.clientHeight) : null; };
+    const left = h('traceLeft'), main = h('traceMain'), right = h('traceRight');
+    const alturas = [left, main, right].filter(v => v !== null);
+    const ok = alturas.length === 3 && new Set(alturas).size === 1;
+    return {
+      ok, left, main, right,
+      max_delta_px: alturas.length ? Math.max.apply(null, alturas) - Math.min.apply(null, alturas) : null,
+      price_lo: S.priceLo.get(), price_hi: S.priceHi.get(),
+      detail: ok ? 'los tres paneles comparten el mismo eje de precio'
+        : 'los lienzos no miden lo mismo: el mismo precio cae en filas distintas',
+    };
+  }
+
   global.ITMQTrace = {
     mount, applyData, setMetric, setBreakdown, hasBreakdown, setHeatField, setHeatOpacity, setPriceMode, setFollow, toggle,
     // Expuesto para poder VERIFICAR el recorte del campo contra una matriz
     // ancha como la del proveedor, que en demo no existe.
     buildHeatBitmapForTest: buildHeatBitmap,
-    setIntervalGreek, intervalGreeks,
+    setIntervalGreek, intervalGreeks, alignment,
     strikeRow, onStrike(cb) { S.onStrike = cb; },
     clearStrike() { S.pinnedStrike = NaN; invalidateAll(); },
     state: S, METRICS, HEATFIELDS,
