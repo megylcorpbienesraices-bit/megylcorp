@@ -1027,7 +1027,13 @@ def test_the_drift_chart_got_the_room_it_needs():
     # de filas se lleva su fracción pase lo que pase. El suelo en PÍXELES es lo
     # que garantiza el alto; la fracción sólo reparte lo que sobra.
     # v1.52.0 · 360 px seguía siendo poco con ocho KPI encima.
-    assert "minmax(520px, 4.2fr)" in block
+    # v1.55.0 · Se comprueba un SUELO, no una cifra exacta. Fijar el valor hacía
+    # fallar el test cada vez que el gráfico crecía, que es justo lo que este
+    # test quiere que pase; lo que tiene que impedir es que ENCOJA.
+    import re as _re
+    m = _re.search(r"grid-template-rows:\s*minmax\((\d+)px,\s*([\d.]+)fr\)", block)
+    assert m, block
+    assert int(m.group(1)) >= 520 and float(m.group(2)) >= 4.2
 
 
 def test_every_lane_of_the_tape_declares_why_it_is_empty():
@@ -1188,8 +1194,14 @@ def test_the_field_never_reaches_full_opacity():
 
 
 def test_the_section_interval_map_is_a_dot_grid():
-    """En la sección el mapa es el SUJETO y se lee celda a celda; un degradado
-    interpola entre vecinas y no deja saber dónde acaba una celda."""
+    """La vista de PUNTOS sigue existiendo y sigue siendo celda a celda.
+
+    v1.51.0 la hizo la vista principal de la sección. v1.55.0 la movió a
+    DIAGNÓSTICO (RAW) porque con noventa strikes el punto mide cuatro píxeles y
+    su diámetro deja de informar, pero NO la quitó: es donde se comprueba un
+    valor crudo uno a uno. Lo que este test protege es eso — que el punto siga
+    siendo un punto, sin suavizar y sin interpolar.
+    """
     js = _read("app/static/itmq_panels.js")
     assert "function dotmap(" in js
     body = js[js.index("function dotmap("):js.index("global.ITMQPanels")]
@@ -1201,7 +1213,8 @@ def test_the_section_interval_map_is_a_dot_grid():
     assert "if (v === null) continue;" in body
     assert "dotmap," in js
     app = _read("app/static/itmq_app.js")
-    assert "P.dotmap(el('chartIntervalMap')" in app
+    # v1.55.0 · Las dos vistas se eligen sobre el MISMO host y la misma rejilla.
+    assert "(imRaw ? P.dotmap : P.heatmap)(el('chartIntervalMap')" in app
 
 
 def test_net_drift_draws_walls_on_a_price_axis_not_on_the_premium_axis():
@@ -1259,7 +1272,10 @@ def test_the_two_main_charts_have_a_floor_in_pixels():
     # v1.54.0 · 640 -> 780: el gráfico salía comprimido, velas y líneas pegadas.
     assert "min-height: 780px" in trace
     drift = css[css.index(".drift-stack {"):css.index(".drift-stack[hidden]")]
-    assert "minmax(520px," in drift
+    # v1.55.0 · Suelo, no cifra exacta: el gráfico puede crecer, nunca encoger.
+    import re as _re2
+    m2 = _re2.search(r"grid-template-rows:\s*minmax\((\d+)px,", drift)
+    assert m2 and int(m2.group(1)) >= 520
 
 
 def test_none_of_this_release_knows_a_ticker():

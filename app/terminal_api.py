@@ -1109,6 +1109,7 @@ def _dark_pool(state: Dict[str, Any], trace: Dict[str, Any], intel: Dict[str, An
         levels_block=_qd_block(intel, "dark_pool_levels"),
         prints_block=_qd_block(intel, "equity_prints"),
         spot=spot,
+        symbol=str(state.get("active_symbol") or state.get("symbol") or "").upper(),
         session={"resolved": _session(), "authority": "MarketSessionResolver"},
     )
 

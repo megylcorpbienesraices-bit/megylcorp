@@ -592,6 +592,10 @@
     scanner_inval:   { color: '--neg',      label: 'INVAL',   short: 'INVAL', order: 0 },
     scanner_target1: { color: '--pos',      label: 'OBJ1',    short: 'OBJ1', order: 0 },
     scanner_target2: { color: '--pos',      label: 'OBJ2',    short: 'OBJ2', order: 0 },
+    // v1.55.0 · Concentración de dark pool. Vive en su propia sección: comparte
+    // el eje de precio con los muros de opciones y nada más, porque mide dinero
+    // cruzado fuera de bolsa y no exposición.
+    dark_pool_wall: { color: '--violet', label: 'Dark Pool', short: 'DP', order: 8 },
   };
 
   /** Niveles que el panel de flujo comparte con TRACE. */

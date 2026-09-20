@@ -60,10 +60,50 @@ off-exchange, así que su denominador no existe ahí; sin un universo completo
 de Equity Prints dark + lit, el KPI va en None y la pantalla dice SIN DATOS.
 Publicar un porcentaje sobre un denominador parcial daría una cifra que se
 leería como cuota de mercado sin serlo.
+
+═══════════════════════════════════════════════════════════════════════════
+ALCANCE TEMPORAL · v1.55.0
+═══════════════════════════════════════════════════════════════════════════
+
+Los tres carriles NO cubren la misma ventana. `dark-flow` llega por intervalos
+de toda la sesión; `equity-prints` llega como una cola reciente. Presentar
+
+    NOTIONAL OFF-EXCHANGE   412 M$        ← toda la sesión
+    PRINT MAYOR             1,2 M$        ← últimos minutos
+
+uno al lado del otro sin decirlo invita a dividir el segundo entre el primero,
+y esa división no significa nada. Cada carril publica ahora su ventana medida
+—primer y último instante observados— y cada KPI dice de qué carril sale y qué
+período resume.
+
+═══════════════════════════════════════════════════════════════════════════
+IDENTIDAD DEL CICLO · v1.55.0
+═══════════════════════════════════════════════════════════════════════════
+
+`cycle_id` es la huella del CONJUNTO: símbolo, sesión, número de filas por
+carril y último instante de cada uno. Si el ciclo trae lo mismo, el id es el
+mismo; en cuanto cambia cualquier pieza, cambia el id.
+
+Sirve para lo que no se puede ver mirando la pantalla: distinguir «esto es lo
+de hace diez minutos» de «esto acaba de llegar y resulta que es idéntico». Sin
+él, una sección congelada por un fallo de refresco es indistinguible de un
+mercado sin actividad nueva.
+
+═══════════════════════════════════════════════════════════════════════════
+MUROS DE DARK POOL · v1.55.0
+═══════════════════════════════════════════════════════════════════════════
+
+Los niveles ya venían como tabla. Un nivel de concentración oscura es un PRECIO
+con un tamaño detrás, igual que un muro de gamma, y se lee contra el precio: se
+publican por tanto como LÍNEAS dibujables, con `kind`, `name` y `authority`
+propios, encima y debajo del spot. Lo que NO se hace es mezclarlos con los muros
+de opciones: miden cosas distintas y comparten eje de precio, nada más.
 """
 
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 #: Estados de un carril. Se corresponden con los de `data_lineage`, más el de
@@ -129,8 +169,79 @@ def _lane_status(block: Any, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "field_map": block.get("field_map") or {}}
 
 
+#: Cuántas líneas de concentración se publican a cada lado del precio. Más de
+#: tres por lado deja de ser «dónde está el peso» y pasa a ser la tabla otra vez.
+DARK_WALLS_PER_SIDE = 3
+
+#: Prefijo de `kind` de las líneas de dark pool. Distinto de los muros de
+#: opciones a propósito: comparten eje de precio y nada más.
+DARK_WALL_KIND = "dark_pool_wall"
+
+
+def _window(rows: List[Dict[str, Any]], field: str = "t") -> Dict[str, Any]:
+    """Primer y último instante REALMENTE observados en un carril.
+
+    No es la ventana que se pidió: es la que llegó. Son cosas distintas cuando
+    el proveedor recorta, y la que importa para leer un KPI es la segunda.
+    """
+    marcas = [str(r.get(field)) for r in rows or [] if r.get(field)]
+    marcas = sorted(m for m in marcas if m)
+    if not marcas:
+        return {"first": None, "last": None, "points": 0}
+    return {"first": marcas[0], "last": marcas[-1], "points": len(marcas)}
+
+
+def _cycle_id(symbol: str, session: Dict[str, Any],
+              lanes: Dict[str, Dict[str, Any]]) -> str:
+    """Huella del CONJUNTO del ciclo. Ver la cabecera del módulo."""
+    piezas = [str(symbol or "").upper(), str((session or {}).get("resolved") or "")]
+    for name in sorted(lanes):
+        lane = lanes[name] or {}
+        piezas.append(f"{name}:{lane.get('rows')}:{lane.get('last')}")
+    return hashlib.sha256("|".join(piezas).encode("utf-8")).hexdigest()[:12]
+
+
+def _dark_walls(levels: List[Dict[str, Any]], spot: Optional[float]) -> List[Dict[str, Any]]:
+    """Las concentraciones oscuras como LÍNEAS, encima y debajo del precio.
+
+    Un nivel de dark pool es un precio con tamaño detrás y se lee contra el
+    precio, igual que un muro. Sin spot no hay «encima» ni «debajo», así que se
+    publican los mayores sin lado en vez de inventarse una referencia.
+    """
+    con_tamano = [lv for lv in levels if lv.get("notional") is not None]
+    if not con_tamano:
+        return []
+    if spot is None:
+        elegidos = [(lv, None) for lv in con_tamano[:DARK_WALLS_PER_SIDE * 2]]
+    else:
+        arriba = [lv for lv in con_tamano if lv["price"] > spot][:DARK_WALLS_PER_SIDE]
+        abajo = [lv for lv in con_tamano if lv["price"] < spot][:DARK_WALLS_PER_SIDE]
+        elegidos = [(lv, "ABOVE_SPOT") for lv in arriba] + [(lv, "BELOW_SPOT") for lv in abajo]
+    mayor = max((lv["notional"] for lv, _ in elegidos), default=None)
+    out = []
+    for rank, (lv, side) in enumerate(sorted(elegidos, key=lambda x: -(x[0]["notional"] or 0.0)), 1):
+        out.append({
+            "kind": DARK_WALL_KIND,
+            "name": f"DP {lv['price']:g}",
+            "price": lv["price"],
+            "notional": lv["notional"],
+            "shares": lv.get("shares"),
+            "prints": lv.get("prints"),
+            "side": side,
+            "rank": rank,
+            # Fuerza RELATIVA al mayor del propio activo: sin umbrales en dólares,
+            # igual que el resto del programa.
+            "strength": (None if not mayor else round(100.0 * (lv["notional"] or 0.0) / mayor, 1)),
+            "distance_pct": lv.get("distance_pct"),
+            "authority": "QUANTDATA_DARK_POOL_LEVELS",
+            "source_mode": "DIRECT_PROVIDER",
+        })
+    return out
+
+
 def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
           spot: Optional[float] = None,
+          symbol: str = "",
           session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Arma el modelo desde los TRES carriles del proveedor y nada más.
 
@@ -228,6 +339,18 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
             dark_share = round(100.0 * dark_only / (dark_only + lit_shares), 2)
             dark_share_basis = "EQUITY_PRINTS_DARK_PLUS_LIT"
 
+    # ── ALCANCE TEMPORAL POR CARRIL ──────────────────────────────────────────
+    # Los tres NO cubren la misma ventana, y presentarlos juntos sin decirlo
+    # invita a dividir un KPI de los ultimos minutos entre uno de toda la sesion.
+    scope = {
+        "dark_flow": _window(buckets),
+        "dark_pool_levels": {"first": None, "last": None, "points": len(levels),
+                             "note": "sin eje temporal: es una foto acumulada de la sesion"},
+        "equity_prints": _window(prints),
+    }
+
+    walls = _dark_walls(levels, spot)
+
     covered = sum(1 for s in status.values() if s["state"] == DATA_OK)
     # CONTEO POR ETAPA. El criterio de cierre exige que el numero de filas no se
     # pierda por el camino: 608 en el proveedor tienen que seguir siendo 608 en
@@ -246,8 +369,23 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
                           "drop_reason": ("prints no clasificados DARK_POOL por el proveedor"
                                           if len(print_rows) != len(prints) else None)},
     }
+    cycle = _cycle_id(symbol, session or {}, {
+        "dark_flow": {"rows": len(buckets), "last": scope["dark_flow"]["last"]},
+        "dark_pool_levels": {"rows": len(levels),
+                             "last": None if not levels else f"{levels[0]['price']}:{levels[0]['notional']}"},
+        "equity_prints": {"rows": len(prints), "last": scope["equity_prints"]["last"]},
+    })
+
     return {
         "ready": covered > 0,
+        "symbol": str(symbol or "").upper() or None,
+        # Huella del CONJUNTO: distingue «esto es lo de hace diez minutos» de
+        # «esto acaba de llegar y resulta que es identico».
+        "cycle_id": cycle,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "temporal_scope": scope,
+        # Las concentraciones como LINEAS dibujables, con identidad propia.
+        "walls": walls,
         "flow": {"rows": buckets, "buckets": buckets, "count": len(buckets),
                  "row_count": len(buckets), "status": status["dark_flow"]},
         "levels": levels,
@@ -270,6 +408,69 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
             # Sin denominador completo, el KPI no es un cero: es un hueco con causa.
             "dark_share_reason": (None if dark_share is not None else
                                   "sin universo completo de prints dark + lit"),
+        },
+        # ── QUE MIDE CADA KPI Y SOBRE QUE PERIODO ────────────────────────────
+        #
+        # v1.55.0 · «NOTIONAL OFF-EXCHANGE» no dice de donde sale ni que ventana
+        # resume, y al lado de «PRINT MAYOR» —que viene de otro carril y de otra
+        # ventana— invita a dividir uno entre otro. El nombre de pantalla se
+        # queda corto a proposito; la definicion viaja aqui y el Auditor la
+        # muestra entera.
+        "kpi_meta": {
+            "dark_notional": {
+                "label": "NOTIONAL FUERA DE BOLSA",
+                "measures": "suma del valor negociado fuera de bolsa, en dolares",
+                "formula": "Sigma notionalValue de Dark Flow",
+                "lane": "dark_flow", "window": scope["dark_flow"],
+                "unit": "USD",
+            },
+            "dark_volume": {
+                "label": "VOLUMEN OSCURO",
+                "measures": "acciones negociadas fuera de bolsa",
+                "formula": "Sigma size de Dark Flow",
+                "lane": "dark_flow", "window": scope["dark_flow"],
+                "unit": "acciones",
+            },
+            "dark_print_count": {
+                "label": "OPERACIONES OSCURAS",
+                "measures": "numero de operaciones fuera de bolsa",
+                "formula": "Sigma tradeCount de Dark Flow",
+                "lane": "dark_flow", "window": scope["dark_flow"],
+                "unit": "operaciones",
+            },
+            "dominant_level": {
+                "label": "PRECIO DE MAYOR CONCENTRACION",
+                "measures": "el precio donde mas dinero se cruzo fuera de bolsa",
+                "formula": "argmax notionalValue de Dark Pool Levels",
+                "lane": "dark_pool_levels", "window": scope["dark_pool_levels"],
+                "unit": "precio",
+            },
+            "largest_print": {
+                "label": "OPERACION MAYOR",
+                "measures": "la mayor operacion oscura individual observada",
+                "formula": "max notionalValue de Equity Prints DARK_POOL",
+                "lane": "equity_prints", "window": scope["equity_prints"],
+                "unit": "USD",
+                # La advertencia que evita la division sin sentido.
+                "caveat": ("viene de la cola reciente de prints, no de toda la sesion: "
+                           "no se puede dividir entre el notional fuera de bolsa"),
+            },
+            "dark_vwap": {
+                "label": "PRECIO MEDIO OSCURO",
+                "measures": "precio medio ponderado por acciones de las operaciones oscuras",
+                "formula": "Sigma(precio x size) / Sigma(size) sobre Equity Prints DARK_POOL",
+                "lane": "equity_prints", "window": scope["equity_prints"],
+                "unit": "precio",
+            },
+            "dark_share_pct": {
+                "label": "CUOTA FUERA DE BOLSA",
+                "measures": "que parte del volumen observado se cruzo fuera de bolsa",
+                "formula": "acciones dark / (acciones dark + acciones lit), solo con universo completo",
+                "lane": "equity_prints", "window": scope["equity_prints"],
+                "unit": "%",
+                "caveat": ("no se estima: sin universo dark + lit completo va en hueco, "
+                           "porque una cuota sobre denominador parcial se lee como cuota de mercado"),
+            },
         },
         "status": status,
         "coverage": f"{covered}/3",

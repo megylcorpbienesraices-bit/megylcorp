@@ -114,6 +114,15 @@ LEVEL_ORIGIN: Dict[str, Dict[str, str]] = {
         "method": "trace_analytics.structural_walls · máximo de exposición firmada",
         "label": "Hedge Wall",
     },
+    # v1.55.0 · Concentración de dark pool como LÍNEA. Es un precio con tamaño
+    # detrás, igual que un muro, pero mide otra cosa: dinero cruzado fuera de
+    # bolsa, no exposición de opciones. Comparten eje de precio y nada más.
+    "dark_pool_wall": {
+        "function": "dark_pool_view._dark_walls",
+        "field": "dark_pool_levels['notionalValue'] por precio",
+        "method": "dark_pool_view · concentración off-exchange por nivel de precio",
+        "label": "Dark Pool",
+    },
     # v1.54.0 · Las cuatro líneas del PLAN del Scanner. TRACE las representa;
     # el Scanner sigue siendo la única autoridad direccional.
     "scanner_entry": {
