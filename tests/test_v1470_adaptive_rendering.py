@@ -1280,7 +1280,10 @@ def test_the_two_main_charts_have_a_floor_in_pixels():
     css = _read("app/static/itmq_terminal.css")
     trace = css[css.index(".trace-grid {"):css.index(".trace-col {")]
     # v1.54.0 · 640 -> 780: el gráfico salía comprimido, velas y líneas pegadas.
-    assert "min-height: 780px" in trace
+    # v1.56.0 · Suelo, no cifra exacta: el gráfico puede crecer, nunca encoger.
+    import re as _re3
+    m3 = _re3.search(r"min-height:\s*(\d+)px", trace)
+    assert m3 and int(m3.group(1)) >= 780
     drift = css[css.index(".drift-stack {"):css.index(".drift-stack[hidden]")]
     # v1.55.0 · Suelo, no cifra exacta: el gráfico puede crecer, nunca encoger.
     import re as _re2

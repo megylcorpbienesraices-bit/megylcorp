@@ -225,6 +225,30 @@ def normalize_series(values: Sequence[Any], *, symbol: str = "",
 NOISE_PERCENTILE = 0.35
 
 
+def _cell(v: Any) -> Optional[float]:
+    """Una celda del Interval Map: número finito, o HUECO.
+
+    Devolver `None` en vez de `0.0` es la diferencia entre «el proveedor no
+    publicó esta celda» y «aquí se midió y no había exposición». La segunda es
+    una afirmación sobre el libro de opciones.
+    """
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        x = float(v)
+        return x if math.isfinite(x) else None
+    if isinstance(v, str):
+        texto = v.strip()
+        if not texto:
+            return None
+        try:
+            x = float(texto)
+        except ValueError:
+            return None
+        return x if math.isfinite(x) else None
+    return None
+
+
 def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
                      clip: float = 1.0, mode: str = "RANK") -> Dict[str, Any]:
     """Matriz del Interval Map llevada a [-1, 1] de forma legible en CUALQUIER activo.
@@ -271,26 +295,47 @@ def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
         rows = [list(r) if isinstance(r, (list, tuple)) else
                 (list(r) if hasattr(r, "tolist") or hasattr(r, "__iter__") else [])
                 for r in matrix]
-    flat: List[float] = []
+    # v1.56.0 · UNA CELDA AUSENTE NO ES UN CERO.
+    #
+    # Aquí un valor no convertible se volvía `0.0`, y ese cero viajaba como si
+    # fuera una medición: entraba en el cálculo del percentil, contaba como
+    # «celda observada sin exposición» y llegaba al renderizador indistinguible
+    # de un cero real. El renderizador SÍ sabe tratar un hueco —`ITMQBars.field`
+    # lo rellena desde sus vecinas y lo declara— pero sólo si le llega como
+    # hueco.
+    #
+    # La diferencia importa en el mapa: una zona que el proveedor no publicó se
+    # dibujaba como una zona medida y vacía, que es una afirmación sobre el
+    # libro de opciones.
+    flat: List[Optional[float]] = []
     for r in rows:
         for v in r:
-            try:
-                x = float(v)
-            except (TypeError, ValueError):
-                x = 0.0
-            flat.append(x if math.isfinite(x) else 0.0)
+            x = _cell(v)
+            flat.append(x)
 
-    if not flat:
+    medidas = [x for x in flat if x is not None]
+    if not medidas:
         return {"ready": False, "matrix": [], "scale": None,
                 "symbol": str(symbol).upper(), "reason": "MATRIZ VACÍA"}
 
-    arr = np.asarray(flat, dtype=float)
-    mag = np.abs(arr)
-    nonzero = mag[mag > 0]
+    # `np.nan` marca el hueco dentro del array: NumPy lo propaga sin confundirlo
+    # con cero, y al final se vuelve a publicar como `None`.
+    arr = np.asarray([np.nan if x is None else x for x in flat], dtype=float)
+    hueco = np.isnan(arr)
+    mag = np.abs(np.nan_to_num(arr, nan=0.0))
+    mag[hueco] = 0.0
+    nonzero = mag[(mag > 0) & (~hueco)]
     if nonzero.size == 0:
-        # Todo ceros REALES. Se declara en vez de fabricar contraste.
-        return {"ready": True, "matrix": [[0.0] * len(r) for r in rows], "scale": 0.0,
+        # Todo ceros REALES. Se declara en vez de fabricar contraste. Los huecos
+        # siguen siendo huecos también aquí.
+        vacia: List[List[Optional[float]]] = []
+        i0 = 0
+        for r in rows:
+            vacia.append([None if flat[i0 + j] is None else 0.0 for j in range(len(r))])
+            i0 += len(r)
+        return {"ready": True, "matrix": vacia, "scale": 0.0,
                 "symbol": str(symbol).upper(), "normalization": "ALL_ZERO_OBSERVED",
+                "missing_cells": int(hueco.sum()),
                 "reason": "todas las celdas observadas son cero"}
 
     if str(mode).upper() == "LINEAR":
@@ -311,17 +356,25 @@ def normalize_matrix(matrix: Sequence[Sequence[Any]], *, symbol: str = "",
         scale = float(np.percentile(nonzero, 95))
         normalization = "ASSET_RANK_PERCENTILE"
 
-    out: List[List[float]] = []
+    out: List[List[Optional[float]]] = []
     i = 0
     for r in rows:
-        line: List[float] = []
+        line: List[Optional[float]] = []
         for _ in r:
-            line.append(round(float(norm[i]), 6))
+            # El hueco sale como `None` y llega así al renderizador, que sabe
+            # rellenarlo desde sus vecinas y declararlo. Publicarlo como 0.0
+            # sería afirmar que se midió y no había nada.
+            line.append(None if hueco[i] else round(float(norm[i]), 6))
             i += 1
         out.append(line)
-    filled = float(np.mean(np.abs(norm) > 0.02)) if norm.size else 0.0
+    observadas = norm[~hueco]
+    filled = float(np.mean(np.abs(observadas) > 0.02)) if observadas.size else 0.0
     return {"ready": True, "matrix": out, "scale": round(float(scale), 6),
             "symbol": str(symbol).upper(), "normalization": normalization,
+            # Cuántas celdas NO publicó el proveedor. Si esto no es cero, el mapa
+            # tiene zonas interpoladas y se puede decir cuántas.
+            "missing_cells": int(hueco.sum()),
+            "observed_cells": int(observadas.size),
             # Proporción de celdas que de verdad se van a ver. Si es ~0, el mapa se
             # verá vacío y hay que saberlo AQUÍ, no descubrirlo mirando la pantalla.
             "filled_ratio": round(filled, 4),

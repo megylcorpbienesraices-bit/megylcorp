@@ -2961,8 +2961,60 @@
     "test_sin_interes_abierto_no_se_multiplica_por_cero",
     "test_un_centimo_de_diferencia_rompe_la_igualdad"
    ]
+  },
+  "tests/test_v1560_gate7_trace_space.py": {
+   "casos": 19,
+   "tests": [
+    "test_el_area_central_tiene_suelo_en_pixeles",
+    "test_el_grafico_no_cede_alto_a_lo_de_abajo",
+    "test_el_muro_lejano_lleva_flecha_precio_y_distancia",
+    "test_el_plan_sustituye_a_target_y_risk_no_convive",
+    "test_hay_una_sola_funcion_de_escala_de_precio",
+    "test_la_alineacion_se_mide_en_marcha_y_se_publica",
+    "test_la_escala_no_se_construye_con_los_niveles",
+    "test_la_identidad_no_se_deduce_del_color",
+    "test_la_linea_del_muro_lejano_se_distingue_de_la_cercana",
+    "test_la_ventana_se_acota_alrededor_del_precio",
+    "test_las_columnas_laterales_dejan_sitio_a_las_cifras_del_eje",
+    "test_las_cuatro_lineas_del_plan_existen_y_no_se_duplican",
+    "test_las_tres_cabeceras_miden_exactamente_lo_mismo",
+    "test_las_tres_columnas_comparten_fila_de_rejilla",
+    "test_los_tres_lienzos_usan_el_mismo_padding",
+    "test_todo_kind_que_el_renderer_dibuja_tiene_procedencia",
+    "test_trace_no_recalcula_la_direccion",
+    "test_un_muro_fuera_de_ventana_se_conserva_y_se_ancla_al_borde",
+    "test_una_linea_sin_identidad_se_denuncia"
+   ]
+  },
+  "tests/test_v1560_gate8_interval_map.py": {
+   "casos": 23,
+   "tests": [
+    "test_atenuar_por_el_suelo_de_ruido_no_es_invertir",
+    "test_cada_celda_coincide_con_el_crudo_del_proveedor",
+    "test_el_campo_continuo_lleva_isolineas",
+    "test_el_recorte_visual_no_altera_la_matriz_cruda",
+    "test_el_renderizador_distingue_hueco_de_cero",
+    "test_el_signo_se_conserva_en_toda_la_rejilla",
+    "test_el_trace_normaliza_sobre_la_ventana_visible",
+    "test_la_muestra_se_reparte_por_la_rejilla",
+    "test_la_reduccion_se_declara_y_es_la_misma_para_todos",
+    "test_la_rejilla_declara_cuantas_celdas_no_publico_el_proveedor",
+    "test_la_vista_principal_de_la_seccion_es_el_campo_continuo",
+    "test_las_cuatro_griegas_pasan_la_misma_auditoria",
+    "test_los_dos_construyen_el_campo_con_la_misma_funcion",
+    "test_los_ocho_activos_conservan_el_signo",
+    "test_los_puntos_quedan_como_vista_raw_de_diagnostico",
+    "test_trace_y_escenarios_leen_la_misma_rejilla_canonica",
+    "test_un_cero_medido_sigue_siendo_cero",
+    "test_un_desajuste_contra_el_crudo_se_denuncia",
+    "test_un_hueco_publicado_como_medido_hace_FALLAR_la_auditoria",
+    "test_una_celda_ausente_no_se_convierte_en_cero",
+    "test_una_inversion_inyectada_hace_FALLAR_la_auditoria",
+    "test_una_matriz_toda_a_cero_conserva_sus_huecos",
+    "test_una_rejilla_negativa_sale_negativa"
+   ]
   }
  },
- "total_minimo": 2433,
+ "total_minimo": 2475,
  "version": "1.55.0"
 }

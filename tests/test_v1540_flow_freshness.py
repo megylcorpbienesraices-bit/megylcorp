@@ -320,9 +320,17 @@ def test_el_hover_identifica_la_linea_bajo_el_cursor():
 
 
 def test_el_trace_tiene_mas_alto():
+    """Suelo, no cifra exacta: el gráfico puede crecer y nunca encoger.
+
+    Fijar el valor hacía fallar el test cada vez que el área central crecía,
+    que es justo lo que el test quiere que pase; lo que tiene que impedir es lo
+    contrario.
+    """
+    import re as _re
     css = _read("app/static/itmq_terminal.css")
     block = css[css.index(".trace-grid {"):css.index(".trace-col {")]
-    assert "min-height: 780px" in block
+    m = _re.search(r"min-height:\s*(\d+)px", block)
+    assert m and int(m.group(1)) >= 780, block
 
 
 # ════════════════════════════════════════════════════════════════════════════

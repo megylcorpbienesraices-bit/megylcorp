@@ -309,8 +309,13 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
      252 px porque los perfiles DEX y GEX se leen contra el eje de precio y a 230
      las cifras del eje quedaban pegadas a las barras. */
   /* v1.54.0 · 640 -> 780. El grafico salia comprimido: velas y lineas pegadas
-     unas a otras justo donde hay que leer la separacion. */
-  flex: 1; min-height: 780px;
+     unas a otras justo donde hay que leer la separacion.
+     v1.56.0 · 780 -> 940. El area central es donde se lee: velas, campo de
+     calor, niveles con etiqueta y marcas de flujo compartiendo el mismo alto.
+     A 780 px, con doce niveles publicados, las etiquetas se apilaban hasta
+     tocarse y el precio quedaba aplastado entre ellas. El contenedor hace
+     scroll; lo que no puede pasar es que el grafico ceda alto a lo de abajo. */
+  flex: 1; min-height: 940px;
   display: grid;
   grid-template-columns: var(--trace-side, 252px) minmax(0, 1fr) var(--trace-side, 252px);
   gap: 0;
