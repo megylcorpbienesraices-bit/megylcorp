@@ -477,6 +477,133 @@ def render(ticker: str, rows: List[Dict[str, Any]]) -> Tuple[str, bool]:
     return "\n".join(lines), ok
 
 
+#: La cesta de los ocho activos del criterio de cierre. Escalas distintas a
+#: propósito: un ETF de índice, uno de pequeña capitalización y equities de
+#: precio y liquidez muy dispares. Si algo se arregla con una constante, aquí
+#: se rompe.
+CIERRE_BASKET = ("DIA", "SPY", "QQQ", "IWM", "AAPL", "NVDA", "TSLA", "AMD")
+
+
+def probe_aggressor(base_url: str, ticker: str, timeout: float) -> Dict[str, Any]:
+    """TABLA DE EVIDENCIA del lado agresor, con la cinta REAL. Punto 44.
+
+    Lee el bundle en marcha, saca las filas normalizadas de `order-flow` y las
+    contrasta contra la regla del contrato publicado, reimplementada A MANO en
+    `aggressor_evidence.expected_side`. Comparar el clasificador consigo mismo
+    no demostraría nada.
+
+    Exige que el lado sea el MISMO en RAW, clasificador y las marcas que dibujan
+    FLUJO y TRACE. Si una sola etapa cambia BUY por SELL, falla y dice cuál.
+    """
+    from app.core.aggressor_evidence import build_evidence
+
+    br = read_bundle(base_url, ticker, timeout)
+    if not br.get("ok"):
+        return {"ok": False, "ticker": ticker, "detail": br.get("detail")}
+    bundle = br["bundle"]
+    flujo = bundle.get("flujo_ordenes") or {}
+    bloque = (flujo.get("order_flow_unconsolidated") or {})
+    if not bloque.get("rows"):
+        bloque = (flujo.get("order_flow_consolidated") or {})
+    filas = bloque.get("rows") or []
+    marcas = ((bundle.get("qflow") or {}).get("markers")) or []
+
+    # Las filas normalizadas llevan el crudo que hace falta para recalcular el
+    # lado esperado, así que sirven de las dos entradas: es el mismo dato, leído
+    # por dos caminos que no se hablan.
+    ev = build_evidence(filas, filas, flow_marks=marcas, trace_marks=marcas, limit=200)
+    ev["ticker"] = ticker.upper()
+    ev["auditor"] = (bundle.get("auditor") or {}).get("aggressor") or {}
+    return ev
+
+
+def render_aggressor(reports: List[Dict[str, Any]]) -> Tuple[str, bool]:
+    out = ["", "=" * 104,
+           "TABLA DE EVIDENCIA DEL AGRESOR · cinta real",
+           "  RAW tradeSideCode / bid / ask / precio  →  esperado  →  clasificador  →  marca FLUJO  →  marca TRACE",
+           "=" * 104]
+    todo_ok = True
+    for r in reports:
+        t = r.get("ticker", "?")
+        if not r.get("rows"):
+            out.append(f"\n[{t}] sin operaciones en la cinta: {r.get('detail') or 'nada que auditar'}")
+            continue
+        a = r.get("auditor") or {}
+        out.append(f"\n[{t}] {r['count']} operaciones · cobertura {r.get('coverage_pct')} % · "
+                   f"estado {a.get('state')}")
+        out.append(f"  {'hora':<9} {'contrato':<10} {'code':<12} {'bid':>8} {'ask':>8} {'precio':>8} "
+                   f"{'esperado':<9} {'clasif.':<9} {'FLUJO':<8} {'TRACE':<8} ok")
+        for f in r["rows"][:25]:
+            out.append(
+                f"  {str(f.get('tradeTime') or '')[11:19]:<9} "
+                f"{str(f.get('option_symbol') or '')[-10:]:<10} "
+                f"{str(f.get('tradeSideCode') or '—'):<12} "
+                f"{(f.get('bidPrice') if f.get('bidPrice') is not None else float('nan')):>8.2f} "
+                f"{(f.get('askPrice') if f.get('askPrice') is not None else float('nan')):>8.2f} "
+                f"{(f.get('optionPrice') if f.get('optionPrice') is not None else float('nan')):>8.2f} "
+                f"{f['expected']:<9} {f['classifier']:<9} "
+                f"{str(f.get('flow_mark') or '—'):<8} {str(f.get('trace_mark') or '—'):<8} "
+                f"{'OK' if f['match'] else 'FALLO'}")
+        if not r["ok"]:
+            todo_ok = False
+            out.append(f"  >>> {r['mismatch_count']} operacion(es) CAMBIAN DE LADO por el camino:")
+            for f in r["mismatches"][:10]:
+                out.append(f"      {f.get('tradeTime')} esperado={f['expected']} "
+                           f"clasificador={f['classifier']} flujo={f.get('flow_mark')} "
+                           f"trace={f.get('trace_mark')}")
+    out.append("")
+    out.append("VEREDICTO: " + ("el lado se conserva en toda la cadena"
+                                if todo_ok else "HAY OPERACIONES QUE CAMBIAN DE LADO"))
+    return "\n".join(out), todo_ok
+
+
+def probe_interval_map(base_url: str, ticker: str, timeout: float) -> Dict[str, Any]:
+    """Interval Map celda a celda contra el crudo publicado. Puntos 18, 53 y 54.
+
+    «El mapa de QQQ sale casi todo rojo» puede ser correcto —si el proveedor
+    devuelve exposición negativa— o un bug de agregación. Mirar la pantalla al
+    lado de la web del proveedor no las distingue. Esto compara los números.
+    """
+    from app.core.interval_map_audit import audit_grid
+
+    br = read_bundle(base_url, ticker, timeout)
+    if not br.get("ok"):
+        return {"ok": False, "symbol": ticker, "detail": br.get("detail")}
+    bundle = br["bundle"]
+    rejilla = bundle.get("interval_map") or {}
+    a = audit_grid(rejilla, limit=50)
+    a["symbol"] = ticker.upper()
+    return a
+
+
+def render_interval_map(reports: List[Dict[str, Any]]) -> Tuple[str, bool]:
+    out = ["", "=" * 104,
+           "INTERVAL MAP · validación celda a celda contra el crudo de Quant Data",
+           "  RAW → valor canónico → signo → intensidad. El signo NO puede cambiar.",
+           "=" * 104,
+           f"  {'activo':<7} {'griega':<7} {'celdas':>7} {'inversiones':>12} "
+           f"{'huecos medidos':>15} {'atenuadas':>10}  veredicto"]
+    todo_ok = True
+    for r in reports:
+        if not r.get("checked"):
+            out.append(f"  {r.get('symbol','?'):<7} {'—':<7} {'—':>7} {'—':>12} {'—':>15} {'—':>10}  "
+                       f"{r.get('reason') or r.get('detail') or 'sin rejilla'}")
+            todo_ok = False
+            continue
+        out.append(f"  {r.get('symbol','?'):<7} {str(r.get('greek') or '—'):<7} {r['checked']:>7} "
+                   f"{r['sign_flip_count']:>12} {len(r.get('missing_became_measured') or []):>15} "
+                   f"{r.get('noise_floor_muted', 0):>10}  {'OK' if r['ok'] else 'BUG'}")
+        if not r["ok"]:
+            todo_ok = False
+            for c in (r.get("sign_flips") or [])[:6]:
+                out.append(f"      strike {c['strike']} · {c['time']}: RAW {c['raw']} "
+                           f"({c['expected_color']}) → canónico {c['canonical']}")
+    out.append("")
+    out.append("VEREDICTO: " + ("el signo del proveedor se conserva en el renderizador"
+                                if todo_ok else "HAY CELDAS QUE CAMBIAN DE SIGNO"))
+    return "\n".join(out), todo_ok
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -489,10 +616,49 @@ def main() -> int:
                     help="ruta donde guardar el informe completo")
     ap.add_argument("--skip-bundle", action="store_true",
                     help="sólo proveedor y normalizador, sin comprobar la API interna")
+    ap.add_argument("--aggressor", action="store_true",
+                    help=("tabla de evidencia del lado agresor con la cinta REAL: "
+                          "RAW tradeSideCode/bid/ask/precio → esperado → clasificador "
+                          "→ marca FLUJO → marca TRACE, y exige que coincidan"))
+    ap.add_argument("--interval-map", action="store_true",
+                    help=("valida el Interval Map celda a celda contra el crudo: el "
+                          "signo del proveedor no puede cambiar en el renderizador"))
+    ap.add_argument("--cierre", action="store_true",
+                    help=("ejecuta los tres modos forenses sobre los ocho activos del "
+                          "criterio de cierre"))
     ap.add_argument("--dark-pool", action="store_true",
                     help=("verifica sólo los tres carriles de DARK POOL sobre una cesta "
                           "multi-activo, con el código HTTP y el campo rechazado de cada 400"))
     args = ap.parse_args()
+
+    if args.cierre:
+        args.aggressor = True
+        args.interval_map = True
+        if not args.ticker:
+            args.ticker = list(CIERRE_BASKET)
+
+    if args.aggressor or args.interval_map:
+        cesta = args.ticker or ["SPY"]
+        salida: Dict[str, Any] = {"generated_at": datetime.now(timezone.utc).isoformat(),
+                                  "base_url": args.base_url}
+        ok = True
+        if args.aggressor:
+            informes = [probe_aggressor(args.base_url, t, args.timeout) for t in cesta]
+            txt, parcial = render_aggressor(informes)
+            print(txt)
+            ok = ok and parcial
+            salida["aggressor"] = informes
+        if args.interval_map:
+            informes = [probe_interval_map(args.base_url, t, args.timeout) for t in cesta]
+            txt, parcial = render_interval_map(informes)
+            print(txt)
+            ok = ok and parcial
+            salida["interval_map"] = informes
+        if args.json_out:
+            Path(args.json_out).write_text(
+                json.dumps(salida, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            print(f"\ninforme completo: {args.json_out}")
+        return 0 if ok else 1
 
     if args.dark_pool:
         basket = args.ticker or list(DARK_POOL_BASKET)

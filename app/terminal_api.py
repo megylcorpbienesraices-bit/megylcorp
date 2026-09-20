@@ -17,6 +17,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import math
 
+import hashlib as _hashlib
+
 from .core import session_resolver
 from .core.obs import note as _obs_note
 
@@ -2624,11 +2626,34 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     _epoch = state.get("symbol_epoch")
     generation_id = f"{_sym}#{int(_epoch)}" if _epoch is not None else (_sym or None)
 
+    # ── CICLO · la huella del CONTENIDO, no de la identidad ──────────────
+    #
+    # `generation_id` dice DE QUÉ activo es la respuesta. `cycle_id` dice si es
+    # la MISMA respuesta que la anterior. Son preguntas distintas y hacen falta
+    # las dos: una sección congelada por un fallo de refresco tiene la misma
+    # generación que la anterior y un contenido idéntico, y sin la segunda
+    # huella es indistinguible de un mercado sin actividad nueva.
+    _sesion = ""
+    try:
+        from .providers.quantdata.tools import last_valid_session_date as _sd
+        _sesion = _sd()
+    except Exception as exc:
+        _obs_note("terminal_api:session_date", exc, severity="DEGRADED")
+    _piezas = [generation_id or "", _sesion,
+               str(len((trace or {}).get("candles") or [])),
+               str(len((trace or {}).get("levels") or [])),
+               str(((trace or {}).get("walls") or {}).get("call_wall", {}).get("strike")),
+               str(((trace or {}).get("walls") or {}).get("put_wall", {}).get("strike")),
+               str(dark_pool_section.get("cycle_id") or "")]
+    cycle_id = _hashlib.sha256("|".join(_piezas).encode("utf-8")).hexdigest()[:12]
+
     return {
         "ready": bool(state.get("ready")),
         "symbol": state.get("active_symbol") or state.get("symbol"),
         "symbol_epoch": state.get("symbol_epoch"),
         "generation_id": generation_id,
+        "cycle_id": cycle_id,
+        "session_date": _sesion or None,
         "asset_name": asset.get("name"),
         "asset_kind": asset.get("kind"),
         "spot": _f(state.get("spot")),

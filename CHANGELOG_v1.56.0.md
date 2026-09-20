@@ -1,0 +1,178 @@
+# ITM QUANT MULTI ASSET · v1.56.0 — Cierre integral por gates
+
+Release: `ITM_QUANT_v1.56.0_PRE_VPS` · Base: `v1.55.0` · Alcance: `MULTI_ASSET`
+
+**No se modifican fórmulas, pesos del Scanner ni autoridad direccional.**
+
+---
+
+## GATE 1 · El lado agresor, con su orden de autoridad
+
+```
+1. tradeSideCode        el campo OFICIAL. Si viene, decide y se acabó.
+2. otro campo de lado   declarado por el proveedor
+3. NBBO                 medición, no heurística
+4. UNKNOWN              y se dice por qué
+
+ASK / ABOVE_ASK → BUY    BID / BELOW_BID → SELL    MID_MARKET → UNKNOWN
+```
+
+El paso 1 va aparte del 2 **a propósito**. Si `tradeSideCode` dice `MID_MARKET`,
+la respuesta es `UNKNOWN` y **no se cae al NBBO** aunque el precio toque el ask.
+El proveedor ya ha dicho que nadie cruzó el spread; volver a preguntárselo al
+precio es discutirle el dato oficial hasta que conteste lo que queremos oír, y
+así es exactamente como se fabrica una flecha inventada.
+
+**Nunca `CALL = BUY` ni `PUT = SELL`.** Una put se compra, y eso es una COMPRA.
+
+Cada operación conserva 17 campos: `trade_id`, `tradeTime`, `ticker`,
+`option_symbol`, tipo, `strike`, `expiration`, `DTE`, `optionPrice`, `bidPrice`,
+`askPrice`, `size`, `premium`, `trade_side_code`, `aggressor`,
+`classification_source` y `classification_reason`.
+
+`MID_TRADE` deja de contarse como avería. Una cinta con muchas ejecuciones al
+punto medio es una cinta **sana**; hasta ahora producía el mismo mensaje que una
+a la que le falta el campo, y son dos cosas con arreglos opuestos.
+
+### La tabla de evidencia
+
+`aggressor_evidence` recorre la cadena operación por operación y exige que el
+lado sea el mismo en RAW, clasificador, marca de FLUJO y marca de TRACE. La
+columna «esperado» **reimplementa la regla del contrato a mano**, sin llamar al
+clasificador: compararlo consigo mismo no demuestra nada. Un test inyecta una
+inversión y comprueba que la tabla FALLA.
+
+## GATE 2 · La marca, en un solo sitio
+
+Las cinco funciones de la marca vivían **duplicadas** en TRACE y en FLUJO. Eran
+equivalentes el día que se escribieron, y ese es el problema: dos copias
+equivalentes se separan en cuanto alguien corrige una, y una marca que significa
+COMPRA en una pantalla y otra cosa en la de al lado es peor que no dibujarla.
+
+```
+círculo dorado  = concentración (NO dirección)
+flecha verde ▲  = compra demostrada
+flecha roja  ▼  = venta demostrada
+rombo neutro    = lado no demostrable
+```
+
+El hover lleva los tres porcentajes **sobre toda la prima de la ventana** —si el
+40 % no tiene lado, se ve ese 40 %— y de qué campo salió la mayoría de los
+lados, ponderado por prima.
+
+## GATE 3 · Las barras que faltaban
+
+El síntoma: `VOLUMEN SUBYACENTE` lleno, `AGRESOR → SIN FLUJO DIRECCIONAL`,
+`PRIMA → SIN PRIMA OBSERVADA`, todo a la vez.
+
+La causa: los tres carriles se alimentaban de sitios distintos. El volumen sale
+de las **velas**; el agresor y la prima salían de `trace.option_prints`, en el
+cliente. Ese campo llegaba vacío aunque `order-flow` hubiera devuelto cientos de
+operaciones. En pantalla eso se lee como «hoy no hubo flujo de opciones» —una
+conclusión sobre el mercado— donde había una ruta rota.
+
+Ahora se agrupan en el servidor, desde la misma cinta que las tarjetas, con LKG
+por carril. El recuento de la cadena se publica etapa por etapa, y si el
+proveedor trae filas y salen cero barras se declara **fallo de integración**.
+
+## GATE 4 · Auditoría y ocho carriles
+
+Los diez contadores con sus nombres y los siete estados, armados desde la
+**misma** cinta y la misma atribución que dibujan las marcas: recalcularlos
+aparte daría un segundo veredicto que podría discrepar del que se está viendo.
+
+Ocho carriles declarados: `tape`, `qflow`, `net_flow`, `net_drift`, `premiums`,
+`prints`, `volume`, `aggressor`. `last_known_good` se publica **aparte** de
+`current`: cuando el carril está vivo coinciden, y cuando está viejo `current`
+ES el LKG, cosa que quien lea la respuesta tiene que poder saber sin deducirla.
+
+## GATE 5 · Net Drift: por qué los muros «no aparecían»
+
+```js
+const px = vis.filter(v => Q.isNum(v.price));
+if (px.length > 1) { ...aquí dentro iba TODO: precio, muros y QFLOW... }
+```
+
+`v.price` es `stockPrice`, un campo que el proveedor no siempre publica. Sin él,
+el bloque entero se saltaba. Parecía que los muros no existían cuando lo que
+faltaba era una columna de **otro** dataset.
+
+Ahora el precio cae a las velas —mismo subyacente, mismo reloj— y se rotula
+`PRECIO DE VELAS`. Sigue habiendo **exactamente un** eje de precio.
+
+## GATE 6 · Cómo se calcula un muro
+
+Un muro dibujado es una afirmación sobre el mercado. Si su único respaldo es que
+hay una línea en el gráfico, no hay forma de discutirla.
+
+```
+score = 100 · exposición_lado^(1−w) · interés_abierto_lado^w
+```
+
+**Geométrica**, no aritmética: un strike con mucha exposición y nada de libro
+abierto no sostiene un muro, y la media aritmética lo premiaría igual. Sin OI
+utilizable no se multiplica por cero —eso afirmaría que no hay libro, no que no
+se sabe—. La igualdad se verifica en las **seis** secciones.
+
+## GATE 7 · TRACE
+
+Área central de 780 a 940 px. Un muro lejano sigue sin poder deformar la escala:
+con QQQ en 722 y un PUT WALL en 700 no se abren veintidós dólares vacíos; el
+muro se ancla al borde con flecha, precio y distancia.
+
+## GATE 8 · Interval Map: una celda ausente no es un cero
+
+En `normalize_matrix`, una celda que el proveedor no publica se convertía en
+`0.0`. Ese cero viajaba como si fuera una medición: entraba en el percentil,
+contaba como «celda observada sin exposición» y llegaba al renderizador
+indistinguible de un cero real. Una zona no publicada se dibujaba como una zona
+medida y vacía.
+
+`interval_map_audit` compara RAW → canónico → signo → intensidad y exige que el
+signo se conserve. Atenuar por el suelo de ruido **no** cuenta como inversión.
+Dos tests inyectan el defecto y comprueban que la auditoría falla.
+
+## GATE 9 · Monte Carlo congelado y las acumulaciones auditadas
+
+Nueve pruebas contra soluciones **cerradas** pasan al gate de release, antes que
+la suite particionada: si la matemática está rota, el resto no significa nada.
+
+Las acumulaciones, una a una y sin reemplazo global:
+
+| Fichero | Veredicto |
+|---|---|
+| `aggression_delta` | **VÁLIDO** · cada `or 0.0` es una contribución |
+| `qflow` | **VÁLIDO** · sumas sobre operaciones |
+| `dealer_intelligence` | **CORREGIDO** · un componente ausente puntuaba 0 con todo su peso |
+| `market_state_field` | **CORREGIDO** · sin exposición afirmaba `TRANSITION` |
+| `nextgen_terminal` | **CORREGIDO** · `spot or 0.0` ordenaba los strikes por distancia a CERO |
+
+Pendientes: **0**.
+
+## GATE 10 · Dos huellas y un commit transaccional
+
+```
+generation_id   ¿DE QUÉ activo es esta respuesta?
+cycle_id        ¿es la MISMA respuesta que la anterior?
+```
+
+Descartar la generación ajena no basta: durante la hidratación el bundle llega
+con el símbolo nuevo y secciones a medio llenar. `Net Drift de QQQ + GEX todavía
+de DIA + muros antiguos` son tres lecturas de tres momentos distintos
+presentadas como una sola foto del mercado. El snapshot sólo se publica cuando
+los datasets críticos ya son del activo nuevo.
+
+---
+
+## Lo que NO alcanza esta release
+
+Los puntos 5, 10, 18, 25, 27, 37, 38 y 53 exigen la API real con ocho activos.
+El entorno de desarrollo no tiene credenciales ni salida a `quantdata.us`. Las
+herramientas existen:
+
+```
+python scripts/verify_live_quantdata.py --cierre
+```
+
+El estado por módulo, con los cinco niveles y sin inflar ninguno, está en
+`ESTADO_v1.56.0.md`.

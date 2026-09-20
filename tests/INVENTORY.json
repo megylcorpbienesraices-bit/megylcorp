@@ -2827,6 +2827,35 @@
     "test_trace_mide_su_propia_alineacion_en_marcha"
    ]
   },
+  "tests/test_v1560_gate10_transactional.py": {
+   "casos": 24,
+   "tests": [
+    "test_a_las_cuatro_de_la_manana_de_ecuador_empieza_londres",
+    "test_al_abrir_nueva_york_londres_se_sella_y_no_se_borra",
+    "test_cambiar_de_activo_cambia_las_dos_huellas",
+    "test_contenido_nuevo_produce_ciclo_nuevo",
+    "test_el_bundle_lleva_generacion_ciclo_y_sesion",
+    "test_el_cliente_descarta_la_generacion_ajena_entera",
+    "test_el_cliente_guarda_las_dos_huellas",
+    "test_el_guion_falla_cuando_una_etapa_cambia_el_lado",
+    "test_el_guion_live_tiene_los_tres_modos_forenses",
+    "test_el_mismo_contenido_produce_el_mismo_ciclo",
+    "test_el_modo_agresor_contrasta_las_cuatro_etapas",
+    "test_el_modo_interval_map_compara_el_signo_celda_a_celda",
+    "test_el_monitor_no_toca_los_datos_del_proveedor",
+    "test_la_cesta_de_cierre_son_los_ocho_activos",
+    "test_la_generacion_responde_de_que_activo_y_el_ciclo_si_cambio",
+    "test_la_hora_sale_de_la_zona_no_de_un_utc_escrito_a_mano",
+    "test_londres_y_nueva_york_son_acumulados_separados",
+    "test_los_ocho_activos_producen_la_misma_forma_de_bundle",
+    "test_mientras_hidrata_la_cabecera_lo_dice",
+    "test_ningun_activo_toma_una_rama_propia",
+    "test_no_se_publica_un_snapshot_a_medio_llenar",
+    "test_sin_dato_real_no_se_inventa_actividad",
+    "test_una_secuencia_rapida_no_mezcla_activos",
+    "test_volver_al_activo_anterior_no_reutiliza_su_generacion"
+   ]
+  },
   "tests/test_v1560_gate1_aggressor_forensic.py": {
    "casos": 31,
    "tests": [
@@ -3038,6 +3067,6 @@
    ]
   }
  },
- "total_minimo": 2493,
- "version": "1.55.0"
+ "total_minimo": 2517,
+ "version": "1.56.0"
 }

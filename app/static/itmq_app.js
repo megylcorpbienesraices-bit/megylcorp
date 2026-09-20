@@ -55,6 +55,9 @@
     intervalGreek: 'GAMMA',
     // Generacion publicada por el bundle: «SIMBOLO#epoca». Ver pullBundle.
     generation: null,
+    // Huella del CONTENIDO del último snapshot publicado. Ver pullBundle.
+    cycle: null,
+    pendingGeneration: null,
     // Vista del Interval Map: 'field' (mapa continuo, lectura) | 'raw' (puntos, diagnostico)
     intervalRender: 'field',
     intervalRenderApplied: null,
@@ -373,7 +376,40 @@
         console.debug('[BUNDLE] generacion descartada', gen, '≠', esperado);
         return;                       // el bundle del activo viejo no se pinta
       }
+
+      /* v1.56.0 · COMMIT TRANSACCIONAL DEL SNAPSHOT.
+       *
+       * Descartar la generación ajena no basta. Durante la hidratación del
+       * activo nuevo, el bundle empieza a llegar con SU símbolo correcto pero
+       * con secciones a medio llenar, y pintarlo produce media pantalla de cada:
+       *
+       *     Net Drift de QQQ  +  GEX todavía de DIA  +  muros antiguos
+       *
+       * Eso no es un estado intermedio inocente: son tres lecturas de tres
+       * momentos distintos presentadas como una sola foto del mercado.
+       *
+       * Mientras se está cambiando de activo, el snapshot sólo se PUBLICA
+       * cuando los datasets críticos ya son del activo nuevo. Hasta entonces la
+       * cabecera dice HIDRATANDO y la pantalla anterior se queda quieta, que es
+       * honesto: lo que se ve es de antes y se dice.
+       */
+      if (esperado) {
+        const criticos = [
+          ['walls', d.walls && (d.walls.call_wall || d.walls.put_wall)],
+          ['exposicion', d.exposicion && (d.exposicion.by_strike || []).length],
+          ['interval_map', d.interval_map && d.interval_map.ready],
+        ];
+        const faltan = criticos.filter(([, ok]) => !ok).map(([k]) => k);
+        if (faltan.length) {
+          console.debug('[BUNDLE] snapshot incompleto, sin commit:', faltan.join(', '));
+          engineState('WAIT', `HIDRATANDO ${esperado}`);
+          state.pendingGeneration = gen;
+          return;
+        }
+      }
       state.generation = gen || state.generation;
+      state.cycle = String(d.cycle_id || '') || state.cycle;
+      state.pendingGeneration = null;
       state.bundle = d;
       state.symbol = d.symbol || state.symbol;
       state.failures = 0;

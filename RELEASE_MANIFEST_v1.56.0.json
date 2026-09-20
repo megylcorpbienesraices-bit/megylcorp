@@ -1,29 +1,35 @@
 {
-  "version": "1.55.0",
-  "release": "ITM_QUANT_v1.55.0_PRE_VPS",
+  "version": "1.56.0",
+  "release": "ITM_QUANT_v1.56.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.54.0",
-  "focus": "CORRECCION INTEGRAL: ausente deja de ser cero, auditoria matematica del Monte Carlo, FlowViewModel consumido por la seccion, agresor con su soporte por marca, ninguna linea anonima, una sola autoridad de muros comprobada, Interval Map con una rejilla y un renderer principal, Dark Pool con ventana declarada e identidad de ciclo, cambio de activo transaccional.",
+  "base_version": "1.55.0",
+  "focus": "CIERRE INTEGRAL POR GATES: tradeSideCode como autoridad del agresor con tabla de evidencia forense, una sola implementacion de la marca de flujo, barras de agresor y prima recuperadas desde el FlowViewModel, ocho carriles con LKG, Net Drift con muros y QFLOW sobre un eje unico, auditoria del calculo de los muros, Interval Map con el hueco preservado y el signo verificado celda a celda, Monte Carlo como gate de release, cinco ficheros de acumulaciones auditados uno a uno y snapshot transaccional.",
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "net_drift + norm_net_drift + runtime: campo ausente ya no se publica como 0.0; el acumulado ignora el hueco sin estrenarse en cero y el certificador rechaza un numero donde el crudo no tiene dato.",
-    "monte_carlo: semilla DERIVADA de las entradas (antes produccion llamaba sin semilla y el mismo mercado quieto publicaba 43,8 % y luego 44,2 %); se publica el error tipico.",
-    "qflow: cada marca publica prima de compra/venta/sin-lado, operaciones, dominancia y cobertura del agresor.",
-    "flow_view: consumido por FLUJO DE ORDENES; LKG por carril con inventario auditable.",
-    "dark_pool_view: muros dibujables, cycle_id, ventana temporal medida por carril y definicion de cada KPI con su formula y su advertencia.",
-    "level_identity: UNIDENTIFIED_LEVEL con recuento; wall_consistency compara motor, linea dibujada y tarjeta.",
-    "service: reemplazo del ticker heredado con BORDE DE PALABRA (str.replace convertia MEDIA en MEQQQ y DIARIO en QQQRIO en todos los activos menos uno)."
+    "aggressor: `tradeSideCode` decide y NO se cae al NBBO cuando dice MID_MARKET; 17 campos forenses por print; MID_TRADE deja de contarse como averia.",
+    "aggressor_evidence: tabla RAW -> esperado -> clasificador -> marca FLUJO -> marca TRACE, con la columna esperada reimplementada a mano.",
+    "itmq_core.flowMark: UNA implementacion de la marca para TRACE, FLUJO y NET DRIFT; antes habia dos copias que podian separarse.",
+    "flow_view.bucketize: las barras de agresor y prima se agrupan en el servidor desde la misma cinta que las tarjetas, con LKG por carril y recuento de la cadena.",
+    "flow_view: ocho carriles declarados, `last_known_good` publicado aparte de `current`, y la clave completa en cada respuesta.",
+    "drawDrift: el eje de precio cae a las velas cuando el proveedor no publica `stockPrice`; sin ese respaldo se perdian precio, muros y QFLOW a la vez.",
+    "wall_engine.wall_audit: exposicion por lado, OI, distancia, ranking, score y la formula entera; la igualdad se comprueba en SEIS secciones.",
+    "asset_normalization: una celda ausente deja de convertirse en 0.0 y sobrevive como hueco hasta el renderizador.",
+    "interval_map_audit: signo verificado celda a celda contra el crudo, con dos tests de inyeccion que comprueban que la auditoria falla cuando debe.",
+    "market_state_field: sin exposicion el regimen dice NO_EXPOSURE_DATA en vez de afirmar TRANSITION con estabilidad 50.",
+    "dealer_intelligence: un componente ausente sale de la media en vez de puntuar cero con todo su peso.",
+    "nextgen_terminal: `spot or 0.0` ordenaba los strikes por distancia a CERO y devolvia los mas bajos de la cadena; corregido, junto al charm y la prima del print.",
+    "terminal_api: `cycle_id` ademas de `generation_id`, y commit transaccional del snapshot en el cliente."
   ],
   "tests": {
-    "collected": 2493,
+    "collected": 2517,
     "passed": 2170,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 168,
+    "files": 169,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "5894d8f7c33f23bfb5517e60a47c5514a652c937f6a896c10164a34f5a84d6c2"
+    "plan_sha256": "5ceb363e55ace356633c4dbe5379d90cbb9bc28af3797c6656e986a794be63c5"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -158,8 +164,8 @@
     "session_cut": "BUILT_IN_NEW_YORK_TIME_NEVER_A_FIXED_UTC_HOUR"
   },
   "verification_limits": [
-    "Puntos 10, 25 y 27 de la correccion integral NO alcanzados: exigen API real de quantdata.us con ocho activos, y el entorno de desarrollo no tiene credenciales ni salida de red al proveedor.",
-    "Monte Carlo es el unico modulo CERTIFICADO, y puede serlo porque su correccion se contrasta contra formulas cerradas y no depende de ningun proveedor.",
-    "La regresion visual (92 paneles en Chromium con los renderizadores reales) valida GEOMETRIA, no datos de mercado."
+    "Los puntos 5, 10, 18, 25, 27, 37, 38 y 53 del cierre exigen la API real de quantdata.us con ocho activos; el entorno de desarrollo no tiene credenciales ni salida de red al proveedor. Las herramientas existen y se ejecutan con `scripts/verify_live_quantdata.py --cierre`.",
+    "Monte Carlo es el unico modulo CERTIFICADO, y puede serlo porque se contrasta contra formulas cerradas y no depende de ningun proveedor.",
+    "La regresion visual valida GEOMETRIA en un navegador real, no datos de mercado."
   ]
 }
