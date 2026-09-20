@@ -14,7 +14,7 @@ Regla de procedencia, en este orden:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import math
 
 from .core import session_resolver
@@ -1335,7 +1335,11 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
     tape_rows = unconsolidated.get("rows") or consolidated.get("rows") or []
     tape = _tape_totals(tape_rows)
     tape["buckets"] = tape_rows or None
-    view_model = _flow_view_model(symbol, state, tape, net_flow_rows, qflow)
+    # Cuántas filas entregó el PROVEEDOR antes de cualquier transformación. Es
+    # el primer eslabón del recuento de la cadena: sin él, «no se ven barras»
+    # no se puede distinguir de «no hubo operaciones».
+    tape["provider_count"] = int(unconsolidated.get("count") or 0) or int(consolidated.get("count") or 0)
+    view_model = _flow_view_model(symbol, state, tape, net_flow_rows, qflow, drift)
 
     return {
         "symbol": symbol,
@@ -1477,8 +1481,54 @@ def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str
     }
 
 
+def _aggressor_audit(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, Any]:
+    """Los contadores del agresor, con los nombres que exige la auditoría.
+
+    Se arma desde la MISMA cinta y la MISMA atribución que dibujan las marcas.
+    Recalcularla aparte daría un segundo veredicto que podría discrepar del que
+    se está viendo en pantalla, y entonces la auditoría auditaría otra cosa.
+    """
+    from .core.qflow import aggressor_diagnosis
+
+    qflow = _qflow(state, intel)
+    of = _order_flow_block(intel, "options_order_flow_raw")
+    if not of.get("rows"):
+        of = _order_flow_block(intel, "options_order_flow")
+    bloque = intel.get("options_order_flow_raw") or intel.get("options_order_flow") or {}
+    cobertura = bloque.get("aggressor_coverage") if isinstance(bloque, dict) else None
+    diag = aggressor_diagnosis(qflow.get("events") or [],
+                               qflow.get("attribution") or {},
+                               {**of, "aggressor_coverage": cobertura or {}})
+    return {
+        "state": diag.get("state"),
+        "broken_at": diag.get("broken_at"),
+        "remedy": diag.get("remedy"),
+        "tape_rows": diag.get("tape_rows"),
+        "explicit_side_rows": diag.get("explicit_side_rows"),
+        "primary_field_rows": diag.get("primary_field_rows"),
+        "nbbo_classified_rows": diag.get("nbbo_classified_rows"),
+        "unknown_rows": diag.get("unknown_rows"),
+        "mid_trade_rows": diag.get("mid_trade_rows"),
+        "nbbo_missing_rows": diag.get("nbbo_missing_rows"),
+        "without_side_field_rows": diag.get("without_side_field_rows"),
+        "attribution_matches": diag.get("attribution_matches"),
+        "attribution_misses": diag.get("attribution_misses"),
+        "buy_rows": diag.get("buy_rows"),
+        "sell_rows": diag.get("sell_rows"),
+        "coverage_pct": diag.get("coverage_pct"),
+        "markers_with_side": diag.get("markers_with_side"),
+        "markers_total": diag.get("markers_total"),
+        "by_source": diag.get("by_source"),
+        "by_reason": diag.get("by_reason"),
+        "states": diag.get("states"),
+        "chain": diag.get("chain"),
+        "authority": "ITMQ_AGGRESSOR_TRADE_SIDE_CODE_FIRST",
+    }
+
+
 def _flow_view_model(symbol: str, state: Dict[str, Any], tape: Dict[str, Any],
-                     net_flow_rows: Any, qflow: Dict[str, Any]) -> Dict[str, Any]:
+                     net_flow_rows: Any, qflow: Dict[str, Any],
+                     drift: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Arma el FlowViewModel con la sesion y el estado de mercado reales.
 
     `tape` y `net_flow` son DATASETS DISTINTOS y entran por separado: la ausencia
@@ -1498,6 +1548,9 @@ def _flow_view_model(symbol: str, state: Dict[str, Any], tape: Dict[str, Any],
             tape=tape,
             net_flow={"series": list(net_flow_rows) if net_flow_rows else None},
             qflow={"markers": (qflow or {}).get("markers") or None},
+            net_drift={"series": (drift or {}).get("series") or None,
+                       "state": (drift or {}).get("state"),
+                       "error": None if (drift or {}).get("ready") else None},
         )
         model["session_mode"] = ses["mode"]
         model["aggressor_coverage_pct"] = tape.get("aggressor_coverage_pct")
@@ -2521,6 +2574,18 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     # ÚLTIMO VALOR BUENO · inventario real, no cobertura declarada. Contesta
     # «¿qué está protegido y qué no?» sin leer el código, que es la pregunta que
     # se hace cuando una sección se vacía y la de al lado no.
+    # ── AGRESOR · la auditoría completa, con sus contadores ──────────────
+    #
+    # «Todas las marcas salen neutras» no es accionable. Estos números dicen
+    # CUÁL de los eslabones se rompe y, cuando una marca queda neutral, por qué
+    # exactamente: si la cinta no llegó, si llegó sin lado, si el lado dice que
+    # se ejecutó al medio —que NO es una avería— o si no hubo dominancia.
+    try:
+        auditor["aggressor"] = _aggressor_audit(state, intel)
+    except Exception as exc:
+        _obs_note("terminal_api:aggressor_audit", exc, severity="DEGRADED")
+        auditor["aggressor"] = {"state": None, "detail": "auditoría no disponible"}
+
     try:
         from .core import flow_view as _FV2
         auditor["last_known_good"] = _FV2.coverage()

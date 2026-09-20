@@ -2875,8 +2875,51 @@
     "test_una_ventana_entera_al_medio_no_produce_flecha",
     "test_venta_es_flecha_roja_hacia_abajo"
    ]
+  },
+  "tests/test_v1560_gate3_flow_bars.py": {
+   "casos": 19,
+   "tests": [
+    "test_cada_bucket_lleva_los_tres_lados_por_separado",
+    "test_el_bucket_lleva_prima_y_volumen_por_lado",
+    "test_el_carril_de_volumen_sigue_siendo_de_las_velas",
+    "test_el_cliente_publica_cuantas_barras_dibuja_de_verdad",
+    "test_el_eje_es_el_instante_no_el_indice",
+    "test_el_lado_sin_clasificar_no_se_reparte",
+    "test_el_lkg_de_las_barras_no_cruza_de_un_activo_a_otro",
+    "test_el_modelo_al_llegar_reconstruye_las_barras",
+    "test_el_vacio_de_un_carril_dice_el_motivo_real",
+    "test_el_volumen_del_subyacente_no_se_confunde_con_el_flujo_de_opciones",
+    "test_filas_del_proveedor_y_cero_barras_es_un_fallo_de_integracion",
+    "test_la_cadena_publica_su_recuento_etapa_por_etapa",
+    "test_la_cinta_local_sigue_de_respaldo_si_el_modelo_no_viaja",
+    "test_las_barras_de_opciones_salen_del_modelo",
+    "test_los_prints_individuales_no_pueden_vaciar_la_barra",
+    "test_sin_dato_y_sin_historico_si_se_dice_que_no_hay",
+    "test_sin_filas_del_proveedor_no_se_denuncia_nada",
+    "test_un_ciclo_sin_filas_no_fabrica_barras",
+    "test_un_ciclo_vacio_conserva_las_barras_anteriores"
+   ]
+  },
+  "tests/test_v1560_gate4_audit_lanes.py": {
+   "casos": 14,
+   "tests": [
+    "test_cada_carril_lleva_los_nueve_campos",
+    "test_cada_estado_trae_su_remedio_en_lenguaje_accionable",
+    "test_el_agresor_es_un_carril_porque_puede_fallar_solo",
+    "test_el_auditor_publica_los_diez_contadores",
+    "test_el_inventario_del_lkg_llega_al_auditor",
+    "test_el_lkg_se_publica_aparte_del_valor_actual",
+    "test_la_atribucion_cuenta_aciertos_y_fallos",
+    "test_la_auditoria_declara_su_autoridad",
+    "test_la_clave_completa_viaja_en_la_respuesta",
+    "test_las_cinco_reglas_de_frescura",
+    "test_los_ocho_carriles_existen",
+    "test_los_siete_estados_estan_declarados",
+    "test_net_drift_es_su_propio_carril",
+    "test_sin_cinta_el_estado_es_tape_missing_y_no_otro"
+   ]
   }
  },
- "total_minimo": 2367,
+ "total_minimo": 2400,
  "version": "1.55.0"
 }

@@ -119,6 +119,24 @@
 
   /* ---------------------------------------------------------- agregación */
 
+  /**
+   * v1.56.0 · Por qué un carril de OPCIONES está vacío, con el motivo real.
+   *
+   * «SIN PRIMA OBSERVADA» es una conclusión: dice que hoy no se negoció prima.
+   * Sólo vale cuando NO hay dato actual y TAMPOCO último valor bueno. Si el
+   * último ciclo vino vacío pero hay histórico, lo que toca es enseñar el
+   * histórico y decir de cuándo es.
+   */
+  function laneEmpty(dataset, porDefecto) {
+    const vm = S.flowView;
+    const lane = vm && vm[dataset];
+    if (!lane) return porDefecto;
+    if (lane.status === 'NO_DATA') return porDefecto;
+    if (lane.status === 'PROVIDER_ERROR') return 'EL PROVEEDOR FALLÓ EN ESTE CICLO';
+    if (lane.screen_note) return String(lane.screen_note).toUpperCase();
+    return porDefecto;
+  }
+
   function rebuild() {
     const byBucket = new Map();
     const bw = S.bucketMs;
@@ -137,21 +155,64 @@
       byBucket.set(k, b);
     }
 
+    const nuevo = k => ({ t: k, net: 0, total: 0, buy: 0, sell: 0, unknown: 0,
+                          underlyingNet: 0, prints: [], vol: 0 });
+
+    /* v1.56.0 · LAS BARRAS DE OPCIONES SALEN DEL FlowViewModel.
+     *
+     * Antes se construían aquí a partir de `S.prints`, que viene de
+     * `trace.option_prints`. Cuando ese campo llegaba vacío —y llegaba vacío
+     * aunque `order-flow` hubiera devuelto cientos de operaciones— los carriles
+     * de AGRESOR y PRIMA se quedaban en «SIN FLUJO DIRECCIONAL» y «SIN PRIMA
+     * OBSERVADA», mientras el de VOLUMEN SUBYACENTE, que se alimenta de las
+     * velas, seguía lleno. En pantalla eso se lee como «no hubo flujo de
+     * opciones»: una conclusión sobre el mercado donde había una ruta rota.
+     *
+     * El modelo trae las barras ya agrupadas, de la MISMA cinta que las
+     * tarjetas y que QFLOW, y con LKG por carril: un ciclo vacío ya no las
+     * borra. La cinta local queda como respaldo si el modelo no viaja.
+     */
+    const barras = (S.flowView && S.flowView.aggressor_bars
+                    && Array.isArray(S.flowView.aggressor_bars.current))
+      ? S.flowView.aggressor_bars.current : null;
+
     const floor = effectiveMinPremium();
-    for (const p of S.prints) {
-      const t = Q.parseTime(p.t);
-      const prem = Math.abs(Q.num(p.premium, 0));
-      if (!Q.isNum(t) || prem <= 0) continue;
-      const k = key(t);
-      const b = byBucket.get(k) || { t: k, net: 0, total: 0, buy: 0, sell: 0, unknown: 0, underlyingNet: 0, prints: [], vol: 0 };
-      b.total += prem;
-      const dir = Q.num(p.direction, 0);
-      // La prima sin agresor identificado se contabiliza aparte. Sin esto, un carril
-      // de flujo neto plano con millones negociados delante parecía una avería
-      // cuando en realidad la cinta no traía cotización con la que clasificarla.
-      if (dir > 0) b.buy += prem; else if (dir < 0) b.sell += prem; else b.unknown += prem;
-      if (prem >= floor) b.prints.push(p);
-      byBucket.set(k, b);
+    if (barras) {
+      for (const r of barras) {
+        const k = key(Q.num(r.t, NaN));
+        if (!Q.isNum(k)) continue;
+        const b = byBucket.get(k) || nuevo(k);
+        b.buy += Q.num(r.buy_premium, 0);
+        b.sell += Q.num(r.sell_premium, 0);
+        b.unknown += Q.num(r.unknown_premium, 0);
+        b.total += Q.num(r.total_premium, 0);
+        byBucket.set(k, b);
+      }
+      // Los prints individuales siguen siendo del trace: son el DETALLE de un
+      // intervalo, no la barra. Que falten no puede vaciar la barra.
+      for (const p of S.prints) {
+        const t = Q.parseTime(p.t);
+        const prem = Math.abs(Q.num(p.premium, 0));
+        if (!Q.isNum(t) || prem < floor) continue;
+        const b = byBucket.get(key(t));
+        if (b) b.prints.push(p);
+      }
+    } else {
+      for (const p of S.prints) {
+        const t = Q.parseTime(p.t);
+        const prem = Math.abs(Q.num(p.premium, 0));
+        if (!Q.isNum(t) || prem <= 0) continue;
+        const k = key(t);
+        const b = byBucket.get(k) || nuevo(k);
+        b.total += prem;
+        const dir = Q.num(p.direction, 0);
+        // La prima sin agresor identificado se contabiliza aparte. Sin esto, un carril
+        // de flujo neto plano con millones negociados delante parecía una avería
+        // cuando en realidad la cinta no traía cotización con la que clasificarla.
+        if (dir > 0) b.buy += prem; else if (dir < 0) b.sell += prem; else b.unknown += prem;
+        if (prem >= floor) b.prints.push(p);
+        byBucket.set(k, b);
+      }
     }
 
     S.buckets = Array.from(byBucket.values()).sort((a, b) => a.t - b.t);
@@ -456,7 +517,9 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('AGRESOR', box.x + 4, box.y + 3);
+    // v1.56.0 · Tres datasets DISTINTOS, con nombres que no se confunden:
+    // el agresor y la prima son de OPCIONES; el volumen gris es del SUBYACENTE.
+    ctx.fillText('AGRESOR · OPCIONES', box.x + 4, box.y + 3);
     ctx.restore();
 
     if (S.panels.aggr && S.panels.aggr.pointer.inside) crosshairX(ctx, box, S.panels.aggr.pointer.x);
@@ -477,7 +540,7 @@
     if (_cls <= 0) {
       empty(ctx, env, _unk > 0
         ? `PRIMA SIN AGRESOR IDENTIFICADO · ${Q.money(_unk, 1)} sin clasificar`
-        : 'SIN FLUJO DIRECCIONAL');
+        : laneEmpty('aggressor_bars', 'SIN FLUJO DIRECCIONAL'));
       return false;
     }
     const sx = Q.scale(win.t0, win.t1, box.x, box.x + box.w);
@@ -620,7 +683,7 @@
   function drawTotal(ctx, env) {
     const box = plotBox(env);
     const win = window_();
-    if (!win || !S.buckets.length) { empty(ctx, env, 'SIN PRIMA OBSERVADA'); return false; }
+    if (!win || !S.buckets.length) { empty(ctx, env, laneEmpty('premium_bars', 'SIN PRIMA OBSERVADA')); return false; }
     const sx = Q.scale(win.t0, win.t1, box.x, box.x + box.w);
     let actualPeak = 0;
     for (const b of S.buckets) {
@@ -677,7 +740,7 @@
     // Ejes dibujados pero ningun contenedor con prima: el carril quedaria en
     // blanco sin decir por que. Un carril vacio sin causa es indistinguible de
     // un fallo de render, asi que se declara.
-    if (!painted) { ctx.restore(); empty(ctx, env, 'SIN PRIMA OBSERVADA'); return false; }
+    if (!painted) { ctx.restore(); empty(ctx, env, laneEmpty('premium_bars', 'SIN PRIMA OBSERVADA')); return false; }
     // sólo los picos llevan cifra: etiquetar todo haría ilegible el carril
     tall.sort((a, b) => b.total - a.total);
     ctx.font = '10px ui-monospace, monospace';
@@ -695,7 +758,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('TOTAL', box.x + 4, box.y - 8);
+    ctx.fillText('PRIMA · OPCIONES', box.x + 4, box.y - 8);
     
     // Los mismos eventos de concentración que se marcan sobre el precio, aquí en
     // su magnitud. Ver el pico y saber a qué precio ocurrió es lo que une los dos
@@ -1655,8 +1718,21 @@
 
   function applyFlowView(vm) {
     S.flowView = (vm && typeof vm === 'object' && vm.premiums) ? vm : null;
+    // Las barras de opciones salen del modelo, así que al llegar hay que
+    // reconstruirlas: si sólo se repintaran las tarjetas, los carriles de
+    // AGRESOR y PRIMA seguirían enseñando lo que hubiera calculado la cinta
+    // local, que es justo la ruta que se está sustituyendo.
+    rebuild();
     renderSummary();
+    invalidateAll();
     return S.flowView;
+  }
+
+  /** Cuántas barras dibuja de verdad este cliente. Cierra el recuento de la
+   *  cadena que el modelo publica en `pipeline`: si el proveedor trae filas y
+   *  aquí salen cero, el fallo es de integración y se puede señalar. */
+  function renderedBarCount() {
+    return S.buckets.filter(b => (Q.num(b.total, 0) > 0)).length;
   }
 
   function renderSummary() {
@@ -1714,6 +1790,6 @@
     for (const p of Object.values(S.panels)) if (p) p.invalidate();
   }
 
-  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, applyFlowView, setPanel, setGoldRule,
+  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, applyFlowView, renderedBarCount, setPanel, setGoldRule,
     setMinPremium, setMode, setFollow, state: S };
 })(window);

@@ -104,15 +104,37 @@ def expected_side(raw: Dict[str, Any]) -> str:
     return UNKNOWN
 
 
-def _f(*values: Any) -> Optional[float]:
-    for v in values:
-        if v is None or isinstance(v, bool):
-            continue
+def _parse(v: Any) -> Optional[float]:
+    """Un valor a número finito, o None. No es un fallo: es «este alias no».
+
+    La tabla se lee contra la respuesta CRUDA del proveedor, que publica
+    `optionPrice` en unas respuestas y `price` en otras. Que un alias no venga,
+    o venga como texto vacío, es la forma normal de la respuesta y no hay nada
+    que diagnosticar; por eso se devuelve None en vez de registrar un incidente
+    por cada fila.
+    """
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        x = float(v)
+    elif isinstance(v, str):
+        texto = v.strip()
+        if not texto:
+            return None
         try:
-            x = float(v)
-        except (TypeError, ValueError):
-            continue
-        if x == x and x not in (float("inf"), float("-inf")):
+            x = float(texto)
+        except ValueError:
+            return None
+    else:
+        return None
+    return x if x == x and x not in (float("inf"), float("-inf")) else None
+
+
+def _f(*values: Any) -> Optional[float]:
+    """El primero de varios alias que sea un número finito."""
+    for v in values:
+        x = _parse(v)
+        if x is not None:
             return x
     return None
 

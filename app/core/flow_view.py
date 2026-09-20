@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # ── Estados de un carril ─────────────────────────────────────────────────
 LIVE = "LIVE"                       # dato nuevo en este ciclo
@@ -107,6 +107,7 @@ def lane(symbol: str, session_date: str, dataset: str, value: Any, *,
          now: Optional[datetime] = None,
          error: Optional[str] = None,
          market_open: bool = True,
+         source_mode: str = "DIRECT_PROVIDER",
          meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Un carril con su valor, su estado y su edad.
 
@@ -115,28 +116,40 @@ def lane(symbol: str, session_date: str, dataset: str, value: Any, *,
     """
     ref = _now(now)
 
+    # La identidad del carril viaja SIEMPRE, pase lo que pase con el dato. Un
+    # LKG mal indexado es peor que no tenerlo —enseña un número correcto en el
+    # sitio equivocado—, así que la clave completa tiene que poder leerse en la
+    # propia respuesta sin reconstruirla desde fuera.
+    ident = {"symbol": str(symbol or "").upper(), "session_date": str(session_date or ""),
+             "dataset": str(dataset or ""), "source_mode": source_mode,
+             "timestamp": ref.isoformat()}
+
     if error:
         prev = recall(symbol, session_date, dataset)
         return _pack(prev["value"] if prev else None, PROVIDER_ERROR, ref,
                      prev_at=(prev or {}).get("at"), detail=str(error)[:240],
-                     meta=(prev or {}).get("meta") or meta)
+                     meta=(prev or {}).get("meta") or meta, ident=ident,
+                     lkg=(prev or {}).get("value"))
 
     if value is not None:
         remember(symbol, session_date, dataset, value, now=ref, meta=meta)
-        return _pack(value, LIVE, ref, prev_at=ref.isoformat(), detail="", meta=meta)
+        return _pack(value, LIVE, ref, prev_at=ref.isoformat(), detail="",
+                     meta=meta, ident=ident, lkg=value)
 
     prev = recall(symbol, session_date, dataset)
     if prev is None:
         # Nunca hubo dato para este símbolo y esta sesión. Éste es el ÚNICO
         # caso en el que la pantalla puede decir SIN DATOS.
         return _pack(None, NO_DATA, ref, prev_at=None,
-                     detail="sin dato para este activo en esta sesión", meta=meta)
+                     detail="sin dato para este activo en esta sesión",
+                     meta=meta, ident=ident, lkg=None)
 
     age = _age_minutes(prev.get("at"), ref)
     state = HISTORICAL if not market_open else (
         STALE if (age is None or age >= STALE_AFTER_MINUTES) else LIVE)
     return _pack(prev["value"], state, ref, prev_at=prev.get("at"),
-                 detail="", meta=prev.get("meta") or meta)
+                 detail="", meta=prev.get("meta") or meta, ident=ident,
+                 lkg=prev.get("value"))
 
 
 def _age_minutes(at: Any, ref: datetime) -> Optional[float]:
@@ -152,10 +165,18 @@ def _age_minutes(at: Any, ref: datetime) -> Optional[float]:
 
 
 def _pack(value: Any, state: str, ref: datetime, *, prev_at: Optional[str],
-          detail: str, meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+          detail: str, meta: Optional[Dict[str, Any]],
+          ident: Optional[Dict[str, Any]] = None,
+          lkg: Any = None) -> Dict[str, Any]:
     age = _age_minutes(prev_at, ref)
     return {
+        **(ident or {}),
         "current": value,
+        # `last_known_good` se publica APARTE de `current` aunque coincidan.
+        # Cuando el carril está vivo son el mismo valor; cuando está viejo,
+        # `current` ES el LKG, y quien lea la respuesta tiene que poder saberlo
+        # sin deducirlo del estado.
+        "last_known_good": lkg,
         "status": state,
         "last_good_at": prev_at,
         "age_minutes": age,
@@ -217,10 +238,123 @@ def coverage(now: Optional[datetime] = None) -> Dict[str, Any]:
     }
 
 
+#: Anchura del bucket de las barras de flujo. Un minuto es el intervalo con el
+#: que el proveedor publica Net Flow y Net Drift, así que las tres series caen
+#: sobre el mismo reloj y se pueden leer una contra otra.
+BUCKET_MS = 60_000
+
+
+def bucketize(rows: Any, *, bucket_ms: int = BUCKET_MS) -> List[Dict[str, Any]]:
+    """Agrupa la cinta de opciones en barras por intervalo.
+
+    ═══════════════════════════════════════════════════════════════════════
+    POR QUÉ ESTO ESTÁ AQUÍ Y NO EN EL NAVEGADOR
+    ═══════════════════════════════════════════════════════════════════════
+
+    Las barras de AGRESOR y de PRIMA se construían en el cliente a partir de
+    `trace.option_prints`. Cuando ese campo venía vacío —y venía vacío aunque
+    `order-flow` hubiera devuelto cientos de operaciones— los dos carriles se
+    quedaban en «SIN FLUJO DIRECCIONAL» y «SIN PRIMA OBSERVADA», mientras el
+    carril de VOLUMEN SUBYACENTE, que se alimenta de las velas, seguía lleno.
+
+    En pantalla eso se lee como «no hubo flujo de opciones», que es una
+    conclusión sobre el mercado. Lo que había era una ruta de datos rota.
+
+    Construyéndolas aquí, las barras salen de la MISMA cinta que las tarjetas y
+    que QFLOW, entran en el LKG por carril como todo lo demás, y un ciclo vacío
+    deja de borrarlas.
+
+    ═══════════════════════════════════════════════════════════════════════
+    QUÉ LLEVA CADA BARRA
+    ═══════════════════════════════════════════════════════════════════════
+
+    Prima y volumen, separados por lado, y el lado SIN CLASIFICAR en su propio
+    cubo. Repartirlo entre compra y venta inclinaría el sesgo hacia el lado que
+    tocara por azar justo cuando la cinta llega sin cotización, que es cuando
+    peor se lee.
+    """
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return []
+    ancho = max(1000, int(bucket_ms))
+    por_bucket: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ms = _epoch_ms(r.get("t") or r.get("tradeTime") or r.get("timestamp"))
+        if ms is None:
+            continue
+        k = (ms // ancho) * ancho
+        b = por_bucket.get(k)
+        if b is None:
+            b = {"t": k, "t_iso": datetime.fromtimestamp(k / 1000.0, tz=timezone.utc).isoformat(),
+                 "buy_premium": 0.0, "sell_premium": 0.0, "unknown_premium": 0.0,
+                 "buy_volume": 0.0, "sell_volume": 0.0, "unknown_volume": 0.0,
+                 "trades": 0, "buys": 0, "sells": 0, "unknowns": 0}
+            por_bucket[k] = b
+        prem = abs(_num(r.get("premium")) or 0.0)
+        size = abs(_num(r.get("size")) or 0.0)
+        lado = str(r.get("aggressor") or "UNKNOWN").upper()
+        destino = "buy" if lado == "BUY" else "sell" if lado == "SELL" else "unknown"
+        b[f"{destino}_premium"] += prem
+        b[f"{destino}_volume"] += size
+        b[destino + "s"] += 1
+        b["trades"] += 1
+
+    salida: List[Dict[str, Any]] = []
+    for k in sorted(por_bucket):
+        b = por_bucket[k]
+        b["net_premium"] = b["buy_premium"] - b["sell_premium"]
+        b["net_volume"] = b["buy_volume"] - b["sell_volume"]
+        b["total_premium"] = b["buy_premium"] + b["sell_premium"] + b["unknown_premium"]
+        b["classified_premium"] = b["buy_premium"] + b["sell_premium"]
+        b["coverage_pct"] = (None if b["total_premium"] <= 0 else
+                             round(100.0 * b["classified_premium"] / b["total_premium"], 1))
+        salida.append(b)
+    return salida
+
+
+def _epoch_ms(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        n = float(v)
+        return int(n if abs(n) > 1e11 else n * 1000.0)
+    raw = str(v).strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        n = float(raw)
+        return int(n if abs(n) > 1e11 else n * 1000.0)
+    try:
+        t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return int(t.timestamp() * 1000)
+
+
+def _num(v: Any) -> Optional[float]:
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if x == x and x not in (float("inf"), float("-inf")) else None
+
+
+#: Los OCHO carriles de la sección. Se declaran aquí para que «faltaba un
+#: carril» sea una comprobación y no una impresión.
+LANES = ("tape", "qflow", "net_flow", "net_drift", "premiums", "prints",
+         "volume", "aggressor")
+
+
 def build(*, symbol: str, session_date: str, market_open: bool,
           tape: Optional[Dict[str, Any]] = None,
           net_flow: Optional[Dict[str, Any]] = None,
           qflow: Optional[Dict[str, Any]] = None,
+          net_drift: Optional[Dict[str, Any]] = None,
           now: Optional[datetime] = None) -> Dict[str, Any]:
     """El modelo único que consume la sección FLUJO DE ÓRDENES.
 
@@ -236,11 +370,14 @@ def build(*, symbol: str, session_date: str, market_open: bool,
     t = tape or {}
     nf = net_flow or {}
     q = qflow or {}
+    nd = net_drift or {}
 
     def L(dataset: str, value: Any, error: Optional[str] = None,
-          meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+          meta: Optional[Dict[str, Any]] = None,
+          source_mode: str = "DIRECT_PROVIDER") -> Dict[str, Any]:
         return lane(symbol, session_date, dataset, value, now=ref,
-                    error=error, market_open=market_open, meta=meta)
+                    error=error, market_open=market_open, meta=meta,
+                    source_mode=source_mode)
 
     # La prima compradora y vendedora salen SÓLO de prints con agresor
     # clasificado. Un `CALL` no es una compra y un `PUT` no es una venta; la
@@ -253,11 +390,34 @@ def build(*, symbol: str, session_date: str, market_open: bool,
         "largest_print": L("largest_print", t.get("largest_print")),
     }
 
+    # ── LAS BARRAS ───────────────────────────────────────────────────────
+    #
+    # v1.56.0 · Se construyen AQUÍ, no en el navegador.
+    #
+    # Antes salían de `trace.option_prints` en el cliente, y cuando ese campo
+    # venía vacío —aunque `order-flow` hubiera devuelto cientos de operaciones—
+    # los carriles de AGRESOR y PRIMA se quedaban en «SIN FLUJO DIRECCIONAL» y
+    # «SIN PRIMA OBSERVADA» mientras el de VOLUMEN SUBYACENTE, alimentado por
+    # las velas, seguía lleno. En pantalla eso se lee como «no hubo flujo de
+    # opciones», que es una conclusión sobre el mercado; lo que había era una
+    # ruta rota.
+    #
+    # Aquí salen de la MISMA cinta que las tarjetas y que QFLOW, y entran en el
+    # LKG por carril como todo lo demás: un ciclo vacío deja de borrarlas.
+    barras = bucketize(t.get("buckets")) or None
+
     model = {
         "symbol": str(symbol or "").upper(),
         "session": {"date": str(session_date or ""), "market_open": bool(market_open)},
         "tape": L("tape_buckets", t.get("buckets"), error=t.get("error"),
                   meta={"count": len(t.get("buckets") or [])}),
+        # Dos carriles SEPARADOS sobre las mismas barras: uno responde «¿de qué
+        # lado fue?» y el otro «¿cuánto dinero?». Un carril no desaparece porque
+        # falte el otro.
+        "aggressor_bars": L("aggressor_bars", barras,
+                            meta={"count": len(barras or []), "bucket_ms": BUCKET_MS}),
+        "premium_bars": L("premium_bars", barras,
+                          meta={"count": len(barras or []), "bucket_ms": BUCKET_MS}),
         "net_flow": L("net_flow", nf.get("series"), error=nf.get("error"),
                       meta={"count": len(nf.get("series") or [])}),
         "qflow": L("qflow", q.get("markers"), error=q.get("error"),
@@ -265,6 +425,18 @@ def build(*, symbol: str, session_date: str, market_open: bool,
         "volume": L("volume", t.get("volume")),
         "prints": L("prints", t.get("prints"), meta={"count": len(t.get("prints") or [])}),
         "premiums": premiums,
+        # NET DRIFT es su propio carril: viene del endpoint OFICIAL y no se
+        # reconstruye con Net Flow ni con QFLOW. Que falte no puede vaciar la
+        # cinta, y que falte la cinta no puede vaciarlo a él.
+        "net_drift": L("net_drift", nd.get("series"), error=nd.get("error"),
+                       meta={"count": len(nd.get("series") or []),
+                             "state": nd.get("state")}),
+        # El AGRESOR es un carril propio porque puede fallar solo: la cinta
+        # llega entera y aun así ninguna operación resuelve lado.
+        "aggressor": L("aggressor", t.get("aggressor_coverage_pct"),
+                       meta={"classified_premium": t.get("classified_premium"),
+                             "unknown_premium": t.get("unknown_premium")},
+                       source_mode="DERIVED"),
     }
 
     # Frescura de la SECCIÓN: el carril más fresco manda, porque la sección
@@ -282,5 +454,29 @@ def build(*, symbol: str, session_date: str, market_open: bool,
         "age_minutes": min(ages) if ages else None,
         "lanes_live": sum(1 for s in states if s == LIVE),
         "lanes_total": len(states),
+    }
+
+    # ── RECUENTO DE LA CADENA ────────────────────────────────────────────
+    #
+    # Si el proveedor trae filas y no se dibuja ninguna barra, hay un fallo de
+    # integración y tiene que poder señalarse la ETAPA exacta. Sin estos
+    # números, «no se ven barras» obliga a instrumentar la cadena entera cada
+    # vez. Con ellos se lee de un vistazo dónde se pierden.
+    provider = int(t.get("provider_count") or 0)
+    normalized = len(t.get("buckets") or [])
+    model["pipeline"] = {
+        "provider_count": provider,
+        "normalized_count": normalized,
+        "hub_bucket_count": normalized,
+        "viewmodel_bucket_count": len(barras or []),
+        # Lo que el navegador dibuja de verdad lo publica él mismo al pintar;
+        # aquí viaja el resto de la cadena para poder compararlo.
+        "rendered_bar_count": None,
+        "bucket_ms": BUCKET_MS,
+        "ok": (provider == 0) or bool(barras),
+        "detail": ("sin filas del proveedor en este ciclo" if provider == 0 else
+                   f"{provider} filas del proveedor -> {len(barras or [])} barras"
+                   if barras else
+                   f"{provider} filas del proveedor y NINGUNA barra: fallo de integración"),
     }
     return model

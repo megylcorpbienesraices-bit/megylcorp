@@ -1044,7 +1044,9 @@ def test_every_lane_of_the_tape_declares_why_it_is_empty():
     # así que el eje se dibujaba y el carril quedaba mudo.
     assert "let painted = 0;" in body and "painted += 1;" in body
     assert "if (!painted) {" in body
-    assert "empty(ctx, env, 'SIN PRIMA OBSERVADA')" in body
+    # v1.56.0 · El motivo sale del ESTADO del carril: «SIN PRIMA OBSERVADA» es
+    # una conclusión y sólo vale cuando no hay dato actual NI último valor bueno.
+    assert "laneEmpty('premium_bars', 'SIN PRIMA OBSERVADA')" in body
     # El ctx.restore() del clip tiene que ocurrir antes de escribir el texto.
     idx = body.index("if (!painted) {")
     assert "ctx.restore();" in body[idx:idx + 120]
