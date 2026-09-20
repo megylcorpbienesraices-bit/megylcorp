@@ -682,6 +682,17 @@
 <!-- ════════════════════════════════════════════════════ FUENTES ═══════ -->
 <section class="view" data-view="fuentes">
   <div class="stack">
+    <!-- Identidad de cada línea que TRACE dibuja. Existe porque había líneas sin
+         etiqueta, y una línea sin nombre sobre un gráfico de operativa se ve,
+         parece significar algo y no se puede identificar. El color no sirve para
+         deducirla: rojo es `put_wall` Y `risk`, verde es `call_wall` Y `target`. -->
+    <article class="card">
+      <header><h2>TRACE · IDENTIDAD DE CADA LÍNEA</h2><span class="pill" id="liPill">—</span></header>
+      <div class="body"><div class="table-wrap"><table class="data" id="tblLevelIdentity">
+        <thead><tr><th>PRECIO</th><th>TYPE</th><th>NOMBRE DEL MOTOR</th><th>SOURCE</th><th>CAMPO</th><th>METHOD</th><th>MAGNITUD</th><th>PERSISTENCIA</th><th>TIMESTAMP</th></tr></thead><tbody></tbody>
+      </table></div>
+      <p class="note" id="liNote">—</p></div>
+    </article>
     <article class="card">
       <header><h2>PROVEEDORES · PARIDAD DE OPCIONES</h2><span class="pill" id="parityPill">—</span></header>
       <div class="body" id="providerList">

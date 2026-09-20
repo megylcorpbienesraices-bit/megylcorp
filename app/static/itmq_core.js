@@ -559,17 +559,32 @@
    * prioridad. TRACE y el panel de flujo la comparten para que un Call Wall se
    * vea igual en los dos sitios y no haya dos verdades sobre el mismo precio.
    */
+  /* v1.53.1 · `short` — nombre corto para que TODA línea pueda llevar etiqueta.
+   *
+   * El renderer sólo rotulaba las primeras por prioridad, así que `target` y
+   * `risk` —orden 7— se dibujaban SIN NOMBRE. Una línea sin nombre sobre un
+   * gráfico de operativa es peor que no dibujarla: se ve, parece significar
+   * algo, y no hay forma de saber qué.
+   *
+   * Y no se puede deducir por color: rojo es `put_wall` Y `risk`; verde es
+   * `call_wall` Y `target`. El color agrupa `kind` distintos, así que deducir
+   * de él acierta la mitad de las veces y no avisa cuando falla.
+   *
+   * Con nombre corto caben todas. `short` NO renombra el nivel: el nombre que
+   * manda sigue siendo el que publica el motor; esto es sólo la abreviatura de
+   * pantalla cuando el suyo no cabe.
+   */
   const LEVELS = {
-    flip:        { color: '--accent',   label: 'Zero Gamma',  order: 1 },
-    call_wall:   { color: '--pos',      label: 'Call Wall',   order: 2 },
-    put_wall:    { color: '--neg',      label: 'Put Wall',    order: 2 },
-    vol_trigger: { color: '--warn',     label: 'Vol Trigger', order: 3 },
-    hedge_wall:  { color: '--violet',   label: 'Hedge Wall',  order: 4 },
-    gamma:       { color: '--accent-2', label: 'Γ Center',    order: 5 },
-    delta:       { color: '--accent-2', label: 'Δ Center',    order: 5 },
-    zone:        { color: '--text-dim', label: 'Zona',        order: 6 },
-    target:      { color: '--pos',      label: 'Objetivo',    order: 7 },
-    risk:        { color: '--neg',      label: 'Invalidación', order: 7 },
+    flip:        { color: '--accent',   label: 'Zero Gamma',   short: '0Γ',   order: 1 },
+    call_wall:   { color: '--pos',      label: 'Call Wall',    short: 'CW',   order: 2 },
+    put_wall:    { color: '--neg',      label: 'Put Wall',     short: 'PW',   order: 2 },
+    vol_trigger: { color: '--warn',     label: 'Vol Trigger',  short: 'VT',   order: 3 },
+    hedge_wall:  { color: '--violet',   label: 'Hedge Wall',   short: 'HW',   order: 4 },
+    gamma:       { color: '--accent-2', label: 'Γ Center',     short: 'ΓC',   order: 5 },
+    delta:       { color: '--accent-2', label: 'Δ Center',     short: 'ΔC',   order: 5 },
+    zone:        { color: '--text-dim', label: 'Zona',         short: 'ZONA', order: 6 },
+    target:      { color: '--pos',      label: 'Objetivo',     short: 'OBJ',  order: 7 },
+    risk:        { color: '--neg',      label: 'Invalidación', short: 'INVAL', order: 7 },
   };
 
   /** Niveles que el panel de flujo comparte con TRACE. */

@@ -1,5 +1,25 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.53.1 · La identidad de cada línea
+
+Había líneas dibujadas en TRACE **sin etiqueta**, y no se pueden identificar por
+el color: `--neg` agrupa `put_wall` **Y** `risk`; `--pos` agrupa `call_wall` **Y**
+`target`. Deducir del color acierta la mitad de las veces y no avisa cuando falla.
+
+Volcadas desde el motor en ejecución, las dos anónimas son:
+
+- **La roja** → `type=risk`, nombre del motor **`Invalidación`**, de
+  `nextgen_terminal.structure_levels()` ← `scanner['invalidation']`.
+- **La verde** → `type=target`, nombre del motor **`T1`**/**`T2`**, de la misma
+  función ← `scanner['target1'|'target2']`.
+
+Ninguna es un nivel de exposición: las dos salen del **Scanner**, no de la cadena
+de griegas. Quedaban sin rotular por ser las últimas en prioridad.
+
+El Auditor expone ahora `precio · type · source · campo · method · magnitud ·
+persistencia · timestamp` de cada línea visible, y el gráfico las etiqueta todas
+—con nombre corto antes que quedarse mudas—. Nada se renombra ni se recalcula.
+
 ## v1.53.0 · El agresor en producción y el campo visible
 
 - **Todas las marcas salían en rombo neutro.** v1.52.0 hizo bien en no inventar

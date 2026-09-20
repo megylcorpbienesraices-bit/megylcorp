@@ -1,7 +1,7 @@
 {
   "name": "itm-quant-solid-shell",
   "private": true,
-  "version": "1.53.0",
+  "version": "1.53.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

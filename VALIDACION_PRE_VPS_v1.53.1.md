@@ -1,14 +1,79 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.53.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.53.1
 
-Release: `ITM_QUANT_v1.53.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.53.1_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A17** es la de esta release.
+> Documento acumulativo. La sección **A18** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2122 casos / 148 ficheros**
-- Particiones: 21 · `plan_sha256`: `1898c1b10a0bb1c97d606c4e982c54a9c32cfe909e2f2a5546a282276da8af20`
+- Inventario nominal: **2133 casos / 149 ficheros**
+- Particiones: 21 · `plan_sha256`: `c5b631232177bd39b731493261f3768059b34bb1fd4edbf737910614dc0d0aec`
 - Resultado: **PASS**
+
+---
+
+## A18 · v1.53.1 · La identidad de cada línea
+
+### Qué se certifica
+
+Once casos en `tests/test_v1531_level_identity.py`.
+
+**1 · El color NO puede identificar una línea.** Se comprueba sobre la tabla de
+estilo que `--neg` agrupa `put_wall` Y `risk`, y `--pos` agrupa `call_wall` Y
+`target`. Si alguien añade un `kind` a esos colores, salta.
+
+**2 · Todo `kind` que emite el motor tiene origen declarado.** Se extraen los
+`kind` de `structure_levels` por análisis del propio fuente y se exige que estén
+en `LEVEL_ORIGIN`.
+
+**3 · El origen nombra la función y el campo reales**, no una descripción.
+
+**4 · `describe` expone los siete campos** pedidos, y sin magnitud NO fabrica un
+cero.
+
+**5 · Un `kind` no registrado lo dice** en vez de inventarse un origen.
+
+**6 · La autoridad del nivel gana al registro**: el Wall Engine manda sobre el
+respaldo.
+
+**7 · La persistencia cuenta ciclos consecutivos** y se reinicia al moverse.
+
+**8 · La tolerancia es relativa**: un dólar en 5.800 es el mismo nivel; en 40, es
+otro.
+
+**9 · La identidad viaja en el bundle** sin cambiar el cálculo.
+
+**10 · El Auditor muestra las nueve columnas.**
+
+**11 · Toda línea visible lleva etiqueta**, con abreviatura antes que silencio.
+
+### Volcado contra el motor real
+
+`127.0.0.1:8819` · **11 líneas**, cada una con su función y su campo. Cálculo de
+cuáles quedaban sin rotular con el cupo anterior:
+
+```
+SIN ETIQUETA:
+  533.70  T1            type=target  (order 7)
+  533.20  T2            type=target  (order 7)
+  535.62  Invalidación  type=risk    (order 7)
+```
+
+### Verificación en la terminal real
+
+`127.0.0.1:8823`, **0 errores de consola**. Tabla del Auditor con 11 filas, y el
+TRACE rotulando las once líneas: `INVAL 535.62`, `Zero Gamma 535.16`,
+`CALL WALL 534.70`, `ZONA 534.29`, `Delta Center 534.28`, `Gamma Center 534.23`,
+`Zona Low 534.11`, `PUT WALL 533.70`, `OBJ 533.70`, `OBJ 533.20`,
+`▼ VT 530.20 −4.02`.
+
+### Límites de esta verificación
+
+- Los precios de la sesión del usuario —roja ~517.2, verde ~515.0— son de su
+  activo en vivo. Aquí el mismo `type` sale en otros precios porque el demo
+  cotiza en otro nivel. **La identidad es la misma y es la que se comprobó.**
+- Empaquetado certificado imposible aquí: 3.11.15 / 22.22.2 frente a
+  3.12.14 / 22.16.0 fail-closed.
 
 ---
 

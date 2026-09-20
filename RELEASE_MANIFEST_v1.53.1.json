@@ -1,35 +1,29 @@
 {
- "version": "1.53.0",
- "release": "ITM_QUANT_v1.53.0_PRE_VPS",
+ "version": "1.53.1",
+ "release": "ITM_QUANT_v1.53.1_PRE_VPS",
  "scope": "MULTI_ASSET",
- "base_version": "1.52.0",
+ "base_version": "1.53.0",
  "focus": [
-  "AGRESOR EN PRODUCCION: todas las marcas salian en rombo neutro porque el proveedor no siempre publica campo de lado. Se anade la via NBBO —precio contra bid/ask del instante—, que es la definicion operativa del agresor, no una heuristica.",
-  "AGRESOR: el corte de dominancia baja de 2:1 a 60/40. Una concentracion con el 65% de la prima agredida del lado comprador ES compradora; llamarla repartida escondia informacion real.",
-  "AGRESOR: la cinta publica su COBERTURA (cuantos prints con lado y de que campo), para que «todas neutras» se pueda diagnosticar.",
-  "MAPA DE CALOR: se recorta al rango de precio VISIBLE antes de normalizar. El Interval Map cubre todo el libro y la ventana son unos dolares: el percentil se calculaba contra strikes que ni se ven, y por eso salia masa maciza en QQQ, SPY y todos los ETF.",
-  "NIVELES: un muro fuera de ventana se ancla al borde con su distancia en vez de desaparecer. QQQ en 722 publicaba PUT WALL 700 en el KPI y no lo dibujaba.",
-  "DARK POOL: el diagnostico de paneles pasa a mirar los carriles del PROVEEDOR. Declaraba como origen las capas derivadas con cientos de filas ya descargadas.",
-  "DARK POOL: el ViewModel publica el CONTEO POR ETAPA (proveedor -> modelo) para poder exigir que ninguna fila se pierda.",
-  "INTERVAL MAP: el panel crece con los strikes y el punto tiene rango de diametro; con 90 filas en panel fijo la celda medía 4.6 px."
+  "IDENTIDAD DE CADA LINEA DE TRACE: habia lineas dibujadas SIN ETIQUETA. Se identifican desde el MOTOR, no por el color: rojo es put_wall Y risk, verde es call_wall Y target.",
+  "Las dos lineas anonimas resultaron ser `risk` (Invalidacion) y `target` (T1/T2), los ultimos por prioridad y por eso fuera del cupo de etiquetas.",
+  "AUDITOR: tabla nueva con precio, type, nombre del motor, source, campo, method, magnitud, persistencia y timestamp de cada linea visible.",
+  "TRACE: toda linea visible lleva etiqueta. El sitio sale del alto del panel; si no caben con nombre largo, se abrevia antes que quedarse muda."
  ],
  "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
  "quant_logic_changes": [
-  "SIN CAMBIOS de formula.",
-  "CAMBIA EL UMBRAL DE DOMINANCIA del agresor de 66.7% a 60%: mas concentraciones reciben lado, y la confianza exacta viaja en el evento.",
-  "SE ANADE UNA VIA DE MEDICION del agresor (NBBO). No sustituye al campo declarado: solo actua cuando no hay ninguno, y va etiquetada.",
-  "El recorte del campo de calor es de PRESENTACION: cambia contra que se normaliza, no el dato."
+  "NINGUN cambio de calculo. `level_identity` describe lo que el motor ya publico; no calcula ni renombra ningun nivel.",
+  "`short` es abreviatura de PANTALLA: el nombre que manda sigue siendo el que publica el motor."
  ],
  "tests": {
-  "collected": 2122,
-  "passed": 2122,
+  "collected": 2133,
+  "passed": 2133,
   "failed": 0,
   "skipped": 0,
   "errors": 0,
-  "files": 148,
+  "files": 149,
   "status": "PASS",
   "partitions": 21,
-  "plan_sha256": "1898c1b10a0bb1c97d606c4e982c54a9c32cfe909e2f2a5546a282276da8af20"
+  "plan_sha256": "c5b631232177bd39b731493261f3768059b34bb1fd4edbf737910614dc0d0aec"
  },
  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
  "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -147,12 +141,17 @@
   "offscreen_levels": "ANCHORED_TO_THE_EDGE_WITH_THEIR_DISTANCE",
   "dark_pool_diagnosis": "READS_THE_PROVIDER_LANES_NOT_THE_DERIVED_ONES",
   "dark_pool_lineage": "ROW_COUNT_PUBLISHED_PER_STAGE",
-  "interval_map_density": "PANEL_GROWS_AND_THE_DOT_KEEPS_ITS_RANGE"
+  "interval_map_density": "PANEL_GROWS_AND_THE_DOT_KEEPS_ITS_RANGE",
+  "level_identity": "PROVENANCE_ATTACHED_NEVER_INFERRED_FROM_COLOUR",
+  "level_persistence": "CONSECUTIVE_CYCLES_WITH_A_RELATIVE_TOLERANCE",
+  "level_labels": "EVERY_VISIBLE_LINE_IS_NAMED_SHORT_BEFORE_SILENT",
+  "unregistered_kind": "SAYS_SO_INSTEAD_OF_INVENTING_AN_ORIGIN"
  },
  "verification_limits": [
   "El recorte del campo se verifico INYECTANDO una matriz de 90 strikes en el navegador real, porque en demo el respaldo del motor ya cabe en la ventana: 90 -> 13 filas, 77 recortadas, 210 segmentos de isolinea frente a 94. Con el proveedor LIVE es donde importa.",
   "La via NBBO se verifica valor a valor sobre el clasificador. NO se ha contrastado contra una cinta real: sin credenciales ni salida al proveedor.",
   "La cobertura del agresor es la herramienta para comprobarlo en LIVE: si sigue saliendo neutra, `aggressor_coverage.by_field` dira si el proveedor no manda campo ni NBBO.",
-  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2."
+  "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2.",
+  "La identidad se volco contra el MOTOR REAL en ejecucion (11 lineas, con su funcion y campo). Los precios concretos de la sesion del usuario —roja ~517.2, verde ~515.0— corresponden a su activo en vivo; aqui el mismo `type` sale en otros precios porque el demo cotiza en otro nivel. La IDENTIDAD es la misma y es la que se comprobo."
  ]
 }

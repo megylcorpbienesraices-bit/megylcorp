@@ -1651,6 +1651,15 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
                      "fallback_used": lv.get("fallback_used", False),
                      "authority": "ITMQ_WALL_ENGINE"})
     payload["levels"] = kept
+    # IDENTIDAD de cada línea que TRACE va a dibujar. No calcula ni renombra
+    # nada: adjunta la procedencia que el nivel ya tiene, para que una línea sin
+    # etiqueta se pueda identificar sin deducirla por el color.
+    try:
+        from .core import level_identity as _LI
+        payload["level_identity"] = _LI.describe(kept, symbol=symbol)
+    except Exception as exc:
+        _obs_note("main:level_identity", exc, severity="DEGRADED")
+        payload["level_identity"] = []
     return walls
 
 

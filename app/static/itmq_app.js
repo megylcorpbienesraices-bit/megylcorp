@@ -1508,7 +1508,47 @@
     el('sophiaMic')?.addEventListener('click', sophiaToggleMic);
   }
 
+  /* Identidad REAL de cada línea de TRACE, tal y como sale del motor.
+   *
+   * No deduce el nombre por el color ni renombra nada: pinta la procedencia que
+   * el nivel ya trae. Si un `kind` no está en el registro, se dice con esas
+   * palabras en vez de inventarle un origen.
+   */
+  function renderLevelIdentity(d) {
+    const rows = ((state.trace || {}).level_identity) || [];
+    const unknown = rows.filter(r => r.known_to_registry === false).length;
+    pill('liPill', rows.length ? (unknown ? 'warn' : 'live') : 'off',
+      rows.length ? `${rows.length} líneas${unknown ? ` · ${unknown} sin origen declarado` : ''}`
+                  : 'sin niveles en este ciclo');
+    fillTable('tblLevelIdentity',
+      rows.slice().sort((a, b) => Q.num(b.price, 0) - Q.num(a.price, 0)), r => {
+        const p = Q.num(r.price, NaN);
+        const pers = r.persistence || {};
+        const mag = Q.num(r.magnitude, NaN);
+        return [
+          Q.isNum(p) ? p.toFixed(p >= 1000 ? 2 : 2) : '—',
+          esc(String(r.type || '—')),
+          esc(String(r.engine_name || '— (el motor no le puso nombre)')),
+          esc(String(r.source || '—')),
+          esc(String(r.source_field || '—')),
+          esc(String(r.method || '—')),
+          // Sin magnitud NO se escribe un cero: el cálculo no publica ninguna.
+          Q.isNum(mag) ? `${Q.compact(mag, 2)} · ${esc(String(r.magnitude_field || ''))}`
+                       : 'el cálculo no publica magnitud',
+          `${Q.num(pers.cycles, 0).toFixed(0)} ciclos`
+            + (Q.isNum(Q.num(pers.held_minutes, NaN)) ? ` · ${Q.fmtMinutes(pers.held_minutes)}` : '')
+            + (pers.moved_this_cycle ? ' · se movió' : ''),
+          esc(String(r.timestamp || '—')).replace('T', ' ').slice(0, 19),
+        ];
+      }, 'Sin niveles publicados por el motor en este ciclo');
+    set('liNote', rows.length
+      ? 'La identidad sale del motor, no del color: rojo es `put_wall` Y `risk`, verde es '
+        + '`call_wall` Y `target`. Cada fila dice qué función y qué campo produjeron el número.'
+      : 'Cuando el motor publique niveles, aquí aparece la procedencia de cada línea.');
+  }
+
   function renderFuentes(d) {
+    renderLevelIdentity(d);
     const f = d.fuentes || {};
     const parity = f.parity || {};
     const host = el('providerList');

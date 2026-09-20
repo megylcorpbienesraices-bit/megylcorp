@@ -1194,7 +1194,10 @@
       items.push({
         y: off ? (above ? box.y + 1 : box.y + box.h - 1) : y,
         price: p, off,
+        // El nombre que manda es el que publica el MOTOR. `short` sólo entra
+        // cuando el largo no cabe, y nunca sustituye a la identidad.
         name: lv.name || st.label || lv.kind,
+        short: st.short || lv.name || lv.kind,
         color: Q.token(st.color, '#8494ad'),
         order: st.order || 9,
         away: Q.isNum(spotNow) ? p - spotNow : NaN,
@@ -1215,17 +1218,36 @@
     }
     // Los de dentro primero; un muro fuera de ventana no puede quitarle el sitio
     // a uno que el precio está tocando.
+    /* v1.53.1 · TODA línea visible lleva etiqueta.
+     *
+     * El cupo dejaba sin nombre a `target` y `risk` —los últimos por prioridad—
+     * y ésas son justo las dos líneas sin identificar del gráfico: la roja es
+     * `Invalidación` y la verde es un objetivo `T1`/`T2`. Se dibujaban, se
+     * veían, y no había forma de saber qué eran.
+     *
+     * No se puede deducir por color: rojo es `put_wall` Y `risk`, verde es
+     * `call_wall` Y `target`. El color agrupa `kind` distintos.
+     *
+     * Si no caben todas con su nombre largo, las de menor prioridad pasan al
+     * nombre CORTO antes que quedarse mudas: una abreviatura identifica; una
+     * línea anónima no.
+     */
     const ordered = items.slice().sort((a, b) => (a.off ? 1 : 0) - (b.off ? 1 : 0) || a.order - b.order);
-    const shown = ordered.slice(0, 8);
-    const placed = Q.stackLabels(shown.map(it => ({ ...it })), Q.LEVEL_LABEL_GAP);
+    const room = Math.max(1, Math.floor(box.h / Q.LEVEL_LABEL_GAP));
+    const LONG = 6;
+    const placed = Q.stackLabels(ordered.slice(0, room).map((it, i) => ({ ...it, rank: i })),
+                                 Q.LEVEL_LABEL_GAP);
     for (const it of placed) {
       const digits = it.price >= 1000 ? 0 : 2;
       const arrow = it.off < 0 ? '▲ ' : it.off > 0 ? '▼ ' : '';
       const dist = (it.off && Q.isNum(it.away))
         ? `  ${it.away >= 0 ? '+' : ''}${it.away.toFixed(digits)}` : '';
+      // Las primeras conservan el nombre que publica el MOTOR; el resto pasan
+      // al corto. `short` no renombra: sólo abrevia en pantalla.
+      const label = it.rank < LONG ? it.name : it.short;
       Q.chip(ctx, box.x + 8,
         Q.clamp(it.y, box.y + Q.LEVEL_LABEL_H / 2, box.y + box.h - Q.LEVEL_LABEL_H / 2),
-        `${arrow}${it.name} ${it.price.toFixed(digits)}${dist}`,
+        `${arrow}${label} ${it.price.toFixed(digits)}${dist}`,
         { bg: Q.alpha(it.color, it.off ? 0.62 : 0.92), color: '#06101c',
           font: Q.LEVEL_FONT, h: Q.LEVEL_LABEL_H, padX: 7 });
     }

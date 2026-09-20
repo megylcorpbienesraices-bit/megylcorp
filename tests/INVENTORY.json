@@ -2599,8 +2599,24 @@
     "test_the_unambiguous_field_wins_over_the_ambiguous_one",
     "test_trades_without_a_declared_side_are_not_counted_as_balanced"
    ]
+  },
+  "tests/test_v1531_level_identity.py": {
+   "casos": 11,
+   "tests": [
+    "test_an_unregistered_kind_says_so_instead_of_inventing_an_origin",
+    "test_describe_exposes_the_seven_fields",
+    "test_every_kind_the_engine_emits_has_a_declared_origin",
+    "test_every_visible_line_gets_a_label",
+    "test_persistence_counts_consecutive_cycles_and_resets_when_it_moves",
+    "test_the_auditor_shows_the_seven_columns",
+    "test_the_authority_of_the_level_wins_over_the_registry",
+    "test_the_colour_cannot_identify_a_line",
+    "test_the_identity_travels_in_the_trace_bundle",
+    "test_the_origin_names_the_real_function_and_field",
+    "test_the_same_level_tolerance_is_relative_not_in_dollars"
+   ]
   }
  },
- "total_minimo": 2122,
- "version": "1.53.0"
+ "total_minimo": 2133,
+ "version": "1.53.1"
 }
