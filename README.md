@@ -1,5 +1,27 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.53.0 · El agresor en producción y el campo visible
+
+- **Todas las marcas salían en rombo neutro.** v1.52.0 hizo bien en no inventar
+  un lado, pero el resultado en producción fue que **ninguna** lo tenía. El
+  proveedor no siempre publica campo de lado; sí publica precio y NBBO del
+  instante, y compararlos **no es adivinar: es la definición operativa del
+  agresor**. El campo declarado siempre gana; el NBBO sólo actúa cuando no hay
+  ninguno, y va etiquetado.
+- **El umbral bajó de 2:1 a 60/40.** Una concentración con el 65 % de la prima
+  agredida del lado comprador **es** compradora. La confianza viaja en el evento.
+- **La cinta publica su cobertura**: cuántos prints con lado y de qué campo. Si
+  vuelve a salir neutro, ahí está la causa.
+- **El mapa de calor salía macizo en QQQ, SPY y todos los ETF**, y la causa era
+  contra qué se normalizaba: el Interval Map cubre todo el libro y la ventana son
+  unos dólares, así que el percentil se calculaba contra strikes que ni se ven.
+  Cuantos más datos, menos contraste. Ahora se recorta al rango visible antes de
+  normalizar: 90 strikes → 13 filas, 94 → 210 segmentos de isolínea.
+- **Un muro fuera de ventana ya no desaparece**: se ancla al borde con su
+  distancia, en vez de estirar la ventana y aplastar las velas.
+- **El diagnóstico de Dark Pool mira los carriles del proveedor**, no las capas
+  derivadas, y el modelo publica el conteo por etapa.
+
 ## v1.52.0 · El lado agresor, y el dato que ya estaba
 
 Ninguna fórmula cambia. **Sí cambia la clasificación del lado agresor**, que

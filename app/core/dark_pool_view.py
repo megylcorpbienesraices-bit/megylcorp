@@ -229,11 +229,34 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
             dark_share_basis = "EQUITY_PRINTS_DARK_PLUS_LIT"
 
     covered = sum(1 for s in status.values() if s["state"] == DATA_OK)
+    # CONTEO POR ETAPA. El criterio de cierre exige que el numero de filas no se
+    # pierda por el camino: 608 en el proveedor tienen que seguir siendo 608 en
+    # el modelo. Publicarlo aqui es lo que permite comprobarlo sin instrumentar
+    # nada: si una etapa recorta, se ve donde y se puede exigir el filtro
+    # explicito que lo justifique.
+    lineage = {
+        "dark_flow": {"provider": len(flow_rows), "view_model": len(buckets),
+                      "dropped": len(flow_rows) - len(buckets)},
+        "dark_pool_levels": {"provider": len(level_rows), "view_model": len(levels),
+                             "dropped": len(level_rows) - len(levels),
+                             "drop_reason": ("niveles sin precio utilizable"
+                                             if len(level_rows) != len(levels) else None)},
+        "equity_prints": {"provider": len(print_rows), "view_model": len(prints),
+                          "dropped": len(print_rows) - len(prints),
+                          "drop_reason": ("prints no clasificados DARK_POOL por el proveedor"
+                                          if len(print_rows) != len(prints) else None)},
+    }
     return {
         "ready": covered > 0,
-        "flow": {"buckets": buckets, "count": len(buckets)},
+        "flow": {"rows": buckets, "buckets": buckets, "count": len(buckets),
+                 "row_count": len(buckets), "status": status["dark_flow"]},
         "levels": levels,
+        "levels_block": {"rows": levels, "row_count": len(levels),
+                         "status": status["dark_pool_levels"]},
         "prints": prints,
+        "prints_block": {"rows": prints, "row_count": len(prints),
+                         "status": status["equity_prints"]},
+        "lineage": lineage,
         "kpis": {
             "dark_notional": dark_notional,
             "dark_volume": dark_volume,

@@ -1,4 +1,4 @@
-# AUDITORÍA DEL MOTOR · ITM QUANT v1.52.0
+# AUDITORÍA DEL MOTOR · ITM QUANT v1.53.0
 
 ## Veredicto
 
@@ -114,3 +114,53 @@ pantalla— y por una salida anticipada, y nunca toca la reserva del motor.
 - **Que las cuatro griegas vengan del Interval Map.** Aquí salen del respaldo
   del motor declarado, porque no hay proveedor.
 - **Que el artefacto esté certificado.** Toolchain fail-closed no disponible.
+
+---
+
+## 7 · v1.53.0 · Cuando «no inventar» tampoco basta
+
+v1.52.0 quitó el lado inventado y dejó rombos neutros. Era correcto y en
+producción resultó **inútil**: ninguna marca tenía lado, así que la pantalla
+pasó de mentir a no decir nada. Las dos cosas fallan, sólo que de forma distinta.
+
+Lo que faltaba era ver que **había otra medición disponible**. El proveedor no
+siempre manda un campo de lado, pero sí manda el precio y el NBBO del instante, y
+comparar los dos no es una heurística: es la definición operativa del agresor.
+
+La lección: cuando un dato no viene declarado, antes de publicar «desconocido»
+hay que preguntarse si se puede **medir** desde lo que sí viene. «No inventar» y
+«no medir» no son lo mismo, y confundirlos deja la pantalla vacía con la
+información delante.
+
+## 8 · Un umbral defendible no es necesariamente el correcto
+
+2:1 se justificó como «no etiquetar ruido». Es defendible y estaba mal calibrado:
+descartaba como «repartido» el 65/35, que es un sesgo direccional claro. Un
+umbral conservador no es neutral — desplaza el error hacia el otro lado y pierde
+señal real.
+
+Publicar la **confianza** junto al veredicto es lo que hace que el umbral importe
+menos: quien mira puede distinguir un 61 % de un 95 % sin que el corte decida por
+él.
+
+## 9 · Normalizar contra lo que no se ve
+
+El campo de calor se normalizaba por rango-percentil sobre toda la matriz del
+proveedor, y la ventana visible es una franja estrecha de ella. El efecto es
+contraintuitivo y por eso costó verlo: **cuantos más strikes trae el proveedor,
+menos contraste tiene lo que se está mirando**, porque el percentil se calcula
+contra celdas fuera de pantalla.
+
+La regla que queda: **una normalización relativa tiene que calcularse sobre el
+mismo conjunto contra el que el ojo compara.** Si la vista recorta, la
+normalización recorta antes.
+
+## 10 · Un diagnóstico que mira otra fuente no diagnostica
+
+El ViewModel ya leía al proveedor y el Diagnóstico de Paneles seguía declarando
+las capas derivadas. Es el peor estado posible: la herramienta que existe para
+localizar el fallo estaba señalando al sitio equivocado, y eso cuesta más tiempo
+que no tener diagnóstico.
+
+La regla: **el diagnóstico y la vista leen la misma fuente, siempre.** Si divergen,
+el diagnóstico deja de ser un instrumento y pasa a ser otra cosa que auditar.

@@ -1357,9 +1357,32 @@ def _order_flow_block(intel: Dict[str, Any], key: str) -> Dict[str, Any]:
     }
 
 
+def _dark_pool_rows(row, intel: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+    """Las tres filas de Dark Pool, desde los carriles del PROVEEDOR.
+
+    Cada carril es independiente y lleva su propio estado: que Equity Prints
+    esté en MARKET_CLOSED no puede hacer que Dark Flow parezca vacío.
+    """
+    intel = intel if isinstance(intel, dict) else {}
+    out: List[Dict[str, Any]] = []
+    for label, key, tool in (
+        ("DARK POOL · dark flow", "dark_flow", "QUANTDATA_DARK_FLOW"),
+        ("DARK POOL · niveles", "dark_pool_levels", "QUANTDATA_DARK_POOL_LEVELS"),
+        ("DARK POOL · prints de equity", "equity_prints", "QUANTDATA_EQUITY_PRINTS"),
+    ):
+        block = _qd_block(intel, key)
+        rows_ = _qd_rows(intel, key)
+        reason = (block.get("schema_detail") or block.get("error")
+                  or block.get("reason") or block.get("detail")
+                  or "EL_PROVEEDOR_NO_DEVOLVIO_FILAS")
+        out.append(row(label, bool(rows_), len(rows_), tool, reason))
+    return out
+
+
 def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
                       coverage: Dict[str, Any] | None = None,
-                      parity: Dict[str, Any] | None = None) -> Dict[str, Any]:
+                      parity: Dict[str, Any] | None = None,
+                      intel: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Por qué cada panel tiene o no tiene datos, sin tener que adivinarlo.
 
     Cada fila responde una sola pregunta: ¿hay dato?, ¿de dónde viene?, y si no
@@ -1405,6 +1428,13 @@ def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
         return {"panel": panel, "ok": bool(ok), "count": count, "state": state_flag,
                 "source": source, "reason": None if ok else why}
 
+    # v1.52.1 · El diagnóstico de Dark Pool mira los carriles del PROVEEDOR.
+    #
+    # Declaraba como origen las capas DERIVADAS —la clasificación por venue de la
+    # cinta propia y las zonas de liquidez—, así que con cientos de filas del
+    # proveedor ya descargadas el Auditor seguía señalando a la cinta propia como
+    # autoridad. Un diagnóstico que no mira la misma fuente que la vista no sirve
+    # para diagnosticar nada.
     checks = [
         row("TRACE · velas", bool(candles), len(candles),
             trace.get("candle_source") or "PRICE_TICK_FABRIC",
@@ -1416,10 +1446,7 @@ def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
         row("TRACE · niveles", bool(levels), len(levels), "ITM_QUANT_STRUCTURE", "SCANNER_NO_PUBLICO_NIVELES"),
         row("FLUJO · prints de opciones", bool(prints), len(prints), "OPRA_OBSERVED",
             _d(state, "opra_diagnostics", "status") or "SIN_PRINTS_OBSERVADOS"),
-        row("DARK POOL · off-exchange", bool(lp.get("off_exchange_count")), int(_f(lp.get("off_exchange_count"), 0) or 0),
-            "EQUITY_TAPE · VENUE_CONFIRMADO", "SIN_OFF_EXCHANGE_CONFIRMADO"),
-        row("DARK POOL · niveles", bool(zones), len(zones), "ITM_QUANT_LIQUIDITY_ZONES",
-            _d(lp, "off_exchange_liquidity_zones", "reason") or "SIN_ZONAS_OFF_EXCHANGE"),
+        *_dark_pool_rows(row, intel),
         row("VOLATILIDAD · skew", bool(_d(state, "volatility", "skew_by_expiry", default=[])),
             len(_d(state, "volatility", "skew_by_expiry", default=[]) or []), "ITM_QUANT_CHAIN", "SIN_CADENA"),
         row("EXPOSICIÓN · por vencimiento",

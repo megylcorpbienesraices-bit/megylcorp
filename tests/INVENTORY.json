@@ -2560,10 +2560,13 @@
    ]
   },
   "tests/test_v1520_aggressor_and_dark_pool.py": {
-   "casos": 57,
+   "casos": 66,
    "tests": [
     "test_a_balanced_bucket_is_mixed_not_a_side",
+    "test_a_crossed_or_locked_market_gives_no_side",
     "test_a_derived_layer_can_no_longer_block_the_direct_source",
+    "test_a_dominant_side_is_no_longer_called_mixed",
+    "test_a_level_outside_the_window_is_anchored_not_dropped",
     "test_a_missing_map_declares_its_cause_instead_of_going_blank",
     "test_a_response_without_size_is_a_schema_mismatch_not_a_zero",
     "test_a_symbol_change_opens_a_bounded_burst",
@@ -2575,23 +2578,29 @@
     "test_every_dynamic_map_option_has_a_destination",
     "test_every_lane_declares_its_state_with_a_cause",
     "test_no_module_classifies_the_side_on_its_own",
+    "test_no_row_is_lost_between_the_provider_and_the_view_model",
+    "test_the_aggressor_falls_back_to_the_nbbo_when_no_field_declares_it",
     "test_the_aggressor_is_classified_exactly",
     "test_the_burst_is_bounded_on_all_three_sides",
     "test_the_burst_only_covers_what_draws_the_screen",
     "test_the_chain_carries_every_value_unchanged_to_the_view_model",
     "test_the_contract_type_never_becomes_a_direction",
     "test_the_dark_vwap_weights_by_shares",
+    "test_the_diagnosis_names_the_provider_lane_not_the_derived_one",
     "test_the_frontend_draws_no_arrow_without_a_known_side",
+    "test_the_heat_field_is_normalised_over_what_is_on_screen",
     "test_the_marker_arrow_follows_the_aggressor_not_the_contract",
+    "test_the_nbbo_tolerance_is_relative_to_the_spread",
     "test_the_off_exchange_share_is_never_estimated",
     "test_the_provider_row_carries_the_verdict_and_the_field_it_came_from",
     "test_the_section_reads_the_view_model_and_not_the_derived_layers",
     "test_the_symbol_change_is_still_transactional",
+    "test_the_tape_publishes_its_aggressor_coverage",
     "test_the_unambiguous_field_wins_over_the_ambiguous_one",
     "test_trades_without_a_declared_side_are_not_counted_as_balanced"
    ]
   }
  },
- "total_minimo": 2113,
- "version": "1.52.0"
+ "total_minimo": 2122,
+ "version": "1.53.0"
 }

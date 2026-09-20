@@ -1034,6 +1034,9 @@
       im.ready
         ? `${im.source === 'ITM_QUANT' ? 'motor' : 'proveedor'} · ${(im.strikes || []).length} strikes × ${(im.times || []).length} intervalos`
         : (im.reason || 'no disponible'));
+    // El mapa crece con los strikes, igual que el perfil: con noventa filas en
+    // un panel fijo la celda mide cuatro píxeles y el diámetro deja de informar.
+    growForRows('chartIntervalMap', (im.strikes || []).length, 9, 46);
     chart('chartIntervalMap', () => P.dotmap(el('chartIntervalMap'), {
       fmtY: v => v.toFixed(2),
       fmtX: v => {

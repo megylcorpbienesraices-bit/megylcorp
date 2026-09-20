@@ -1,36 +1,35 @@
 {
- "version": "1.52.0",
- "release": "ITM_QUANT_v1.52.0_PRE_VPS",
+ "version": "1.53.0",
+ "release": "ITM_QUANT_v1.53.0_PRE_VPS",
  "scope": "MULTI_ASSET",
- "base_version": "1.51.0",
+ "base_version": "1.52.0",
  "focus": [
-  "LADO AGRESOR · autoridad unica en app/core/aggressor.py. Se comparaba el PREFIJO del valor contra una letra suelta, asi que `AT_BID` —el vendedor cruzando el spread— se clasificaba como COMPRA por empezar por «A».",
-  "LADO AGRESOR · la marca de flujo dibujaba flecha VERDE de compra cuando la concentracion venia con `side: CALL`, y ese campo es DOMINANCIA DE PRIMA por tipo de contrato, no direccion. Una put comprada es una COMPRA y salia marcada como venta.",
-  "LADO AGRESOR · sin agresor conocido NO se elige lado: rombo neutro. Una flecha inventada sobre un grafico de operativa puede costar dinero.",
-  "DARK POOL · `dark-flow` publica las acciones en `size` y el normalizador las buscaba por heuristica («dark», «offExchange»). Con 608 filas reales, las 608 salian con volumen None. Mapeo determinista del contrato.",
-  "DARK POOL · DarkPoolViewModel unico. Los paneles colgaban de EQUITY_TAPE + VENUE_CONFIRMED y de las zonas de liquidez propias: capas DERIVADAS bloqueando a la fuente DIRECTA.",
-  "DARK POOL · equity-prints pide `sessionDate` resuelto a la ultima sesion valida; fuera de horario devolvia vacio y se publicaba como MARKET_CLOSED con cero prints.",
-  "RELIEVE 3D · una fila por strike, con el panel creciendo. Con 62 strikes agrupaba y el eje numeraba de 2.5 en 2.5.",
-  "MAPA DINAMICO · las 8 opciones verificadas en la terminal real. Un mapa sin dato declara su causa en vez de quedarse en blanco.",
-  "CAMBIO DE ACTIVO · rafaga de arranque acotada: con presupuesto de regimen permanente la pantalla tardaba minutos en llenarse."
+  "AGRESOR EN PRODUCCION: todas las marcas salian en rombo neutro porque el proveedor no siempre publica campo de lado. Se anade la via NBBO —precio contra bid/ask del instante—, que es la definicion operativa del agresor, no una heuristica.",
+  "AGRESOR: el corte de dominancia baja de 2:1 a 60/40. Una concentracion con el 65% de la prima agredida del lado comprador ES compradora; llamarla repartida escondia informacion real.",
+  "AGRESOR: la cinta publica su COBERTURA (cuantos prints con lado y de que campo), para que «todas neutras» se pueda diagnosticar.",
+  "MAPA DE CALOR: se recorta al rango de precio VISIBLE antes de normalizar. El Interval Map cubre todo el libro y la ventana son unos dolares: el percentil se calculaba contra strikes que ni se ven, y por eso salia masa maciza en QQQ, SPY y todos los ETF.",
+  "NIVELES: un muro fuera de ventana se ancla al borde con su distancia en vez de desaparecer. QQQ en 722 publicaba PUT WALL 700 en el KPI y no lo dibujaba.",
+  "DARK POOL: el diagnostico de paneles pasa a mirar los carriles del PROVEEDOR. Declaraba como origen las capas derivadas con cientos de filas ya descargadas.",
+  "DARK POOL: el ViewModel publica el CONTEO POR ETAPA (proveedor -> modelo) para poder exigir que ninguna fila se pierda.",
+  "INTERVAL MAP: el panel crece con los strikes y el punto tiene rango de diametro; con 90 filas en panel fijo la celda medía 4.6 px."
  ],
  "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
  "quant_logic_changes": [
-  "SIN CAMBIOS de formula. Ninguna metrica cambia de valor.",
-  "CAMBIA LA CLASIFICACION DEL LADO AGRESOR, y eso corrige lecturas que estaban INVERTIDAS: `AT_BID` pasa de COMPRA a VENTA, y una concentracion dominada por calls deja de marcarse como compra cuando la cinta dice que fueron calls vendidas.",
-  "`premium_side` (CALL_DOMINANT / PUT_DOMINANT) y `aggressor` (BUY / SELL / MIXED / UNKNOWN) son campos DISTINTOS. Confundirlos era el error.",
-  "El % fuera de bolsa deja de estimarse: sin universo completo dark + lit va en None con su causa."
+  "SIN CAMBIOS de formula.",
+  "CAMBIA EL UMBRAL DE DOMINANCIA del agresor de 66.7% a 60%: mas concentraciones reciben lado, y la confianza exacta viaja en el evento.",
+  "SE ANADE UNA VIA DE MEDICION del agresor (NBBO). No sustituye al campo declarado: solo actua cuando no hay ninguno, y va etiquetada.",
+  "El recorte del campo de calor es de PRESENTACION: cambia contra que se normaliza, no el dato."
  ],
  "tests": {
-  "collected": 2113,
-  "passed": 2113,
+  "collected": 2122,
+  "passed": 2122,
   "failed": 0,
   "skipped": 0,
   "errors": 0,
   "files": 148,
   "status": "PASS",
   "partitions": 21,
-  "plan_sha256": "3a0d6cd29768502d17b988996ee8c68b8985ef172672bb0fa8af1d684e718e8a"
+  "plan_sha256": "1898c1b10a0bb1c97d606c4e982c54a9c32cfe909e2f2a5546a282276da8af20"
  },
  "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
  "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",
@@ -139,12 +138,21 @@
   "off_exchange_share": "ONLY_WITH_A_COMPLETE_DARK_PLUS_LIT_UNIVERSE",
   "relief_resolution": "ONE_ROW_PER_STRIKE_PANEL_GROWS",
   "dynamic_map_fallback": "DECLARED_ENGINE_FALLBACK_AND_A_STATED_CAUSE",
-  "symbol_switch_burst": "BOUNDED_BY_TIME_SCOPE_AND_EARLY_EXIT"
+  "symbol_switch_burst": "BOUNDED_BY_TIME_SCOPE_AND_EARLY_EXIT",
+  "aggressor_nbbo": "PRICE_VS_BID_ASK_WHEN_NO_FIELD_DECLARES_THE_SIDE",
+  "aggressor_tolerance": "A_FRACTION_OF_THE_SPREAD_NEVER_A_DOLLAR_AMOUNT",
+  "aggressor_dominance": "SIXTY_FORTY_WITH_THE_CONFIDENCE_PUBLISHED",
+  "aggressor_coverage": "PUBLISHED_PER_CYCLE_WITH_THE_FIELD_THAT_SERVED",
+  "heat_field_window": "CLIPPED_TO_THE_VISIBLE_RANGE_BEFORE_NORMALISING",
+  "offscreen_levels": "ANCHORED_TO_THE_EDGE_WITH_THEIR_DISTANCE",
+  "dark_pool_diagnosis": "READS_THE_PROVIDER_LANES_NOT_THE_DERIVED_ONES",
+  "dark_pool_lineage": "ROW_COUNT_PUBLISHED_PER_STAGE",
+  "interval_map_density": "PANEL_GROWS_AND_THE_DOT_KEEPS_ITS_RANGE"
  },
  "verification_limits": [
-  "El lado agresor se verifica valor a valor sobre el clasificador y sobre la cadena del normalizador, incluidos los casos que la version anterior invertia. NO se ha podido contrastar contra una cinta real en este entorno: no hay credenciales ni salida al proveedor.",
-  "DARK POOL: la cadena RAW -> NORMALIZED -> VIEWMODEL se comprueba valor a valor con la forma publicada del contrato. La ejecucion contra el proveedor real queda pendiente de la terminal del usuario, que ya la tiene LIVE.",
-  "Las 8 opciones del MAPA DINAMICO se han ejercitado en la terminal real: 7 pintan campo con isolineas y VANNA declara que no hay mapa. Con proveedor LIVE las cuatro griegas deberian venir del Interval Map en vez del respaldo del motor.",
+  "El recorte del campo se verifico INYECTANDO una matriz de 90 strikes en el navegador real, porque en demo el respaldo del motor ya cabe en la ventana: 90 -> 13 filas, 77 recortadas, 210 segmentos de isolinea frente a 94. Con el proveedor LIVE es donde importa.",
+  "La via NBBO se verifica valor a valor sobre el clasificador. NO se ha contrastado contra una cinta real: sin credenciales ni salida al proveedor.",
+  "La cobertura del agresor es la herramienta para comprobarlo en LIVE: si sigue saliendo neutra, `aggressor_coverage.by_field` dira si el proveedor no manda campo ni NBBO.",
   "El empaquetado certificado oficial es fail-closed sobre Python 3.12.14 / Node 22.16.0; este entorno corre 3.11.15 / 22.22.2."
  ]
 }

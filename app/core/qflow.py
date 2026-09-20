@@ -325,10 +325,16 @@ def _robust_z(value: float, scale: Dict[str, Any]) -> Optional[float]:
 
 # Cuánto tiene que pesar un lado sobre el otro para llamarlo COMPRA o VENTA.
 #
-# Con 55/45 la etiqueta sería ruido: casi todo bucket tiene un lado algo mayor.
-# A partir de 2:1 en prima agredida, decir «aquí mandó la compra» es una lectura
-# defendible; por debajo el bucket estaba repartido y se dice MIXED.
-AGGRESSOR_DOMINANCE = 2.0
+# v1.52.1 · Baja de 2:1 (66.7 %) a 60 %.
+#
+# El 2:1 se eligió para no etiquetar ruido, y se pasó de frenada: una
+# concentración con el 65 % de la prima agredida del lado comprador ES una
+# concentración compradora, y llamarla «repartida» esconde información real que
+# el operador necesita. El 60/40 es el corte habitual de sesgo direccional.
+#
+# Por debajo sigue siendo MIXED, y la confianza exacta viaja en el evento, así
+# que un 61 % y un 95 % no se leen igual aunque los dos digan COMPRA.
+AGGRESSOR_DOMINANCE_SHARE = 0.60
 
 
 def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -> None:
@@ -391,12 +397,10 @@ def apply_aggressor(events: List[Dict[str, Any]], attribution: Dict[str, Any]) -
                                      "declarado por el proveedor")
             continue
         share = max(buy, sell) / total
-        if buy >= sell * AGGRESSOR_DOMINANCE:
-            e["aggressor"] = "BUY"
-        elif sell >= buy * AGGRESSOR_DOMINANCE:
-            e["aggressor"] = "SELL"
-        else:
+        if share < AGGRESSOR_DOMINANCE_SHARE:
             e["aggressor"] = "MIXED"
+        else:
+            e["aggressor"] = "BUY" if buy >= sell else "SELL"
         e["aggressor_confidence"] = round(share, 4)
         e["aggressor_detail"] = (f"compra {buy:,.0f} vs venta {sell:,.0f} "
                                  f"en {d.get('trades', 0)} operaciones")

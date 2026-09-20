@@ -267,17 +267,66 @@
     };
   }
 
+  /* Margen alrededor de la ventana visible al recortar el campo, como fracción
+   * de esa ventana. Sin margen, la zona del borde se queda sin vecinas con las
+   * que suavizar y el campo se corta en seco justo donde se está mirando. */
+  const HEAT_MARGIN = 0.35;
+
   function buildHeatBitmap() {
     const src = heatSource();
     if (!src) { S.heat = null; S.heatKey = ''; return; }
-    const m = src.matrix;
-    const strikes = src.strikes;
+    let m = src.matrix;
+    let strikes = src.strikes;
     const times = src.times;
     if (!strikes.length || !times.length) { S.heat = null; return; }
 
-    const key = [S.heatField, src.origin, src.stamp, times.length, strikes.length].join('|');
+    /* v1.52.1 · RECORTE AL RANGO VISIBLE. Ésta es la causa de que el mapa
+     * saliera como una masa maciza en QQQ, SPY y el resto.
+     *
+     * El Interval Map del proveedor cubre TODO el libro: noventa strikes que en
+     * QQQ van de 454 a 547. La ventana de precio de TRACE son unos pocos
+     * dólares alrededor del spot: 708–736. Es decir, lo que se ve en pantalla es
+     * una franja estrecha de una matriz muchísimo más ancha.
+     *
+     * La normalización es por rango-percentil sobre TODA la matriz, así que el
+     * percentil de una celda se calcula contra strikes que ni siquiera están en
+     * pantalla. Los strikes muy lejanos concentran la exposición extrema, de
+     * modo que las celdas visibles caían todas en el mismo tramo del percentil:
+     * arriba nada, abajo todo saturado. Con más datos, MENOS contraste — que es
+     * lo contrario de lo que debería pasar.
+     *
+     * Recortar primero y normalizar después hace que el percentil se calcule
+     * entre lo que se está mirando, que es contra lo que el ojo compara.
+     */
+    const vLo = Q.num(S.priceLo.get(), NaN), vHi = Q.num(S.priceHi.get(), NaN);
+    let clipped = 0;
+    if (Q.isNum(vLo) && Q.isNum(vHi) && vHi > vLo) {
+      const pad = (vHi - vLo) * HEAT_MARGIN;
+      const lo = vLo - pad, hi = vHi + pad;
+      const keep = [];
+      for (let i = 0; i < strikes.length; i++) {
+        const k = Q.num(strikes[i], NaN);
+        if (Q.isNum(k) && k >= lo && k <= hi) keep.push(i);
+      }
+      // Con menos de cuatro filas dentro no hay campo que suavizar: se deja la
+      // matriz entera antes que dibujar tres franjas interpoladas.
+      if (keep.length >= 4 && keep.length < strikes.length) {
+        const rowsAre = m.length === strikes.length;
+        clipped = strikes.length - keep.length;
+        if (rowsAre) {
+          m = keep.map(i => m[i]);
+        } else {
+          m = m.map(col => keep.map(i => (col || [])[i]));
+        }
+        strikes = keep.map(i => strikes[i]);
+      }
+    }
+
+    const key = [S.heatField, src.origin, src.stamp, times.length, strikes.length,
+                 Q.isNum(vLo) ? vLo.toFixed(2) : '', Q.isNum(vHi) ? vHi.toFixed(2) : ''].join('|');
     if (key === S.heatKey && S.heat) return;
     S.heatKey = key;
+    S.heatClipped = clipped;
 
     // Matriz esperada: [strike][time] o [time][strike]. Se detecta por dimensiones.
     const rowsAreStrikes = m.length === strikes.length;
@@ -1122,14 +1171,34 @@
   }
 
   function drawLevels(ctx, box, sy, levels) {
+    /* v1.52.1 · Un nivel FUERA de la ventana ya no desaparece.
+     *
+     * Antes se descartaba, y con QQQ en 722 el PUT WALL de 700 no se dibujaba en
+     * ninguna parte: el KPI de abajo lo publicaba y el gráfico no lo enseñaba,
+     * así que parecía que no existía. Y no se puede resolver estirando la
+     * ventana: un muro a veinte dólares aplastaría las velas contra una línea.
+     *
+     * Se ancla al BORDE con una punta de flecha que dice hacia dónde queda, y la
+     * etiqueta lleva la distancia. Así el muro está siempre, sin deformar el
+     * gráfico, y se distingue de uno que sí cae dentro.
+     */
     const items = [];
+    const spotNow = Q.num((S.data.profiles || {}).spot, NaN);
     for (const lv of levels) {
       const p = Q.num(lv.price, NaN);
       if (!Q.isNum(p)) continue;
       const y = sy(p);
-      if (y < box.y - 2 || y > box.y + box.h + 2) continue;
       const st = LEVEL_STYLE[lv.kind] || { color: '--text-dim', order: 9 };
-      items.push({ y, price: p, name: lv.name || st.label || lv.kind, color: Q.token(st.color, '#8494ad'), order: st.order || 9 });
+      const above = y < box.y - 2, below = y > box.y + box.h + 2;
+      const off = above ? -1 : below ? 1 : 0;
+      items.push({
+        y: off ? (above ? box.y + 1 : box.y + box.h - 1) : y,
+        price: p, off,
+        name: lv.name || st.label || lv.kind,
+        color: Q.token(st.color, '#8494ad'),
+        order: st.order || 9,
+        away: Q.isNum(spotNow) ? p - spotNow : NaN,
+      });
     }
     if (!items.length) return;
     items.sort((a, b) => a.order - b.order);
@@ -1139,17 +1208,25 @@
     // campo de calor y las velas, una línea de 1 px al 45% se perdía justo en las
     // zonas densas, que son las que hay que leer.
     for (const it of items) {
-      Q.levelLine(ctx, box, it.y, Q.alpha(it.color, 0.72),
-                  { dash: [6, 5], width: Q.LEVEL_LINE_WIDTH });
+      // El nivel fuera de ventana lleva línea más tenue: está ahí, pero no es
+      // un precio que las velas estén tocando.
+      Q.levelLine(ctx, box, it.y, Q.alpha(it.color, it.off ? 0.42 : 0.72),
+                  { dash: it.off ? [3, 4] : [6, 5], width: Q.LEVEL_LINE_WIDTH });
     }
-    const shown = items.slice(0, 6);
+    // Los de dentro primero; un muro fuera de ventana no puede quitarle el sitio
+    // a uno que el precio está tocando.
+    const ordered = items.slice().sort((a, b) => (a.off ? 1 : 0) - (b.off ? 1 : 0) || a.order - b.order);
+    const shown = ordered.slice(0, 8);
     const placed = Q.stackLabels(shown.map(it => ({ ...it })), Q.LEVEL_LABEL_GAP);
     for (const it of placed) {
       const digits = it.price >= 1000 ? 0 : 2;
+      const arrow = it.off < 0 ? '▲ ' : it.off > 0 ? '▼ ' : '';
+      const dist = (it.off && Q.isNum(it.away))
+        ? `  ${it.away >= 0 ? '+' : ''}${it.away.toFixed(digits)}` : '';
       Q.chip(ctx, box.x + 8,
         Q.clamp(it.y, box.y + Q.LEVEL_LABEL_H / 2, box.y + box.h - Q.LEVEL_LABEL_H / 2),
-        `${it.name} ${it.price.toFixed(digits)}`,
-        { bg: Q.alpha(it.color, 0.92), color: '#06101c',
+        `${arrow}${it.name} ${it.price.toFixed(digits)}${dist}`,
+        { bg: Q.alpha(it.color, it.off ? 0.62 : 0.92), color: '#06101c',
           font: Q.LEVEL_FONT, h: Q.LEVEL_LABEL_H, padX: 7 });
     }
   }
@@ -1521,6 +1598,9 @@
 
   global.ITMQTrace = {
     mount, applyData, setMetric, setBreakdown, hasBreakdown, setHeatField, setHeatOpacity, setPriceMode, setFollow, toggle,
+    // Expuesto para poder VERIFICAR el recorte del campo contra una matriz
+    // ancha como la del proveedor, que en demo no existe.
+    buildHeatBitmapForTest: buildHeatBitmap,
     setIntervalGreek, intervalGreeks,
     strikeRow, onStrike(cb) { S.onStrike = cb; },
     clearStrike() { S.pinnedStrike = NaN; invalidateAll(); },

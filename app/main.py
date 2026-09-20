@@ -2460,6 +2460,9 @@ async def api_terminal_diagnostics(timeframe: str = "1m", tail_minutes: int = 39
         state=state, trace=trace,
         coverage=QUANTDATA_INTELLIGENCE.coverage(),
         parity=_parity_snapshot(),
+        # Los carriles del proveedor, para que el diagnóstico de Dark Pool mire
+        # la MISMA fuente que la pantalla y no la capa derivada.
+        intel=QUANTDATA_INTELLIGENCE.snapshot(),
     )))
 
 

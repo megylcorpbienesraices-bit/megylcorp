@@ -659,6 +659,10 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "side": side,
             "aggressor": verdict,
             "aggressor_field": agg_field,
+            # El NBBO del instante viaja para poder AUDITAR la clasificación:
+            # sin él, «esta marca dice compra» no se puede contrastar con nada.
+            "bid": _f(_pick(r, "bid", "bidPrice", "nbboBid", "bestBid")),
+            "ask": _f(_pick(r, "ask", "askPrice", "nbboAsk", "bestAsk")),
             # +1 comprador en ask, −1 vendedor en bid, 0 sin clasificar. Es el
             # mismo convenio en todo el programa, resuelto en un solo sitio.
             "direction": 1 if verdict == "BUY" else -1 if verdict == "SELL" else 0,
@@ -689,8 +693,22 @@ def norm_option_order_flow(payload: Dict[str, Any]) -> Dict[str, Any]:
             "trades": _f(_pick(r, "trades", "tradeCount", "count", "executions")),
         })
     out.sort(key=lambda x: x["t"])
+    # COBERTURA del lado agresor. Sin esto, «todas las marcas salen neutras» no
+    # se puede diagnosticar: no se sabe si el proveedor no manda el campo, si lo
+    # manda con otro nombre o si son operaciones ejecutadas en el medio.
+    sided = sum(1 for r in out if r["aggressor"] in ("BUY", "SELL"))
+    by_field: Dict[str, int] = {}
+    for r in out:
+        key = r.get("aggressor_field") or "NINGUNO"
+        by_field[key] = by_field.get(key, 0) + 1
     return {"ready": bool(out), "rows": out, "count": len(out),
-            "source": "QUANTDATA_OPTIONS_ORDER_FLOW"}
+            "source": "QUANTDATA_OPTIONS_ORDER_FLOW",
+            "aggressor_coverage": {
+                "with_side": sided,
+                "total": len(out),
+                "pct": round(100.0 * sided / len(out), 1) if out else None,
+                "by_field": by_field,
+            }}
 
 
 #: Sufijos que, en el nombre de un campo, identifican una MAGNITUD de volumen.

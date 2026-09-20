@@ -1,14 +1,75 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.52.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.53.0
 
-Release: `ITM_QUANT_v1.52.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.53.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A16** es la de esta release.
+> Documento acumulativo. La sección **A17** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **2113 casos / 148 ficheros**
-- Particiones: 21 · `plan_sha256`: `3a0d6cd29768502d17b988996ee8c68b8985ef172672bb0fa8af1d684e718e8a`
+- Inventario nominal: **2122 casos / 148 ficheros**
+- Particiones: 21 · `plan_sha256`: `1898c1b10a0bb1c97d606c4e982c54a9c32cfe909e2f2a5546a282276da8af20`
 - Resultado: **PASS**
+
+---
+
+## A17 · v1.53.0 · El agresor en producción y el campo visible
+
+### Qué se certifica
+
+Nueve casos nuevos en `tests/test_v1520_aggressor_and_dark_pool.py`.
+
+**1 · El agresor cae al NBBO cuando ningún campo lo declara.** Precio en el ask
+→ COMPRA; en el bid → VENTA; en medio → sin agresor. Y el campo declarado
+**siempre gana** al NBBO.
+
+**2 · La holgura es relativa al spread.** Un céntimo por debajo del ask sigue
+siendo compra con spread ancho, y ya no cruza con spread estrecho.
+
+**3 · Un mercado cruzado o bloqueado no da lado.**
+
+**4 · La cinta publica su cobertura**, con el campo que sirvió cada print, y el
+NBBO viaja en la fila para poder auditar la clasificación.
+
+**5 · Un lado dominante deja de llamarse repartido.** 65/35 y 61/39 son COMPRA;
+55/45 sigue siendo MIXED. La confianza viaja.
+
+**6 · Ninguna fila se pierde entre el proveedor y el modelo.** 608 y 349 llegan
+enteras, con el conteo por etapa publicado, y `equity_prints` en MARKET_CLOSED no
+vacía a los otros dos.
+
+**7 · El diagnóstico nombra el carril del proveedor**, no el derivado.
+
+**8 · Un nivel fuera de ventana se ancla, no se descarta**, y los de dentro
+conservan prioridad de etiqueta.
+
+**9 · El campo de calor se normaliza sobre lo que está en pantalla**, con margen,
+con suelo de filas y respetando las dos orientaciones de la matriz.
+
+### Verificación en la terminal real
+
+`127.0.0.1:8811` y `:8815`, **0 errores de consola**.
+
+Recorte del campo, con una matriz de 90 strikes inyectada —la forma que tiene el
+Interval Map real del proveedor y que en demo no existe:
+
+```
+enviados 90 strikes · ventana 530.68 – 538.24
+resultado: 13 filas · 77 recortadas · rango 528.46 – 540.46
+origen DIRECT_PROVIDER · 210 segmentos de isolínea (antes 94)
+```
+
+Niveles: el TRACE dibuja ahora ocho etiquetas —Zero Gamma, CALL WALL, Zona High,
+Delta Center, Gamma Center, Zona Low, PUT WALL, T1— donde antes cabían seis.
+
+### Límites de esta verificación
+
+- **La vía NBBO no se ha contrastado contra una cinta real.** Sin credenciales ni
+  salida al proveedor. La cobertura publicada es la herramienta para comprobarlo
+  en la terminal LIVE del usuario.
+- **El recorte se verificó por inyección**, porque en demo el respaldo del motor
+  ya cabe en la ventana y no hay nada que recortar.
+- **Empaquetado certificado imposible aquí**: 3.11.15 / 22.22.2 frente a
+  3.12.14 / 22.16.0 fail-closed.
 
 ---
 

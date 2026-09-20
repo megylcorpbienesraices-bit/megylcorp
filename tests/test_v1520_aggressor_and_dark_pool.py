@@ -423,3 +423,140 @@ def test_a_missing_map_declares_its_cause_instead_of_going_blank():
     hud = js[js.index("set('traceHeatSource'"):]
     hud = hud[:hud.index(");") + 2]
     assert "S.heatReason" in hud and "mapa apagado" in hud
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6 · v1.52.1 · El agresor en produccion, y los conteos por etapa
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_the_aggressor_falls_back_to_the_nbbo_when_no_field_declares_it():
+    """En producción TODAS las marcas salían neutras: el proveedor no publica
+    siempre un campo de lado. Comparar el precio con el NBBO no es adivinar, es
+    la definición operativa del agresor."""
+    from app.core.aggressor import from_row
+    assert from_row({"price": 2.50, "bid": 2.40, "ask": 2.50}) == ("BUY", "NBBO")
+    assert from_row({"price": 2.40, "bid": 2.40, "ask": 2.50}) == ("SELL", "NBBO")
+    # En el medio no hubo agresor: no se inventa uno.
+    assert from_row({"price": 2.45, "bid": 2.40, "ask": 2.50})[0] == "UNKNOWN"
+    # Y el campo declarado SIEMPRE gana al NBBO.
+    assert from_row({"price": 2.50, "bid": 2.40, "ask": 2.50, "side": "AT_BID"}) == ("SELL", "side")
+
+
+def test_the_nbbo_tolerance_is_relative_to_the_spread():
+    """Un céntimo es mucho en una opción de 0.05 y nada en una de 40."""
+    from app.core.aggressor import from_row
+    # Spread ancho: un céntimo por debajo del ask sigue siendo compra.
+    assert from_row({"price": 39.98, "bid": 38.00, "ask": 40.00})[0] == "BUY"
+    # Spread estrecho: el mismo céntimo ya no cruza.
+    assert from_row({"price": 2.44, "bid": 2.40, "ask": 2.45})[0] == "UNKNOWN"
+
+
+def test_a_crossed_or_locked_market_gives_no_side():
+    from app.core.aggressor import from_row
+    assert from_row({"price": 2.45, "bid": 2.50, "ask": 2.40})[0] == "UNKNOWN"
+    assert from_row({"price": 2.45, "bid": 2.45, "ask": 2.45})[0] == "UNKNOWN"
+
+
+def test_the_tape_publishes_its_aggressor_coverage():
+    """«Todas las marcas salen neutras» no se podía diagnosticar sin saber si el
+    proveedor no manda el campo, lo manda con otro nombre, o son ejecuciones en
+    el medio."""
+    from app.providers.quantdata.tools import norm_option_order_flow
+    out = norm_option_order_flow({"prints": [
+        {"timestamp": "2026-09-19T14:30:00Z", "price": 2.50, "size": 10, "bid": 2.40, "ask": 2.50},
+        {"timestamp": "2026-09-19T14:31:00Z", "price": 2.40, "size": 5, "bid": 2.40, "ask": 2.50},
+        {"timestamp": "2026-09-19T14:32:00Z", "price": 2.45, "size": 3, "bid": 2.40, "ask": 2.50},
+    ]})
+    cov = out["aggressor_coverage"]
+    assert cov["with_side"] == 2 and cov["total"] == 3
+    assert cov["pct"] == pytest.approx(66.7, abs=0.1)
+    assert cov["by_field"] == {"NBBO": 3}
+    # Y el NBBO viaja en la fila para poder AUDITAR la clasificación.
+    assert out["rows"][0]["bid"] == pytest.approx(2.40)
+    assert out["rows"][0]["ask"] == pytest.approx(2.50)
+
+
+def test_a_dominant_side_is_no_longer_called_mixed():
+    """65/35 ES una concentración compradora; llamarla repartida esconde
+    información real. El corte baja de 2:1 a 60/40."""
+    from app.core.qflow import apply_aggressor, AGGRESSOR_DOMINANCE_SHARE
+    assert AGGRESSOR_DOMINANCE_SHARE == pytest.approx(0.60)
+    for buy, sell, expected in [(650, 350, "BUY"), (610, 390, "BUY"),
+                                (550, 450, "MIXED"), (200, 800, "SELL")]:
+        e = [{"t": "T", "aggressor": "UNKNOWN"}]
+        apply_aggressor(e, {"events": [{"t": "T", "matched": True, "trades": 20,
+                                        "buy_premium": buy, "sell_premium": sell}]})
+        assert e[0]["aggressor"] == expected, (buy, sell)
+    # La confianza viaja: un 61 % y un 95 % no se leen igual aunque digan COMPRA.
+    e = [{"t": "T", "aggressor": "UNKNOWN"}]
+    apply_aggressor(e, {"events": [{"t": "T", "matched": True, "trades": 20,
+                                    "buy_premium": 950, "sell_premium": 50}]})
+    assert e[0]["aggressor_confidence"] == pytest.approx(0.95)
+
+
+def test_no_row_is_lost_between_the_provider_and_the_view_model():
+    """Criterio de cierre: 608 en el proveedor son 608 en el modelo. Una etapa
+    que recorte tiene que declarar el filtro."""
+    from app.core import dark_pool_view as DPV
+    flow = {"ready": True, "schema_state": "CONTRACT_OK", "rows": [
+        {"t": f"T{i}", "dark_volume": 100.0 + i, "dark_notional": 1000.0 + i,
+         "dark_prints": 5, "stock_price": 516.0} for i in range(608)]}
+    levels = {"ready": True, "rows": [
+        {"price": 500.0 + i * 0.1, "notional": 1e6 - i, "shares": 1000, "prints": 10}
+        for i in range(349)]}
+    vm = DPV.build(flow_block=flow, levels_block=levels, prints_block=None, spot=516.0)
+    assert vm["flow"]["row_count"] == 608
+    assert vm["levels_block"]["row_count"] == 349
+    lin = vm["lineage"]
+    assert lin["dark_flow"] == {"provider": 608, "view_model": 608, "dropped": 0}
+    assert lin["dark_pool_levels"]["provider"] == 349
+    assert lin["dark_pool_levels"]["dropped"] == 0
+    # Y `equity_prints` en MARKET_CLOSED no puede vaciar a los otros dos.
+    assert vm["status"]["dark_flow"]["state"] == "DATA_OK"
+    assert vm["status"]["dark_pool_levels"]["state"] == "DATA_OK"
+    assert vm["ready"] is True
+
+
+def test_the_diagnosis_names_the_provider_lane_not_the_derived_one():
+    """Un diagnóstico que no mira la misma fuente que la vista no diagnostica."""
+    api = _read("app/terminal_api.py")
+    # Se mira la LISTA de filas del diagnóstico, no los comentarios que explican
+    # de dónde se viene.
+    checks = api[api.index("    checks = ["):api.index("    blocked = state.get(")]
+    assert "EQUITY_TAPE" not in checks
+    assert "ITM_QUANT_LIQUIDITY_ZONES" not in checks
+    assert "_dark_pool_rows(row, intel)" in checks
+    assert "def _dark_pool_rows(" in api
+    body = api[api.index("def _dark_pool_rows("):api.index("def build_diagnostics(")]
+    for tool in ("QUANTDATA_DARK_FLOW", "QUANTDATA_DARK_POOL_LEVELS",
+                 "QUANTDATA_EQUITY_PRINTS"):
+        assert tool in body, tool
+    main = _read("app/main.py")
+    assert "intel=QUANTDATA_INTELLIGENCE.snapshot()" in main
+
+
+def test_a_level_outside_the_window_is_anchored_not_dropped():
+    """QQQ en 722 publicaba PUT WALL 700 en el KPI y no lo dibujaba: parecía no
+    existir. Estirar la ventana aplastaría las velas, así que se ancla al borde
+    con su distancia."""
+    js = _read("app/static/itmq_trace.js")
+    body = js[js.index("function drawLevels("):]
+    body = body[:body.index("\n  function ")]
+    assert "const off = above ? -1 : below ? 1 : 0;" in body
+    assert "'▲ '" in body and "'▼ '" in body
+    # Y el nivel de dentro conserva prioridad de etiqueta sobre el de fuera.
+    assert "(a.off ? 1 : 0) - (b.off ? 1 : 0)" in body
+
+
+def test_the_heat_field_is_normalised_over_what_is_on_screen():
+    """El Interval Map cubre todo el libro; la ventana de TRACE son unos dólares.
+    Normalizar sobre la matriz entera calculaba el percentil contra strikes que
+    ni se ven, y por eso salía una masa maciza en QQQ, SPY y los demás."""
+    js = _read("app/static/itmq_trace.js")
+    body = js[js.index("function buildHeatBitmap("):js.index("function hexRGB(")]
+    assert "HEAT_MARGIN" in body, "margen para que el campo no se corte en seco"
+    assert "S.priceLo.get()" in body and "S.priceHi.get()" in body
+    assert "keep.length >= 4" in body, "con muy pocas filas no se recorta"
+    # El recorte respeta las dos orientaciones de la matriz.
+    assert "const rowsAre = m.length === strikes.length;" in body
+    assert "m.map(col => keep.map(i => (col || [])[i]))" in body

@@ -1211,7 +1211,17 @@
       const f = AB.field(grid2, { blur: 0, fillRadius: 0 });
 
       const cw = b.w / W, ch = b.h / H;
-      const maxR = Math.max(1.1, Math.min(cw, ch) * 0.44);
+      /* v1.52.1 · El punto necesita tamaño para que el DIÁMETRO signifique algo.
+       *
+       * Con 90 strikes × 81 intervalos en un panel de 420 px la celda mide 4.6 px
+       * y el radio máximo salía en 2: todos los puntos parecían iguales y el
+       * mapa se leía como una nube de motas. Si el diámetro es la magnitud,
+       * hace falta rango de diámetros.
+       *
+       * El suelo de 2.6 px se aplica al MÁXIMO, no a cada punto: los pequeños
+       * siguen siendo pequeños. Y el llamador hace crecer el panel, que es la
+       * otra mitad —la misma solución que las barras por strike—. */
+      const maxR = Math.max(2.6, Math.min(cw, ch) * 0.46);
       const pos = Q.token('--heat-pos', '#22c55e');
       const neg = Q.token('--heat-neg', '#ef4444');
 
@@ -1235,7 +1245,7 @@
           // Un hueco no se dibuja. Un cero MEDIDO sí: es una afirmación.
           if (v === null) continue;
           const rank = f.intensity(v);
-          const r = Math.max(0.7, maxR * Math.pow(rank, 0.72));
+          const r = Math.max(0.9, maxR * Math.pow(rank, 0.72));
           ctx.fillStyle = Q.alpha(v >= 0 ? pos : neg, 0.30 + 0.70 * rank);
           ctx.beginPath();
           ctx.arc(b.x + (xi + 0.5) * cw, cy, r, 0, Math.PI * 2);
