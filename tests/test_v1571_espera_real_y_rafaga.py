@@ -258,7 +258,8 @@ def test_cada_herramienta_publica_su_estado_de_programador(motor):
     for t in cov["tools"]:
         s = t["scheduler"]
         assert set(s) == {"waited_seconds", "base_priority", "effective_priority",
-                          "due", "cooldown_seconds", "never_fetched"}, s
+                          "due", "cooldown_seconds", "never_fetched",
+                          "pages_paused"}, s
         assert isinstance(s["due"], bool)
         assert isinstance(s["never_fetched"], bool)
 

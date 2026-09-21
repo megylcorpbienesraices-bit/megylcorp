@@ -40,6 +40,11 @@ def _env_float(name: str, default: float | None) -> float | None:
 # número de peticiones restantes, el carril de páginas no pide nada.
 ENGINE_RESERVE = 12
 
+#: Por debajo de esta ventana, la cabecera `Reset` describe un CUBO DE RITMO y no
+#: el plan contratado. Cinco minutos: ningún plan se renueva más rápido, y todo
+#: limitador de ritmo que hemos visto cabe por debajo.
+VENTANA_CREIBLE_S = 300.0
+
 # Un payload compartido más viejo que esto ya no representa el ciclo actual y se
 # vuelve a pedir en lugar de mostrarse como si fuera fresco.
 DEFAULT_MAX_AGE_S = 90.0
@@ -144,6 +149,51 @@ class QuotaGuard:
             if self.remaining is not None:
                 self.remaining = max(0, self.remaining - int(n))
 
+    def pages_paused_reason(self) -> Dict[str, Any] | None:
+        """Por qué el carril de páginas no puede pedir nada. `None` = puede.
+
+        Es la MISMA condición que aplica `budget_for_pages`, expuesta para que el
+        Auditor no tenga que deducirla ni el operador adivinarla.
+        """
+        now = time.time()
+        with self._lock:
+            if now < self.rate_limited_until:
+                return {"reason": "RATE_LIMITED",
+                        "seconds": round(self.rate_limited_until - now, 1),
+                        "remaining": self.remaining, "limit": self.limit}
+            remaining = self.remaining
+            limit = self.limit
+            stale = (now - self.updated_at) > 120.0 if self.updated_at else True
+        if remaining is None or stale:
+            return None
+        if int(remaining) - ENGINE_RESERVE <= 0:
+            return {"reason": "PLAN_AGOTADO", "remaining": int(remaining),
+                    "limit": None if limit is None else int(limit),
+                    "engine_reserve": ENGINE_RESERVE}
+        return None
+
+    def burst_ceiling(self, requested: int) -> int:
+        """Tope DURO de la ráfaga de arranque. No es el ritmo: es el límite.
+
+        v1.57.2 · La ráfaga hacía `allowed = max(allowed, len(priority_due))` y se
+        saltaba `budget_for_pages` ENTERA: con el plan en las últimas seguía
+        pidiendo, y podía comerse la reserva del motor —que es la que sostiene la
+        estructura— para dibujar tablas de presentación.
+
+        Aquí la ráfaga conserva su motivo de ser (llenar la pantalla del activo
+        nuevo sin esperar al ritmo de régimen) pero no puede cruzar la reserva ni
+        pedir con el proveedor limitando.
+        """
+        now = time.time()
+        with self._lock:
+            if now < self.rate_limited_until:
+                return 0
+            remaining = self.remaining
+            stale = (now - self.updated_at) > 120.0 if self.updated_at else True
+        if remaining is None or stale:
+            return max(0, int(requested))
+        return max(0, min(int(requested), int(remaining) - ENGINE_RESERVE))
+
     def budget_for_pages(self, requested: int) -> int:
         """Cuántas peticiones puede hacer el carril de páginas en este ciclo.
 
@@ -187,22 +237,43 @@ class QuotaGuard:
             observed_w = self.observed_window_s
 
         # 1 · Presupuesto declarado por el operador: la fuente más fiable, porque
-        #     es el plan que realmente se contrató.
+        #     es el plan que realmente se contrató. Manda sola.
         if declared_n and declared_w:
             per_second = float(declared_n) / float(declared_w)
-        # 2 · Ventana medida observando los reinicios reales del contador.
+        # 2 · Ventana MEDIDA observando los reinicios reales del contador. Es una
+        #     medición, no una suposición, así que también manda sola.
         elif limit and limit > 0 and observed_w:
             per_second = float(limit) / float(observed_w)
-        # 3 · Cabecera Reset del proveedor, si trae algo utilizable.
-        elif remaining and reset and reset > 0:
-            per_second = float(remaining) / float(reset)
-        # 4 · Sin nada de lo anterior se asume la ventana DIARIA, que es la más
-        #     restrictiva. Equivocarse por lento sólo cuesta frescura; equivocarse
-        #     por rápido agota el plan en minutos y deja la sesión entera sin datos.
-        elif limit and limit > 0:
-            per_second = float(limit) / 86_400.0
         else:
-            return max(floor_s, 60.0)
+            # 3 · Sin plan declarado y sin ventana medida sólo quedan CONJETURAS.
+            #
+            #     v1.57.2 · Aquí estaba el agujero que vaciaba el plan. La cabecera
+            #     Reset se tomaba como si describiera la VENTANA DEL PLAN, y muchas
+            #     veces describe un CUBO DE RITMO: «60 s» no significa que el tope
+            #     contratado se renueve cada minuto. Con `limit = 240` y
+            #     `reset = 60` salían 4 req/s, el intervalo caía al suelo de 15 s y
+            #     el carril del motor se comía las 240 peticiones en QUINCE MINUTOS.
+            #     Lo que se ve después es la terminal entera muda con `remaining`
+            #     de un solo dígito y treinta y cuatro herramientas «sin intentos».
+            #
+            #     Una ventana corta no es prueba del plan: es un limitador de
+            #     ritmo. Por debajo de este umbral la conjetura se acota con la
+            #     ventana DIARIA, que es la más restrictiva.
+            conjeturas = []
+            if remaining and reset and reset > 0:
+                conjeturas.append(float(remaining) / float(reset))
+                if float(reset) >= VENTANA_CREIBLE_S and limit and limit > 0:
+                    # Reset largo: sí describe el plan. Se respeta tal cual.
+                    per_second = conjeturas[0]
+                    budget = max(per_second * max(0.05, min(1.0, share)), 1e-9)
+                    return max(floor_s, min(ceil_s, n / budget))
+            if limit and limit > 0:
+                # Equivocarse por lento sólo cuesta frescura; equivocarse por
+                # rápido agota el plan en minutos y deja la sesión entera sin datos.
+                conjeturas.append(float(limit) / 86_400.0)
+            if not conjeturas:
+                return max(floor_s, 60.0)
+            per_second = min(conjeturas)
 
         budget = max(per_second * max(0.05, min(1.0, share)), 1e-9)
         return max(floor_s, min(ceil_s, n / budget))
@@ -212,12 +283,15 @@ class QuotaGuard:
         # Fuera de la sección crítica a propósito: recommended_interval() toma este
         # mismo lock y threading.Lock no es reentrante.
         interval = round(self.recommended_interval(ENGINE_FAST_REQUESTS), 1)
+        # Igual que `interval`: fuera del lock, porque vuelve a tomarlo.
+        pausa = self.pages_paused_reason()
         with self._lock:
             return {
                 "remaining": self.remaining,
                 "limit": self.limit,
                 "reset_seconds": self.reset_seconds,
                 "engine_reserve": ENGINE_RESERVE,
+                "pages_paused": pausa,
                 "rate_limited": now < self.rate_limited_until,
                 "rate_limited_for_seconds": max(0.0, round(self.rate_limited_until - now, 1)),
                 "telemetry_age_seconds": None if not self.updated_at else round(now - self.updated_at, 1),

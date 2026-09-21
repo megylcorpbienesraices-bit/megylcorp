@@ -3376,8 +3376,34 @@
     "test_una_herramienta_nunca_servida_no_ha_esperado_desde_1970",
     "test_una_herramienta_ya_servida_cuenta_desde_su_ultimo_exito"
    ]
+  },
+  "tests/test_v1572_cuota_del_plan.py": {
+   "casos": 25,
+   "tests": [
+    "test_con_el_plan_agotado_la_rafaga_no_pide_nada",
+    "test_con_el_plan_sano_no_se_inventa_una_pausa",
+    "test_con_el_proveedor_limitando_la_rafaga_no_pide_nada",
+    "test_el_auditor_lo_ENSEÑA_en_una_linea",
+    "test_el_diagnostico_por_herramienta_nombra_la_cuota_exacta",
+    "test_el_guardian_publica_por_que_estan_paradas_las_paginas",
+    "test_el_limite_de_ritmo_tambien_se_nombra",
+    "test_el_plan_DECLARADO_manda_sobre_toda_conjetura",
+    "test_el_programador_aplica_el_tope_de_la_rafaga",
+    "test_el_snapshot_lo_lleva_al_auditor",
+    "test_el_umbral_de_credibilidad_es_explicito",
+    "test_la_pastilla_se_pone_en_rojo_cuando_esta_parado",
+    "test_la_pausa_coincide_SIEMPRE_con_el_presupuesto_real",
+    "test_la_rafaga_no_se_come_la_reserva_del_motor",
+    "test_la_rafaga_sigue_sirviendo_para_lo_que_existe",
+    "test_la_ventana_MEDIDA_manda_sobre_la_cabecera",
+    "test_ninguna_ventana_corta_supera_el_ritmo_diario",
+    "test_sin_telemetria_la_rafaga_no_se_bloquea",
+    "test_sin_telemetria_no_se_corre",
+    "test_un_reset_de_un_minuto_NO_autoriza_a_quemar_el_plan",
+    "test_un_reset_largo_SI_describe_el_plan_y_se_respeta"
+   ]
   }
  },
- "total_minimo": 2827,
+ "total_minimo": 2852,
  "version": "1.56.0"
 }

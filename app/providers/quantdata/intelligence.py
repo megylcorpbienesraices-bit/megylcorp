@@ -318,7 +318,11 @@ class QuantDataIntelligence:
                                 if in_burst_class(t.key, self._waited(t.key, now))]
                 if priority_due:
                     remaining_due = priority_due
-                    allowed = max(allowed, len(priority_due))
+                    # v1.57.2 · La ráfaga adelanta el RITMO, nunca cruza el LÍMITE.
+                    # `max(allowed, ...)` a secas se saltaba el guardián de cuota
+                    # entero y podía comerse la reserva del motor.
+                    allowed = min(max(allowed, len(priority_due)),
+                                  QUOTA.burst_ceiling(len(priority_due)))
                 else:
                     # Ya está servido lo que importa: la ráfaga se apaga sola sin
                     # esperar a que se cumpla su plazo.
@@ -682,8 +686,19 @@ class QuantDataIntelligence:
                 accion = ("su cadencia todavía no vence: no es un fallo, es el ritmo "
                           "declarado de la herramienta")
             else:
-                accion = ("exigible y aún sin turno: es PRESUPUESTO DE CUOTA por ciclo, "
-                          "no el proveedor. Si persiste con cuota libre, es el programador")
+                pausa = dict(sch.get("pages_paused") or {})
+                if pausa.get("reason") == "PLAN_AGOTADO":
+                    accion = (f"CUOTA DEL PLAN AGOTADA: quedan {pausa.get('remaining')} de "
+                              f"{pausa.get('limit')} y la reserva del motor es "
+                              f"{pausa.get('engine_reserve')}. El carril de páginas está "
+                              "PARADO hasta que el proveedor reinicie la ventana. No es el "
+                              "endpoint ni la autorización")
+                elif pausa.get("reason") == "RATE_LIMITED":
+                    accion = (f"el proveedor está limitando el ritmo; reabre en "
+                              f"{pausa.get('seconds')} s")
+                else:
+                    accion = ("exigible y aún sin turno: es PRESUPUESTO DE CUOTA por ciclo, "
+                              "no el proveedor. Si persiste con cuota libre, es el programador")
             detalle = f"{len(list(tool.candidates()))} ruta(s) declarada(s), 0 intentos"
             if espera is not None:
                 detalle += f"; espera {espera:.0f} s"
@@ -722,6 +737,7 @@ class QuantDataIntelligence:
     def coverage(self) -> Dict[str, Any]:
         """Cobertura real por página integrada del proveedor."""
         now = time.time()
+        pausa_cuota = QUOTA.pages_paused_reason()
         tools = []
         for key, tool in self.catalog.items():
             data = self._data.get(key) or {}
@@ -733,6 +749,9 @@ class QuantDataIntelligence:
                 "due": bool(self._due(tool, now)),
                 "cooldown_seconds": round(max(0.0, float(tool.unavailable_until) - now), 1),
                 "never_fetched": key not in self._fetched_at,
+                # La causa que está POR ENCIMA del programador: si el plan está
+                # agotado, ninguna prioridad sirve de nada.
+                "pages_paused": pausa_cuota,
             }
             last = tool.last_success
             route = route_diagnostic(tool)

@@ -1787,10 +1787,33 @@
     const q = cov.quota || {};
     const pagesPaused = q.remaining !== null && q.remaining !== undefined
       && Q.num(q.remaining, 0) <= Q.num(q.engine_reserve, 0);
-    pill('qdPill', cov.configured ? (cov.live_tools ? 'live' : 'warn') : 'off',
+    pill('qdPill', cov.configured ? (pagesPaused ? 'down' : cov.live_tools ? 'live' : 'warn') : 'off',
       cov.configured
         ? `${cov.live_tools || 0}/${cov.total_tools || 0}${pagesPaused ? ' · páginas pausadas' : ' herramientas'}`
         : 'sin API key');
+
+    // v1.57.2 · LA CAUSA QUE ESTÁ POR ENCIMA DE TODAS LAS DEMÁS.
+    //
+    // Con el plan agotado, las 34 herramientas salen «sin intentos» y la pantalla
+    // se lee como un fallo del proveedor o de autorización. No lo es: el carril
+    // de páginas está parado a propósito para no comerse la reserva del motor.
+    // Eso hay que DECIRLO en una línea, no dejar que se deduzca de una pastilla.
+    const pausa = q.pages_paused || null;
+    const ventana = q.window_source === 'ASUMIDA_DIARIA'
+      ? ' La ventana del plan NO está declarada ni medida, así que se asume DIARIA —la más lenta—:'
+        + ' declara QUANTDATA_PLAN_REQUESTS y QUANTDATA_PLAN_WINDOW_SECONDS y el ritmo se ajusta solo.'
+      : '';
+    set('qdQuotaNote', !cov.configured
+      ? 'Sin QUANTDATA_API_KEY no hay páginas del proveedor.'
+      : pausa && pausa.reason === 'PLAN_AGOTADO'
+        ? `CUOTA DEL PLAN AGOTADA: quedan ${pausa.remaining} de ${pausa.limit} y la reserva del`
+          + ` motor es ${pausa.engine_reserve}. El carril de páginas está PARADO hasta que el`
+          + ` proveedor reinicie la ventana. No es el endpoint ni la autorización.${ventana}`
+        : pausa && pausa.reason === 'RATE_LIMITED'
+          ? `El proveedor está limitando el ritmo: reabre en ${Q.num(pausa.seconds, 0).toFixed(0)} s.`
+            + ' Ninguna herramienta se pide mientras tanto.'
+          : `Ritmo del carril del motor: un ciclo cada ${Q.num(q.engine_interval_seconds, 0).toFixed(0)} s`
+            + ` · ventana del plan ${esc(String(q.window_source || '—'))}.${ventana}`);
 
     fillTable('tblQdTools', cov.tools || [], t => [
       t.title, t.page,

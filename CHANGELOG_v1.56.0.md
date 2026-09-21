@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2827 casos / 182 ficheros**.
+sentinela en vez de describirlo. Inventario: **2852 casos / 183 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -236,3 +236,40 @@ Ambos fijados por regresión: una prueba prohíbe `/dev/null` y exige `>nul`, y
 otra **compila** cada trozo de Python incrustado en el .bat. La guardia anterior
 —«el .bat no usa comandos de Linux»— miraba `export`, `&&` y `source` y se le
 pasó lo más obvio.
+
+## REVISIÓN SOBRE `2515b0e` · Las 34 herramientas «sin intentos» eran el PLAN AGOTADO
+
+La captura del Auditor lo decía entero, en dos sitios y en letra pequeña:
+`cuota 7/240` y `páginas pausadas`. Con `ENGINE_RESERVE = 12`,
+`budget_for_pages` devolvía **cero** en cada ciclo: las herramientas estaban
+exigibles, con prioridad efectiva 0 y veintitrés minutos de espera, y aun así sin
+un solo intento. No era el proveedor, ni la autorización, ni el programador.
+
+Tres defectos reales detrás:
+
+1. **El ritmo se infería de una cabecera que no dice lo que parece.** `Reset: 60`
+   se tomaba como «la ventana del plan dura 60 s», y a menudo describe un **cubo
+   de ritmo**, no el tope contratado. Con `limit = 240` salían 4 req/s, el
+   intervalo caía al suelo de 15 s y el carril del motor se comía las 240
+   peticiones en un cuarto de hora. El comentario del propio código ya decía la
+   regla —«equivocarse por rápido agota el plan en minutos»— y el código la
+   contradecía tres líneas más abajo. Ahora una ventana por debajo de cinco
+   minutos no se acepta como prueba del plan y se acota con la diaria; una
+   ventana larga se sigue respetando tal cual.
+2. **La ráfaga se saltaba el guardián de cuota entero.** `allowed = max(allowed,
+   len(priority_due))` ignoraba `budget_for_pages`: con el plan en las últimas
+   seguía pidiendo y podía comerse la reserva del motor —la que sostiene la
+   estructura— para dibujar tablas de presentación. Ahora la ráfaga adelanta el
+   **ritmo** pero no cruza el **límite** (`burst_ceiling`).
+3. **El Auditor no lo decía.** Lo insinuaba en una pastilla y lo dejaba deducir de
+   un número. Ahora hay una línea que lo nombra —cuánto queda, cuál es la reserva,
+   que el carril está parado hasta el reinicio de la ventana— y que dice qué
+   hacer: declarar `QUANTDATA_PLAN_REQUESTS` y `QUANTDATA_PLAN_WINDOW_SECONDS`.
+   El diagnóstico por herramienta nombra la cuota exacta en vez de un genérico.
+
+Y una prueba propia que daba verde o rojo según el orden: otra prueba de la suite
+hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
+`shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
+escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
+
+25 regresiones nuevas. Inventario: **2852 casos / 183 ficheros**.
