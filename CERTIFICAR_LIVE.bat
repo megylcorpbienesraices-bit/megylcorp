@@ -7,7 +7,7 @@ REM  herramienta, el estado exacto y si el dato llega a su modulo.
 REM
 REM  ANTES DE EJECUTAR:
 REM    1. La terminal tiene que estar LEVANTADA (INICIAR_WEB.bat)
-REM    2. QUANTDATA_API_KEY tiene que estar puesta
+REM    2. QUANTDATA_API_KEY tiene que estar puesta EN ESTA MISMA VENTANA
 REM
 REM  El informe NO contiene claves ni credenciales.
 REM ============================================================================
@@ -21,9 +21,9 @@ echo ===============================================================
 echo.
 
 REM --- 1. Python -------------------------------------------------------------
-where py >/dev/null 2>&1
+where py >nul 2>&1
 if %ERRORLEVEL%==0 (set "PY=py -3") else (set "PY=python")
-%PY% --version >/dev/null 2>&1
+%PY% --version >nul 2>&1
 if not %ERRORLEVEL%==0 (
   echo [ERROR] No se encuentra Python. Instalalo o abre el entorno del proyecto.
   pause
@@ -31,7 +31,7 @@ if not %ERRORLEVEL%==0 (
 )
 
 REM --- 2. httpx --------------------------------------------------------------
-%PY% -c "import httpx" >/dev/null 2>&1
+%PY% -c "import httpx" >nul 2>&1
 if not %ERRORLEVEL%==0 (
   echo Instalando httpx...
   %PY% -m pip install --quiet httpx
@@ -52,7 +52,7 @@ if "%QUANTDATA_API_KEY%"=="" (
 REM --- 4. La terminal tiene que responder ------------------------------------
 if "%ITMQ_BASE_URL%"=="" set "ITMQ_BASE_URL=http://127.0.0.1:8000"
 echo Comprobando que la terminal responde en %ITMQ_BASE_URL% ...
-%PY% -c "import httpx,os,sys; httpx.get(os.environ[\x27ITMQ_BASE_URL\x27]+\x27/api/terminal/bundle\x27,timeout=30).raise_for_status()" >/dev/null 2>&1
+%PY% -c "import httpx,os;httpx.get(os.environ['ITMQ_BASE_URL']+'/api/terminal/bundle',timeout=30).raise_for_status()" >nul 2>&1
 if not %ERRORLEVEL%==0 (
   echo [ERROR] La terminal no responde en %ITMQ_BASE_URL%
   echo         Arrancala primero con INICIAR_WEB.bat y espera a que cargue.
@@ -63,14 +63,14 @@ echo   OK
 echo.
 
 REM --- 5. Certificacion ------------------------------------------------------
-%PY% scripts\\certificar_live.py --base-url %ITMQ_BASE_URL% --symbols DIA,SPY,QQQ --out CERTIFICACION_LIVE.json
+%PY% scripts\certificar_live.py --base-url %ITMQ_BASE_URL% --symbols DIA,SPY,QQQ --out CERTIFICACION_LIVE.json
 set "RC=%ERRORLEVEL%"
 
 echo.
 echo ===============================================================
 if exist CERTIFICACION_LIVE.json (
   echo   LISTO. Envia este fichero:
-  echo      %CD%\\CERTIFICACION_LIVE.json
+  echo      %CD%\CERTIFICACION_LIVE.json
 ) else (
   echo   No se genero el informe. Revisa los mensajes de arriba.
 )

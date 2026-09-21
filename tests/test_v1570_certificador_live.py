@@ -233,3 +233,37 @@ def test_el_bat_no_usa_comandos_de_linux():
     txt = Path("CERTIFICAR_LIVE.bat").read_text(encoding="utf-8", errors="replace")
     for linux in ("export ", "#!/bin/", "&&", "$(", "source "):
         assert linux not in txt, f"«{linux}» no existe en Windows"
+
+
+def test_el_bat_redirige_al_nulo_de_WINDOWS():
+    """v1.57.1 · El silenciador era de Linux y ninguna comprobación se silenciaba.
+
+    `>/dev/null 2>&1` en cmd.exe no silencia nada: intenta redirigir a una ruta
+    que no existe, el comando falla y la comprobación que debía proteger queda
+    inservible. En Windows es `>nul`.
+    """
+    txt = Path("CERTIFICAR_LIVE.bat").read_text(encoding="utf-8", errors="replace")
+    assert "/dev/null" not in txt, "redirección de Linux en un .bat de Windows"
+    assert ">nul" in txt, "las comprobaciones tienen que silenciarse con >nul"
+
+
+def test_cada_python_del_bat_COMPILA():
+    """v1.57.1 · El chequeo de la terminal era un SyntaxError.
+
+    El literal iba escrito como `os.environ[\x27...\x27]`, que Python no
+    interpreta fuera de una cadena: `unexpected character after line
+    continuation character`. La comprobación fallaba SIEMPRE y el operador
+    recibía «la terminal no responde» con la terminal levantada.
+    """
+    import re
+    txt = Path("CERTIFICAR_LIVE.bat").read_text(encoding="utf-8", errors="replace")
+    trozos = re.findall(r'-c\s+"([^"]+)"', txt)
+    assert trozos, "el .bat dejó de comprobar nada con Python"
+    for src in trozos:
+        compile(src, "<CERTIFICAR_LIVE.bat>", "exec")
+
+
+def test_el_bat_invoca_el_certificador_con_ruta_de_windows():
+    txt = Path("CERTIFICAR_LIVE.bat").read_text(encoding="utf-8", errors="replace")
+    assert "scripts\\certificar_live.py" in txt
+    assert "scripts/certificar_live.py" not in txt

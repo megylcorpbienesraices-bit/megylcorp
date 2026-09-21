@@ -216,4 +216,23 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2824 casos / 182 ficheros**.
+sentinela en vez de describirlo. Inventario: **2827 casos / 182 ficheros**.
+
+## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
+
+Revisando el procedimiento LIVE antes de pedir que se ejecute, dos errores que
+lo habrían hecho fallar **en la máquina del operador**:
+
+- `>/dev/null 2>&1` es Linux. En `cmd.exe` no silencia nada: intenta redirigir a
+  una ruta inexistente, el comando falla, y **las cuatro comprobaciones previas
+  quedaban inservibles**.
+- El chequeo de que la terminal responde iba escrito como
+  `os.environ[\x27ITMQ_BASE_URL\x27]`. Python no interpreta `\x27` fuera de una
+  cadena: es `SyntaxError: unexpected character after line continuation
+  character`. La comprobación fallaba **siempre**, así que el .bat habría dicho
+  «la terminal no responde» con la terminal levantada.
+
+Ambos fijados por regresión: una prueba prohíbe `/dev/null` y exige `>nul`, y
+otra **compila** cada trozo de Python incrustado en el .bat. La guardia anterior
+—«el .bat no usa comandos de Linux»— miraba `export`, `&&` y `source` y se le
+pasó lo más obvio.

@@ -3157,13 +3157,16 @@
    ]
   },
   "tests/test_v1570_certificador_live.py": {
-   "casos": 31,
+   "casos": 34,
    "tests": [
     "test_cada_estado_da_el_veredicto_correcto",
     "test_cada_fila_lleva_las_ocho_columnas",
+    "test_cada_python_del_bat_COMPILA",
     "test_el_bat_comprueba_lo_que_hace_falta_antes_de_arrancar",
     "test_el_bat_de_windows_existe_con_saltos_CRLF",
+    "test_el_bat_invoca_el_certificador_con_ruta_de_windows",
     "test_el_bat_no_usa_comandos_de_linux",
+    "test_el_bat_redirige_al_nulo_de_WINDOWS",
     "test_el_consumidor_por_ruta_mira_el_bundle_de_verdad",
     "test_el_informe_se_escribe_aunque_haya_fallos",
     "test_la_redaccion_no_se_cuelga_con_anidamiento_absurdo",
@@ -3375,6 +3378,6 @@
    ]
   }
  },
- "total_minimo": 2824,
+ "total_minimo": 2827,
  "version": "1.56.0"
 }
