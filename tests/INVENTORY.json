@@ -3340,8 +3340,41 @@
     "test_sin_oi_en_toda_la_cadena_se_sigue_puntuando_solo_con_exposicion",
     "test_un_oi_medido_a_cero_y_un_oi_ausente_no_se_publican_igual"
    ]
+  },
+  "tests/test_v1571_espera_real_y_rafaga.py": {
+   "casos": 28,
+   "tests": [
+    "test_cada_herramienta_publica_su_estado_de_programador",
+    "test_con_la_sentinela_la_exposicion_va_ANTES_que_las_noticias",
+    "test_el_auditor_no_se_queda_en_sin_intentos",
+    "test_el_cambio_de_activo_no_hunde_el_orden_de_carga",
+    "test_el_cambio_de_activo_reinicia_la_espera",
+    "test_el_codigo_no_conserva_la_regla_vieja",
+    "test_el_envejecimiento_SIGUE_funcionando_con_la_sentinela",
+    "test_el_estado_del_programador_es_json_estricto",
+    "test_en_frio_el_primer_lote_es_la_clase_que_dibuja_la_pantalla",
+    "test_en_frio_todas_constan_como_nunca_servidas",
+    "test_la_causa_del_backend_va_escapada",
+    "test_la_clase_de_prioridad_se_respeta_entera_en_frio",
+    "test_la_espera_nunca_es_negativa",
+    "test_la_evidencia_conserva_las_rutas_y_añade_la_espera",
+    "test_la_rafaga_admite_lo_que_YA_ascendio_por_espera",
+    "test_la_rafaga_admite_lo_que_dibuja_la_pantalla",
+    "test_la_rafaga_excluye_el_contexto_secundario_recien_servido",
+    "test_la_rafaga_no_se_convierte_en_barra_libre",
+    "test_la_rafaga_y_el_lote_no_pueden_discrepar",
+    "test_sin_estado_del_programador_el_diagnostico_no_revienta",
+    "test_sin_intentos_exigible_señala_el_presupuesto",
+    "test_sin_intentos_por_cadencia_no_es_un_fallo",
+    "test_sin_intentos_por_enfriamiento_lo_dice",
+    "test_sin_la_sentinela_el_orden_de_carga_se_DESTRUYE",
+    "test_tras_servir_una_el_auditor_lo_refleja",
+    "test_un_error_real_NO_se_disfraza_de_sin_intentar",
+    "test_una_herramienta_nunca_servida_no_ha_esperado_desde_1970",
+    "test_una_herramienta_ya_servida_cuenta_desde_su_ultimo_exito"
+   ]
   }
  },
- "total_minimo": 2796,
+ "total_minimo": 2824,
  "version": "1.56.0"
 }

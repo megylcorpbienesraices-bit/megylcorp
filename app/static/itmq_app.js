@@ -1187,8 +1187,20 @@
     const tries = t.attempts || [];
     const failed = tries.filter(a => !a.ok);
     if (!tries.length) {
+      // v1.57.1 · «Sin intentos» no es un diagnóstico. El backend ya sabe si la
+      // herramienta está enfriando, si su cadencia no ha vencido o si es
+      // exigible y se quedó sin presupuesto: aquí se ENSEÑA, no se resume.
       const cand = (t.candidates || []).length;
-      return `<span class="dim">sin intentos${cand ? ` · ${cand} rutas candidatas` : ''}</span>`;
+      const sc = t.scheduler || {};
+      const causa = String((t.diagnosis || {}).action || '');
+      const espera = (sc.waited_seconds == null) ? '' : ` · espera ${Math.round(sc.waited_seconds)}s`;
+      const prio = (sc.base_priority == null || sc.effective_priority == null)
+        ? '' : ` · prioridad ${sc.base_priority}→${sc.effective_priority}`;
+      const frio = Number(sc.cooldown_seconds || 0) > 0
+        ? ` · enfriando ${Math.round(sc.cooldown_seconds)}s` : '';
+      return `<span class="dim">sin intentos${cand ? ` · ${cand} rutas candidatas` : ''}`
+        + `${espera}${prio}${frio}</span>`
+        + (causa ? `<br><span class="dim">${esc(causa)}</span>` : '');
     }
     const last = failed[failed.length - 1] || tries[tries.length - 1];
     const msg = String(last.error || 'sin detalle').slice(0, 70);

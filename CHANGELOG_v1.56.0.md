@@ -187,3 +187,33 @@ El estado por módulo, con los cinco niveles y sin inflar ninguno, está en
 - El Interval Map conserva la diferencia entre celda RAW medida y hueco. Una observación real no nula que cae bajo el suelo de concentración queda tenue en vez de desaparecer a alfa 0; un `MISSING` no se promociona a observación.
 - Se mantuvo el contrato matemático de Monte Carlo sin cambiar de modelo; sus pruebas contra solución cerrada continúan pasando en la suite focalizada.
 - El manifiesto e inventario se resincronizaron a 2.558 casos / 171 ficheros tras añadir regresiones para las nuevas garantías visuales.
+
+## REVISIÓN SOBRE `9fabecd` · El envejecimiento del programador, entero
+
+El reparto por espera de v1.57.0 quitó el hambre de la cola pero quedó a medias
+en dos sitios que sólo se ven leyendo el archivo entero:
+
+- **La espera de una herramienta nunca servida se medía desde 1970.**
+  `self._fetched_at` se vacía en cada cambio de activo, y el defecto del `get`
+  era `0.0`: la espera no era «cero segundos» sino `now` —unos 1.700 millones—,
+  así que **todas** las herramientas sin servir caían al suelo de prioridad en el
+  primer ciclo y el orden de carga dejaba de existir justo cuando importa, en
+  frío y tras cambiar de activo. Medido sobre el catálogo real: `oi_by_strike`
+  (prioridad 0) salía en el **puesto 20 de 36** y `dark_flow` (prioridad 1) en el
+  **32**; ahora salen en el 4 y el 9. Hay una referencia explícita,
+  `_eligible_since`, que se reinicia con el activo.
+- **La ráfaga de arranque filtraba por la prioridad BASE** mientras el lote
+  ordenaba por la EFECTIVA. Una herramienta ya ascendida por espera a la clase
+  que dibuja la pantalla seguía excluida de la ventana de arranque. Ahora hay una
+  sola regla, `in_burst_class`, y una prueba que impide que vuelvan a ser dos.
+
+Y una tercera que no era de cálculo sino de información: **«sin intentos» no es
+un diagnóstico**, es la ausencia de uno. El Auditor publica ahora el estado del
+programador por herramienta —espera, prioridad base → efectiva, exigible,
+enfriamiento, nunca servida— y el veredicto `SIN_INTENTAR` distingue las tres
+causas con sus tres remedios: enfriamiento tras un fallo, cadencia todavía no
+vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
+línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
+
+28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
+sentinela en vez de describirlo. Inventario: **2824 casos / 182 ficheros**.

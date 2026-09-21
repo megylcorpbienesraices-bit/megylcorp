@@ -126,6 +126,17 @@ def effective_priority(key: str, waited_seconds: float) -> int:
     return max(AGING_FLOOR, base - ascensos)
 
 
+def in_burst_class(key: str, waited_seconds: float) -> bool:
+    """¿Entra esta herramienta en la ráfaga de arranque?
+
+    Una sola regla, compartida con el orden del lote. Cuando la ráfaga filtraba
+    por la prioridad BASE y el lote ordenaba por la EFECTIVA, el envejecimiento
+    quedaba a medias: una herramienta ya ascendida a la clase que dibuja la
+    pantalla seguía sin entrar en la ventana de arranque.
+    """
+    return effective_priority(key, waited_seconds) <= BURST_MAX_PRIORITY
+
+
 class QuantDataIntelligence:
     """Recolector de páginas integradas del proveedor."""
 
@@ -143,6 +154,11 @@ class QuantDataIntelligence:
         self._running = False
         self._cycle = 0
         self._burst_until = 0.0
+        # v1.57.1 · Instante desde el que una herramienta NUNCA SERVIDA lleva
+        # esperando. Sin esta referencia, `now - self._fetched_at.get(key, 0.0)`
+        # medía la espera desde 1970: toda herramienta sin servir envejecía de
+        # golpe hasta el suelo y la clase de prioridad dejaba de existir.
+        self._eligible_since = time.time()
         # Época del símbolo: avanza en cada cambio de activo y ata cada respuesta
         # al ticker que la pidió.
         self._epoch = 0
@@ -199,6 +215,9 @@ class QuantDataIntelligence:
         self._symbol = sym
         self._data.clear()
         self._fetched_at.clear()
+        # Nadie ha esperado nada todavía para el activo nuevo: la espera se
+        # cuenta desde AQUÍ, no desde el arranque del proceso.
+        self._eligible_since = time.time()
         # Se limpia la caché de los DOS símbolos: la del anterior porque ya no
         # describe nada que vaya a mostrarse, y la del nuevo porque pudo quedar
         # sembrada por una consulta previa y ser más vieja que este cambio.
@@ -236,6 +255,19 @@ class QuantDataIntelligence:
                 _obs_expected("quantdata.intelligence.clock_timeout")
 
     # ---------------------------------------------------------- descarga
+
+    def _waited(self, key: str, now: float) -> float:
+        """Segundos que esta herramienta lleva sin servirse, para ESTE activo.
+
+        Una herramienta nunca servida no ha esperado desde el epoch: ha esperado
+        desde que pasó a ser exigible —arranque o cambio de activo—. Medirlo de
+        otro modo hace que el envejecimiento la hunda al suelo de prioridad en el
+        primer ciclo y anula el orden de carga.
+        """
+        base = self._fetched_at.get(key)
+        if base is None:
+            base = getattr(self, "_eligible_since", now)
+        return max(0.0, float(now) - float(base))
 
     def _due(self, tool: QuantDataTool, now: float) -> bool:
         if not tool.available(now):
@@ -278,8 +310,12 @@ class QuantDataIntelligence:
                 # Sólo lo que dibuja la pantalla entra en la ráfaga. Las noticias
                 # y los gainers/losers esperan al ciclo normal: no hay ninguna
                 # prisa en ellos y gastarían el turno de la exposición.
+                # v1.57.1 · La MISMA regla que ordena el lote. Filtrar aquí por la
+                # prioridad BASE mientras el lote ordena por la EFECTIVA dejaba el
+                # envejecimiento a medias: una herramienta que ya había ascendido a
+                # la clase que dibuja la pantalla seguía excluida de la ráfaga.
                 priority_due = [t for t in remaining_due
-                                if _PRIORITY.get(t.key, _PRIORITY_DEFAULT) <= BURST_MAX_PRIORITY]
+                                if in_burst_class(t.key, self._waited(t.key, now))]
                 if priority_due:
                     remaining_due = priority_due
                     allowed = max(allowed, len(priority_due))
@@ -298,9 +334,8 @@ class QuantDataIntelligence:
             # v1.57.0 · Con el tiempo esperado descontado, para que la cola no
             # se muera de hambre. Ver `effective_priority`.
             batch = sorted(remaining_due,
-                           key=lambda t: (effective_priority(
-                                              t.key, now - self._fetched_at.get(t.key, 0.0)),
-                                          self._fetched_at.get(t.key, 0.0)))[:allowed]
+                           key=lambda t: (effective_priority(t.key, self._waited(t.key, now)),
+                                          self._fetched_at.get(t.key, self._eligible_since)))[:allowed]
             if batch:
                 # Las páginas son corroboración, no autoridad del motor. Lanzar ocho
                 # POST pesados a la vez contra una cuenta pequeña aumenta timeouts y
@@ -608,7 +643,8 @@ class QuantDataIntelligence:
     )
 
     @staticmethod
-    def _pending_diagnosis(tool: Any, state: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
+    def _pending_diagnosis(tool: Any, state: str, runtime: Dict[str, Any],
+                           scheduler: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Por qué esta herramienta NO está sirviendo, clasificado y accionable.
 
         v1.57.0 · PARA NO TENER QUE BUSCARLO A MANO.
@@ -630,12 +666,30 @@ class QuantDataIntelligence:
         low = err.lower()
 
         if not intentos and not err:
-            return {
-                "verdict": "SIN_INTENTAR",
-                "action": ("todavía no le ha tocado turno; si persiste varios minutos "
-                           "es presupuesto de cuota, no el proveedor"),
-                "evidence": f"{len(list(tool.candidates()))} ruta(s) declarada(s), 0 intentos",
-            }
+            # v1.57.1 · «Sin intentar» no es un diagnóstico: es la ausencia de uno.
+            # El Auditor tiene que decir POR QUÉ el programador no la ha llamado,
+            # que son tres causas distintas con tres remedios distintos.
+            sch = dict(scheduler or {})
+            enfriando = float(sch.get("cooldown_seconds") or 0.0)
+            exigible = sch.get("due")
+            espera = sch.get("waited_seconds")
+            prio = sch.get("effective_priority")
+            base = sch.get("base_priority")
+            if enfriando > 0.0:
+                accion = (f"en enfriamiento {enfriando:.0f} s tras un fallo anterior: "
+                          "el programador no la llamará hasta que venza")
+            elif exigible is False:
+                accion = ("su cadencia todavía no vence: no es un fallo, es el ritmo "
+                          "declarado de la herramienta")
+            else:
+                accion = ("exigible y aún sin turno: es PRESUPUESTO DE CUOTA por ciclo, "
+                          "no el proveedor. Si persiste con cuota libre, es el programador")
+            detalle = f"{len(list(tool.candidates()))} ruta(s) declarada(s), 0 intentos"
+            if espera is not None:
+                detalle += f"; espera {espera:.0f} s"
+            if base is not None and prio is not None:
+                detalle += f"; prioridad {base}→{prio}"
+            return {"verdict": "SIN_INTENTAR", "action": accion, "evidence": detalle}
         if "401" in err or "403" in err or "unauthor" in low or "forbidden" in low:
             return {"verdict": "NO_AUTORIZADO",
                     "action": "el plan no incluye esta herramienta: no se puede arreglar desde aquí",
@@ -671,6 +725,15 @@ class QuantDataIntelligence:
         tools = []
         for key, tool in self.catalog.items():
             data = self._data.get(key) or {}
+            esperado = self._waited(key, now)
+            scheduler = {
+                "waited_seconds": round(esperado, 1),
+                "base_priority": _PRIORITY.get(key, _PRIORITY_DEFAULT),
+                "effective_priority": effective_priority(key, esperado),
+                "due": bool(self._due(tool, now)),
+                "cooldown_seconds": round(max(0.0, float(tool.unavailable_until) - now), 1),
+                "never_fetched": key not in self._fetched_at,
+            }
             last = tool.last_success
             route = route_diagnostic(tool)
             # v1.42.1 · Un vacío por mercado cerrado NO es lo mismo que un vacío con
@@ -733,8 +796,12 @@ class QuantDataIntelligence:
                 "runtime": ENDPOINT_RUNTIME.get(key).snapshot(),
                 # El veredicto ya clasificado: existe / no existe / no autorizado /
                 # existe y falla / sin intentar, con el remedio de cada uno.
+                # Estado del PROGRAMADOR para esta herramienta: cuánto lleva
+                # esperando, a qué prioridad ha ascendido y si es exigible ahora.
+                # Es lo que convierte un «sin intentos» en una causa concreta.
+                "scheduler": scheduler,
                 "diagnosis": self._pending_diagnosis(
-                    tool, state, ENDPOINT_RUNTIME.get(key).snapshot()),
+                    tool, state, ENDPOINT_RUNTIME.get(key).snapshot(), scheduler),
             })
 
         pages = []

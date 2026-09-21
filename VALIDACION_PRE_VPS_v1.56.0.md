@@ -6,8 +6,8 @@ Release: `ITM_QUANT_v1.56.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
 ## Suite
 
-- Inventario nominal: **2796 casos / 181 ficheros**
-- Particiones: 21 · `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`
+- Inventario nominal: **2824 casos / 182 ficheros**
+- Particiones: 21 · `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`
 - Resultado: **PASS**
 
 ---
@@ -943,7 +943,7 @@ ficheros**.
   NumPy para conservar igualdad bit-a-bit con replay/auditoría; JAX CPU sigue disponible si se
   solicita explícitamente. No cambia ninguna fórmula de Greeks.
 
-Once regresiones nuevas fijan estas rutas. Inventario: **2796 casos / 181 ficheros**.
+Once regresiones nuevas fijan estas rutas. Inventario: **2824 casos / 182 ficheros**.
 
 ## Certificación en cuatro niveles
 
@@ -1069,9 +1069,9 @@ Windows (viene con el sistema) o Piper vía `ITM_PIPER_BIN`.
 ## H4 · continuidad LIVE de equities
 
 - Suite final sobre el árbol H4: **1549 PASS · 0 SKIP · 0 FAIL · 0 ERROR · 21/21 particiones**.
-- Inventario exacto: **2796 casos / 181 ficheros**.
+- Inventario exacto: **2824 casos / 182 ficheros**.
 - Particiones: **21**.
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 - OPRA: el reloj de frescura usa el evento más nuevo entre trade y NBBO quote por contrato.
 - Un snapshot estructural fuera de SLA ya no borra TRACE/OI/EXPOSICIÓN: queda visible como **contexto retenido no accionable** mientras precio y flujo observados siguen LIVE.
 - El carril neto/total de Flujo escala al pico visible real para que una ráfaga no se recorte fuera del canvas.
@@ -1134,7 +1134,7 @@ porque ambos producían números perfectamente plausibles.
 - `cargo check --locked` PASS en `causality_engine` y `wasm_bridge`.
 - JavaScript: 25/25 ficheros validados.
 - Locks instalados con `--require-hashes` y `pip check` limpio.
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 
 
 ## A2 · Auditoría por secciones (v1.42.6)
@@ -1159,7 +1159,7 @@ Pendiente declarado: Vanna/Charm/Speed conviven con unidades distintas por secci
 nombre con dos escalas invita a comparar lo que no es comparable. `units_registry`
 ya tiene los conceptos y ninguna de las dos rutas lo usa.
 
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 
 
 ## A3 · Defectos reportados en producción (v1.42.6)
@@ -1180,7 +1180,7 @@ precio, y `key_levels_report` coincide con `structure_levels`.
 
 Frontend: **0 errores de eslint** en los 25 scripts (antes 18).
 
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 
 
 ## A4 · Interfaz viva (v1.42.6)
@@ -1194,7 +1194,7 @@ Frontend: **0 errores de eslint** en los 25 scripts (antes 18).
 | F21 | BAJA | En la interfaz secundaria los paneles sumaban 957 px dentro de un contenedor de 900 px con `overflow:hidden`. | alturas por peso sobre el alto real |
 
 - Frontend: **0 errores de eslint** en los 25 scripts.
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 
 
 ## A5 · Capa QFLOW y multi-activo (v1.42.6)
@@ -1213,7 +1213,7 @@ consultar otro ticker.
 
 Un fallo de datos nunca se publica como `$0.0`: seis estados con su motivo.
 
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
 
 
 ## A6 · Net Drift oficial, Dark Pool directo y Quant Data como proveedor (v1.42.7)
@@ -1270,4 +1270,4 @@ símbolo aparece como literal en `app/core/net_drift.py`.
   final contra una sesión real queda pendiente de ejecutarse en el VPS**, y para eso
   está `certify_against_raw()`.
 
-- `plan_sha256`: `f0f2db4b2aad154dadc3574b7d4100c0d0378d1b89328c0eebdfb82707519ceb`.
+- `plan_sha256`: `ac8e756e7ba4aec00a9fb66521ecfd9b3b8aaa353ea0ad94a6caebccffe2982b`.
