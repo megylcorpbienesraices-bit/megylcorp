@@ -52,6 +52,7 @@ from . import data_lineage as DL
 from . import dark_pool_state
 from .asset_normalization import normalize_matrix, asset_scale
 from .data_lineage import (LINEAGE, DIRECT_PROVIDER, DERIVED, FALLBACK, UNAVAILABLE,
+                           CAPABILITY_AVAILABLE, CAPABILITY_UNAVAILABLE,
                            DATA_OK, NO_PROVIDER_DATA, FILTERED_ALL, PROVIDER_ERROR,
                            PARSER_ERROR, STALE, NO_DATA_LABEL, QUANTDATA, ITM_QUANT)
 
@@ -142,34 +143,82 @@ def classify(block: Any, *, cadence: str = "MEDIUM",
     Ésta es la función que impide el síntoma que la especificación prohíbe
     expresamente: `$0.0` en pantalla cuando lo que hubo fue un fallo de datos. Un
     cero legítimo exige `DATA_OK`; cualquier otro estado publica SIN DATOS.
+
+    ═══════════════════════════════════════════════════════════════════════
+    v1.57.0 · UN FALLO DE LLAMADA NO BORRA LAS FILAS QUE SÍ ESTÁN
+    ═══════════════════════════════════════════════════════════════════════
+
+    La rama de error devolvía `rows: 0` SIEMPRE. Literalmente:
+
+        if err:
+            return {"state": PROVIDER_ERROR, ..., "rows": 0, ...}
+
+    Así que un canal que había traído 216 filas y luego agotó su plazo en el
+    ciclo siguiente se publicaba como «PROVIDER_ERROR · 0 filas», y quien
+    mirara el Auditor veía a la vez el error y las 216 filas contadas en otro
+    sitio: dos afirmaciones contradictorias sobre el mismo carril.
+
+    Peor que la contradicción: al decir cero, ningún consumidor aguas abajo
+    podía decidir usar el último valor bueno, porque desde su punto de vista no
+    había nada que usar.
+
+    Ahora el recuento es SIEMPRE el real. El estado dice qué pasó en esta
+    llamada; las filas dicen qué hay. Son dos hechos distintos y no se tapan
+    uno al otro.
+
+    ═══════════════════════════════════════════════════════════════════════
+    CAPACIDAD ≠ EJECUCIÓN
+    ═══════════════════════════════════════════════════════════════════════
+
+    `capability` responde «¿existe este endpoint y estamos autorizados?».
+    `state` responde «¿qué pasó en ESTA llamada?». Un endpoint perfectamente
+    disponible puede fallar ahora mismo, y un fallo de ahora no lo convierte en
+    inexistente.
     """
     if block is None:
         return {"state": NO_PROVIDER_DATA, "detail": "el proveedor no publicó este bloque",
-                "rows": 0, "age_seconds": None}
+                "rows": 0, "age_seconds": None,
+                "capability": CAPABILITY_UNAVAILABLE, "has_payload": False}
     if not isinstance(block, dict):
         return {"state": PARSER_ERROR,
                 "detail": f"se esperaba un objeto, llegó {type(block).__name__}",
-                "rows": 0, "age_seconds": None}
+                "rows": 0, "age_seconds": None,
+                "capability": CAPABILITY_UNAVAILABLE, "has_payload": False}
     age = _age_seconds(block)
-    err = block.get("error")
-    if err:
-        return {"state": PROVIDER_ERROR, "detail": str(err)[:200], "rows": 0, "age_seconds": age}
     rows = block.get(rows_key)
     n = len(rows) if isinstance(rows, (list, tuple)) else None
+
+    err = block.get("error")
+    if err:
+        # El endpoint existe y respondía: lo que falló es ESTA llamada. Las
+        # filas que hubiera se cuentan, para que aguas abajo se pueda decidir
+        # mostrar el último valor bueno en vez de vaciar la sección.
+        return {"state": PROVIDER_ERROR, "detail": str(err)[:200],
+                "rows": n or 0, "age_seconds": age,
+                "capability": CAPABILITY_AVAILABLE, "has_payload": bool(n)}
+
     if not block.get("ready"):
         reason = block.get("reason") or block.get("detail")
         if n:
             return {"state": FILTERED_ALL,
                     "detail": str(reason or f"{n} filas recibidas, ninguna utilizable")[:200],
-                    "rows": n, "age_seconds": age}
+                    "rows": n, "age_seconds": age,
+                    "capability": CAPABILITY_AVAILABLE, "has_payload": True}
+        # El proveedor respondió BIEN y no había actividad. Eso no es un fallo
+        # suyo ni nuestro: es un mercado sin operaciones en esa ventana.
         return {"state": NO_PROVIDER_DATA,
                 "detail": str(reason or "el proveedor respondió sin filas")[:200],
-                "rows": 0, "age_seconds": age}
+                "rows": 0, "age_seconds": age,
+                "capability": CAPABILITY_AVAILABLE, "has_payload": False}
+
     limit = STALE_AFTER_SECONDS.get(str(cadence).upper(), STALE_AFTER_SECONDS["MEDIUM"])
     if age is not None and age > limit:
         return {"state": STALE, "detail": f"último dato hace {age:.0f} s (límite {limit:.0f} s)",
-                "rows": n or 0, "age_seconds": age}
-    return {"state": DATA_OK, "detail": "", "rows": n if n is not None else 0, "age_seconds": age}
+                "rows": n or 0, "age_seconds": age,
+                "capability": CAPABILITY_AVAILABLE, "has_payload": bool(n)}
+    return {"state": DATA_OK, "detail": "", "rows": n if n is not None else 0,
+            "age_seconds": age,
+            "capability": CAPABILITY_AVAILABLE, "has_payload": bool(n)}
 
 
 _CLOSED_PHASES = ("WEEKEND", "HOLIDAY", "MARKET_CLOSED")

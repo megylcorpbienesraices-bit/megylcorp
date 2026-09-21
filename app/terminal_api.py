@@ -2503,6 +2503,29 @@ def _candles_reason(trace: Dict[str, Any]) -> str:
     return "FABRIC_VACIA_Y_BOOTSTRAP_SIN_BARRAS"
 
 
+
+def _exposiciones_canonicas(state: Dict[str, Any]) -> List[Any]:
+    """Toda exposición publicada, en la ÚNICA capa de unidades canónicas.
+
+    Nada de mezclar contratos, acciones, dólares, gamma por 1 % y vega por
+    punto en la misma lista sin declarar qué es cada cosa. Cada magnitud llega
+    con unidad registrada, multiplicador, spot usado y convenio de signo.
+    """
+    from .core import delta_flow as DFLOW
+
+    fuera: List[Any] = []
+    try:
+        dm = (state or {}).get("delta_min")
+        if not isinstance(dm, dict):
+            flujo_state = (state or {}).get("flujo_ordenes")
+            dm = flujo_state.get("delta_min") if isinstance(flujo_state, dict) else None
+        if isinstance(dm, dict):
+            fuera.extend(DFLOW.canonical_quantities(dm))
+    except Exception as exc:
+        _obs_note("terminal_api:exposiciones_canonicas", exc, severity="DEGRADED")
+    return fuera
+
+
 def _arquitectura(state: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any]:
     """Contratos de v1.42 publicados junto a los datos, no sólo en la documentación.
 
@@ -2521,8 +2544,23 @@ def _arquitectura(state: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any
 
     flow = state.get("flow_summary") or {}
     scanner = state.get("scanner") or {}
+
+    # v1.57.0 · EL CONTROL DE EXPOSICIÓN SE ALIMENTA DE VERDAD.
+    #
+    # Avisaba con «no se publicó ninguna exposición con unidad declarada», y no
+    # era falso: la capa canónica existía —registro de unidades, convenio de
+    # signo, multiplicador— y `_audit()` se llamaba SIN `exposures`. Un control
+    # al que nadie entrega nada no está midiendo; está esperando.
+    #
+    # Ahora recibe las magnitudes reales de DELTA/MIN, cada una con su unidad
+    # registrada, su spot y su convenio. Si alguna declarara una unidad que no
+    # está en el registro, el control pasa a CRÍTICO, que es lo que tiene que
+    # hacer: aquí no se rebaja la severidad, se le da algo que auditar.
+    exposiciones = _exposiciones_canonicas(state)
+
     audit = _audit(
         chain=None, symbol=symbol,
+        exposures=exposiciones,
         flow={"non_causal_quotes": int(flow.get("non_causal_quotes") or 0),
               "classified_pct": _f(flow.get("classified_pct"))},
         scanner={"input_age_seconds": _f(state.get("data_age_seconds"))},

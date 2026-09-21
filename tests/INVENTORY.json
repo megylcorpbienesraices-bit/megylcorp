@@ -3133,6 +3133,29 @@
     "test_una_cadena_sin_precio_ya_no_tumba_el_refresco"
    ]
   },
+  "tests/test_v1570_capacidad_vs_ejecucion.py": {
+   "casos": 23,
+   "tests": [
+    "test_delta_min_declara_que_sus_entradas_son_del_print",
+    "test_delta_min_funciona_con_el_motor_completamente_vacio",
+    "test_delta_min_multiactivo_sin_cadena",
+    "test_delta_min_no_lee_ninguna_estructura_de_la_cadena",
+    "test_el_carril_vuelve_a_LIVE_cuando_el_proveedor_se_recupera",
+    "test_el_proveedor_que_responde_sin_actividad_no_es_un_proveedor_roto",
+    "test_las_dos_dimensiones_no_comparten_vocabulario",
+    "test_pero_el_fallo_de_la_llamada_no_se_esconde",
+    "test_toda_respuesta_del_proveedor_declara_su_capacidad",
+    "test_un_400_no_se_rebaja_aunque_haya_filas_antiguas",
+    "test_un_bloque_que_el_proveedor_no_publica_si_es_capacidad_ausente",
+    "test_un_carril_con_dato_bueno_y_plazo_agotado_no_rompe_la_seccion",
+    "test_un_carril_que_falla_sin_dato_guardado_sigue_siendo_un_fallo",
+    "test_un_carril_roto_no_arrastra_a_los_otros_dos",
+    "test_un_carril_sano_no_se_ve_afectado",
+    "test_un_error_sin_filas_sigue_siendo_cero",
+    "test_un_error_ya_no_pone_el_recuento_a_cero",
+    "test_una_llamada_fallida_no_convierte_el_endpoint_en_inexistente"
+   ]
+  },
   "tests/test_v1570_delta_min.py": {
    "casos": 37,
    "tests": [
@@ -3202,6 +3225,6 @@
    ]
   }
  },
- "total_minimo": 2633,
+ "total_minimo": 2656,
  "version": "1.56.0"
 }

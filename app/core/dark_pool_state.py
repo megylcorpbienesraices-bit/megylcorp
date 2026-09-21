@@ -127,8 +127,29 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
     detail = str(block.get("lane_detail") or cls.get("detail") or "")
     fields = list(block.get("lane_fields") or [])
 
+    # v1.57.0 · UN FALLO DE LLAMADA CON DATO BUENO GUARDADO ES «VIEJO», NO «ROTO».
+    #
+    # Un carril que ya había traído 216 filas y luego agota su plazo se
+    # declaraba PROVIDER_ERROR, y eso rompía la SECCIÓN entera aunque el dato
+    # estuviera ahí y fuera bueno. En pantalla salía el error; al lado, las 216
+    # filas. Dos afirmaciones contradictorias sobre el mismo carril.
+    #
+    # El reintento con backoff sigue programado y el error se conserva entero en
+    # `last_error` para que nadie lo pierda de vista. Lo que cambia es la
+    # conclusión: hay dato real, de un ciclo que sí funcionó, y se dice que es
+    # viejo en vez de tirarlo.
+    #
+    # `REQUEST_INVALID` NO entra aquí: un 400 significa que el cuerpo está mal
+    # y reintentarlo no lo va a arreglar. Ése sí es un fallo nuestro y se
+    # declara aunque haya filas antiguas.
+    fallo_de_llamada = (provider_status in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL")
+                        or generic == LINEAGE_PROVIDER_ERROR)
+    hay_dato_bueno = bool(rows) and bool(cls.get("has_payload", rows > 0))
+
     if provider_status == "REQUEST_INVALID":
         state = REQUEST_INVALID
+    elif fallo_de_llamada and hay_dato_bueno:
+        state = STALE
     elif provider_status in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL"):
         state = PROVIDER_ERROR
     elif generic == LINEAGE_PARSER_ERROR:
@@ -161,6 +182,13 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
         # v1.49.0 · El 400 entero: `type`, `detail` y cada `errors[].field` con
         # su mensaje. Sin esto, «HTTP 400» no se puede corregir.
         "error": block.get("lane_error") or {},
+        # El fallo de la llamada NO desaparece porque el carril tenga dato
+        # bueno guardado. Se conserva entero para que el reintento y su causa
+        # se puedan seguir desde el Auditor.
+        "last_error": (str(cls.get("detail") or "")[:240]
+                       if fallo_de_llamada else ""),
+        "call_failed": bool(fallo_de_llamada),
+        "capability": cls.get("capability"),
         "rows": rows,
         "age_seconds": cls.get("age_seconds"),
         "endpoint": block.get("path"),

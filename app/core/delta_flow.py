@@ -315,6 +315,65 @@ def build_delta_flow(rows: Any, *, symbol: str,
     }
 
 
+def canonical_quantities(report: Dict[str, Any]) -> List[Any]:
+    """Los totales, como magnitudes CANÓNICAS de la capa de unidades.
+
+    v1.57.0 · TODA EXPOSICIÓN SALE DE UNA SOLA CAPA DE UNIDADES.
+
+    El auditor de riesgo de modelo avisaba con «no se publicó ninguna exposición
+    con unidad declarada». No era falso: la capa canónica existía, con su
+    registro de unidades, su convenio de signo y su multiplicador… y nadie le
+    entregaba nada. Un registro que no registra es documentación, no un control.
+
+    Aquí se entrega lo que este módulo mide, en sus DOS representaciones, cada
+    una con la unidad que le corresponde:
+
+        DEX_SHARES    delta-acciones     el cálculo base
+        DEX_NOTIONAL  dólares            acciones x spot
+
+    El convenio es DEALER, declarado, no supuesto: positivo = el dealer está
+    largo de delta. Y viaja el spot con el que se convirtió, para que nadie
+    pueda comparar estos dólares con los de otro spot sin enterarse.
+    """
+    from . import units_registry as UR
+
+    if not isinstance(report, dict) or not report.get("ready"):
+        return []
+    sym = str(report.get("symbol") or "").upper()
+    if not sym:
+        return []
+
+    acciones = _f(report.get("total_dealer_delta_shares"))
+    dolares = _f(report.get("total_dealer_delta_dollars"))
+    if acciones is None:
+        return []
+    # El spot con el que se convirtió, deducido de lo publicado. Sin conversión
+    # posible no se inventa uno: se entrega sólo la magnitud en acciones.
+    spot = (dolares / acciones) if (dolares is not None and acciones) else None
+
+    out: List[Any] = []
+    comunes = dict(underlying=sym, sign_convention=UR.SIGN_DEALER,
+                   source="ITMQ_DELTA_FLOW", multiplier_source="REGISTRY",
+                   notes="presion delta del dealer acumulada en la ventana publicada")
+    try:
+        if spot is not None:
+            out.append(UR.delta_exposure(acciones, spot=spot,
+                                         representation=UR.REP_SHARES, **comunes))
+            out.append(UR.delta_exposure(dolares, spot=spot,
+                                         representation=UR.REP_NOTIONAL, **comunes))
+        else:
+            # Sin spot no hay nocional. La magnitud en acciones sigue siendo
+            # válida y se publica; inventar un spot para poder convertir sería
+            # exactamente lo que esta capa existe para impedir.
+            out.append(UR.delta_exposure(acciones, spot=0.0,
+                                         representation=UR.REP_SHARES, **comunes))
+    except Exception:
+        # Una unidad mal declarada tiene que romper el control, no colarse.
+        return []
+    return out
+
+
 __all__ = ["build_delta_flow", "trade_delta_flow", "dealer_delta_shares",
+           "canonical_quantities",
            "CONTRACT_MULTIPLIER", "BUCKET_SECONDS", "AUTHORITY", "METHOD",
            "SIN_DELTA", "SIN_LADO", "SIN_TAMANO", "SIN_INSTANTE", "CONTADA"]

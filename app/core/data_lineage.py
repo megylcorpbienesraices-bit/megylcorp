@@ -65,6 +65,23 @@ STALE = "STALE"
 
 DATA_STATES = (DATA_OK, NO_PROVIDER_DATA, FILTERED_ALL, PROVIDER_ERROR, PARSER_ERROR, STALE)
 
+# ── capacidad, que NO es lo mismo que ejecución ────────────────────────────────
+#
+# v1.57.0 · DOS PREGUNTAS DISTINTAS, DOS RESPUESTAS DISTINTAS.
+#
+#   CAPACIDAD   ¿existe este endpoint y estamos autorizados?   AVAILABLE/UNAVAILABLE
+#   EJECUCIÓN   ¿qué pasó en ESTA llamada?                     DATA_OK/NO_DATA/STALE/ERROR
+#
+# Mezclarlas produce las dos mentiras opuestas: una herramienta que existe y
+# está habilitada se enseñaba como LIVE aunque su llamada actual hubiera
+# fallado; y un canal que respondió bien pero sin actividad se pintaba como si
+# el proveedor estuviera roto.
+#
+# Que una herramienta EXISTA no autoriza a decir que su dato es de ahora.
+CAPABILITY_AVAILABLE = "AVAILABLE"
+CAPABILITY_UNAVAILABLE = "UNAVAILABLE"
+CAPABILITIES = (CAPABILITY_AVAILABLE, CAPABILITY_UNAVAILABLE)
+
 # Etiqueta única para el hueco. Nunca «$0.0».
 NO_DATA_LABEL = "SIN DATOS"
 
