@@ -3156,6 +3156,31 @@
     "test_una_llamada_fallida_no_convierte_el_endpoint_en_inexistente"
    ]
   },
+  "tests/test_v1570_certificador_live.py": {
+   "casos": 31,
+   "tests": [
+    "test_cada_estado_da_el_veredicto_correcto",
+    "test_cada_fila_lleva_las_ocho_columnas",
+    "test_el_bat_comprueba_lo_que_hace_falta_antes_de_arrancar",
+    "test_el_bat_de_windows_existe_con_saltos_CRLF",
+    "test_el_bat_no_usa_comandos_de_linux",
+    "test_el_consumidor_por_ruta_mira_el_bundle_de_verdad",
+    "test_el_informe_se_escribe_aunque_haya_fallos",
+    "test_la_redaccion_no_se_cuelga_con_anidamiento_absurdo",
+    "test_la_tabla_y_el_resumen_se_generan_sin_romperse",
+    "test_lo_que_no_es_secreto_se_conserva",
+    "test_los_siete_estados_existen_y_son_los_acordados",
+    "test_ninguna_credencial_sobrevive_a_la_redaccion",
+    "test_no_son_fallo_solo_los_tres_que_no_lo_son",
+    "test_toda_herramienta_del_catalogo_declara_su_consumidor",
+    "test_un_LIVE_OK_cuyo_modulo_esta_vacio_es_FAIL",
+    "test_un_LIVE_OK_que_llega_a_su_modulo_es_PASS",
+    "test_un_activo_que_no_arranca_no_impide_certificar_los_otros",
+    "test_una_clave_larga_suelta_tambien_se_redacta",
+    "test_una_herramienta_que_revienta_no_para_a_las_demas",
+    "test_una_ruta_vacia_se_denuncia_con_su_camino"
+   ]
+  },
   "tests/test_v1570_controles_del_modelo.py": {
    "casos": 27,
    "tests": [
@@ -3317,6 +3342,6 @@
    ]
   }
  },
- "total_minimo": 2765,
+ "total_minimo": 2796,
  "version": "1.56.0"
 }

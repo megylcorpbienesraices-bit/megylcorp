@@ -595,6 +595,18 @@ class QuantDataIntelligence:
     def snapshot(self) -> Dict[str, Any]:
         return {k: dict(v) for k, v in self._data.items()}
 
+    #: Los SIETE veredictos posibles. Uno por remedio distinto: confundirlos
+    #: cuesta una tarde buscando en el sitio equivocado.
+    VERDICTS = (
+        "LIVE_OK",              # sirve dato de este ciclo
+        "NO_DATA",              # respondió bien y no hubo actividad en la ventana
+        "SIN_INTENTAR",         # todavía no le ha tocado turno
+        "NO_AUTORIZADO",        # 401/403 · el plan no la incluye
+        "ENDPOINT_NO_EXISTE",   # 404 · no existe o la renombraron. No inventar sustituto
+        "REQUEST_INVALID",      # 400/422 · el cuerpo está mal. Reintentarlo no lo arregla
+        "PROVIDER_ERROR",       # 5xx, timeout, red · falla y se reintenta con backoff
+    )
+
     @staticmethod
     def _pending_diagnosis(tool: Any, state: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
         """Por qué esta herramienta NO está sirviendo, clasificado y accionable.
@@ -610,7 +622,7 @@ class QuantDataIntelligence:
         decide con lo que el proveedor contestó, no con una suposición.
         """
         if state == "LIVE":
-            return {"verdict": "OK", "action": "", "evidence": ""}
+            return {"verdict": "LIVE_OK", "action": "", "evidence": ""}
 
         intentos = list(getattr(tool, "attempts", None) or [])
         err = str(getattr(tool, "last_error", "") or "")
@@ -629,27 +641,27 @@ class QuantDataIntelligence:
                     "action": "el plan no incluye esta herramienta: no se puede arreglar desde aquí",
                     "evidence": err[:200]}
         if status == STATUS_MISSING_TOOL or "404" in err or "not found" in low:
-            return {"verdict": "NO_EXISTE",
+            return {"verdict": "ENDPOINT_NO_EXISTE",
                     "action": ("ninguna ruta declarada respondió: la herramienta no existe o "
                                "el proveedor la renombró. NO inventar un sustituto"),
                     "evidence": err[:200]}
         if status == STATUS_REQUEST_INVALID or "400" in err or "422" in err:
             campos = list(getattr(tool, "stripped_fields", None) or [])
-            return {"verdict": "EXISTE_CUERPO_INVALIDO",
+            return {"verdict": "REQUEST_INVALID",
                     "action": ("el endpoint existe y rechaza el cuerpo: hay que corregir "
                                "request/schema, no reintentarlo"),
                     "evidence": (getattr(tool, "validation_error", "") or err)[:200],
                     "fields": campos[:8]}
         if runtime.get("breaker") == "OPEN":
-            return {"verdict": "EXISTE_FALLA",
+            return {"verdict": "PROVIDER_ERROR",
                     "action": (f"circuito abierto tras {runtime.get('consecutive_failures')} "
                                f"fallos; reabre en {runtime.get('open_seconds_remaining')} s"),
                     "evidence": (runtime.get("last_error") or err)[:200]}
         if err:
-            return {"verdict": "EXISTE_FALLA",
+            return {"verdict": "PROVIDER_ERROR",
                     "action": "el endpoint responde y falla: corregir parsing o esperar al proveedor",
                     "evidence": err[:200]}
-        return {"verdict": "SIN_DATOS",
+        return {"verdict": "NO_DATA",
                 "action": "el proveedor respondió bien y no había actividad en la ventana",
                 "evidence": ""}
 
@@ -739,8 +751,8 @@ class QuantDataIntelligence:
 
         por_veredicto: Dict[str, List[str]] = {}
         for t in tools:
-            v = str((t.get("diagnosis") or {}).get("verdict") or "OK")
-            if v != "OK":
+            v = str((t.get("diagnosis") or {}).get("verdict") or "LIVE_OK")
+            if v != "LIVE_OK":
                 por_veredicto.setdefault(v, []).append(t["key"])
 
         return {
