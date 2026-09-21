@@ -86,7 +86,7 @@ dado por cerrados. Ocho están corregidos; uno queda parcial y declarado.
 | 27 | El KPI decía **`VWAP SESIÓN`** y enseñaba el VWAP **oscuro**. Dos medidas distintas, rótulo equivocado | ✅ |
 | 27 | `OFF-EXCHANGE CONFIRMADOS` es Σ `tradeCount` (**agregado**) y `PRINT MAYOR OFF-EX` sale de Equity Prints (**individual**). Llamarlos igual invitaba a compararlos | ✅ |
 | 40 | La regresión visual medía **sólo barras**. Campo de calor, relieve 3D, curvas acumuladas y vista RAW de puntos —la mitad de la terminal— no se medían | ✅ |
-| 6 | «Eliminar todas las lecturas legacy». El FlowViewModel **manda**, pero dejé la cinta local como **respaldo** si el modelo no viaja | ⚠️ **parcial** |
+| 6 | «Eliminar todas las lecturas legacy». Había dejado la cinta local como respaldo, y eso **era la UI consumiendo las estructuras internas** | ✅ |
 
 ### Sobre el punto 40
 
@@ -97,11 +97,24 @@ es precisamente el fallo que la suite numérica no ve. Tinta medida: 6,3 %–69,
 ninguno vacío. Y se prueban con datos positivos, negativos, mixtos y **con
 huecos a propósito**, que es el defecto que corregí en `normalize_matrix`.
 
-### Sobre el punto 6
+### Sobre el punto 6 · cerrado
 
-Quitar el respaldo dejaría la sección muda ante un bundle sin `flujo_ordenes`.
-Preferí que la ruta canónica mande y que el respaldo exista, declarado y con su
-prueba. **Si prefiere la ruta única sin red, lo quito y lo digo aquí.**
+Lo había dejado parcial por criterio propio. Al releerlo, usted ya lo había
+decidido:
+
+> *«Si esas estructuras todavía son necesarias para el motor, pueden quedarse
+> internamente, **pero la UI no puede consumirlas**.»*
+
+Mi respaldo era exactamente eso. Y era peor que una duplicación: hacía que un
+bundle roto se viera **sano** —las tarjetas se rellenaban por el otro camino— y
+un fallo que se disimula solo es un fallo que nadie arregla.
+
+La UI ya no lee `trace.option_prints` en ningún sitio. Los prints salen del
+carril `prints` del modelo, con su LKG. Sin modelo, la sección lo dice.
+
+Un efecto secundario que mejora la pantalla: la guardia contra `$0.0` era
+**global** —«¿hubo cinta?»— y ahora es **por carril**. Con la global, un carril
+con dato y otro sin él compartían veredicto, así que uno de los dos mentía.
 
 ### Lo que el propio proyecto cazó
 

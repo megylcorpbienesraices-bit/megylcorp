@@ -2712,18 +2712,20 @@
    ]
   },
   "tests/test_v1550_flow_view_wiring.py": {
-   "casos": 12,
+   "casos": 14,
    "tests": [
     "test_el_cliente_pide_el_modelo_y_lo_pasa_a_la_seccion",
     "test_el_lkg_no_cruza_de_un_activo_a_otro",
     "test_el_modelo_publica_los_carriles_por_separado",
     "test_el_print_mayor_se_elige_por_magnitud_no_por_signo",
-    "test_la_cinta_local_sigue_siendo_el_respaldo",
     "test_la_cobertura_del_agresor_viaja_con_el_sesgo",
     "test_la_prima_se_reparte_solo_por_agresor_resuelto",
     "test_la_seccion_incluye_el_modelo_en_su_salida",
     "test_la_tarjeta_escribe_la_edad_del_dato_en_vez_de_sin_datos",
+    "test_la_ui_no_lee_los_prints_del_trace",
     "test_las_tarjetas_leen_del_modelo_cuando_existe",
+    "test_los_prints_de_la_seccion_salen_del_carril_del_modelo",
+    "test_no_queda_una_segunda_ruta_hacia_las_tarjetas",
     "test_sin_prints_todo_es_none_y_nada_es_cero",
     "test_un_ciclo_vacio_no_borra_lo_que_ya_era_bueno"
    ]
@@ -3094,6 +3096,6 @@
    ]
   }
  },
- "total_minimo": 2539,
+ "total_minimo": 2541,
  "version": "1.56.0"
 }

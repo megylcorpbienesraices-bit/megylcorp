@@ -498,8 +498,16 @@ def test_the_screen_never_prints_a_zero_where_there_is_no_data():
     hubo». Las tres llamadas tienen que pasar por una comprobación explícita.
     """
     of = text("app/static/itmq_orderflow.js")
-    assert "const conCinta = S.prints.length > 0 || total > 0;" in of
-    assert "conCinta ? Q.money(v, 1) : 'SIN DATOS'" in of
+    # v1.56.2 · La guardia era GLOBAL —«¿hubo cinta?»— y ahora es POR CARRIL.
+    #
+    # Es más fuerte: con la global, un carril con dato y otro sin él compartían
+    # veredicto, así que uno de los dos mentía. Cada tarjeta responde ahora por
+    # su propio carril, y `SIN DATOS` sale sólo cuando ESE carril no tiene ni
+    # valor actual ni último valor bueno.
+    assert "if (lane.current == null) return 'SIN DATOS';" in of
+    assert "return Q.money(lane.current, 1);" in of
+    # Y ya no queda la ruta que recalculaba las tarjetas desde la cinta local.
+    assert "const conCinta = S.prints.length > 0" not in of
 
     app = text("app/static/itmq_app.js")
     assert "Q.isNum(cnt) ? Q.compact(cnt, 0) : 'SIN DATOS'" in app

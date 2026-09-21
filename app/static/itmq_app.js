@@ -509,7 +509,15 @@
       fmt: v => Q.compact(v, 1), bucketMs: Q.num((state.trace || {}).bar_interval_ms, 60000), empty: 'SIN FLUJO OBSERVADO',
     })).set(candles.map(c => ({ t: c.t, v: Q.num(c.sv, 0) })));
 
-    const prints = (state.trace || {}).option_prints || [];
+    /* v1.56.2 · El contador de prints sale del FlowViewModel, no del trace.
+     *
+     * Punto 6: la UI no puede consumir las estructuras internas del motor. Este
+     * `pill` leía `trace.option_prints` —la ruta antigua— mientras la sección
+     * de FLUJO ya leía el modelo, así que la cabecera podía contar una cosa y
+     * el panel de al lado enseñar otra sin que nada avisara. */
+    const laneP = ((state.bundle || {}).flujo_ordenes || {}).view_model;
+    const prints = (laneP && laneP.prints && Array.isArray(laneP.prints.current))
+      ? laneP.prints.current : [];
 
     // ── NET DRIFT · OFICIAL DE QUANT DATA ────────────────────────────────────
     //

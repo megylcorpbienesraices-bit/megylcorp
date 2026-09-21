@@ -19,10 +19,11 @@
     "dealer_intelligence: un componente ausente sale de la media en vez de puntuar cero con todo su peso.",
     "nextgen_terminal: `spot or 0.0` ordenaba los strikes por distancia a CERO y devolvia los mas bajos de la cadena; corregido, junto al charm y la prima del print.",
     "terminal_api: `cycle_id` ademas de `generation_id`, y commit transaccional del snapshot en el cliente.",
-    "REPASO FINAL: nueve huecos dados por cerrados sin estarlo. level_id y name faltaban en cada linea; la igualdad de muros no declaraba activo, sesion ni ciclo; el recuento de Dark Pool se paraba en el modelo y no llegaba a lo entregado; el periodo viajaba pero no se veia; la regresion visual solo media barras y dejaba fuera campo de calor, relieve, curvas y puntos."
+    "REPASO FINAL: nueve huecos dados por cerrados sin estarlo. level_id y name faltaban en cada linea; la igualdad de muros no declaraba activo, sesion ni ciclo; el recuento de Dark Pool se paraba en el modelo y no llegaba a lo entregado; el periodo viajaba pero no se veia; la regresion visual solo media barras y dejaba fuera campo de calor, relieve, curvas y puntos.",
+    "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
   ],
   "tests": {
-    "collected": 2539,
+    "collected": 2541,
     "passed": 2170,
     "failed": 0,
     "skipped": 0,
@@ -30,7 +31,7 @@
     "files": 170,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "0d9cbb5900696244adf8e0295fd024547e5cdeccffc5b9a696208a0dc3af5cca"
+    "plan_sha256": "80e21e9db087ebdd31736904ff797619a0edbd0ad5ab516ebf8ab0a87df293ca"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",

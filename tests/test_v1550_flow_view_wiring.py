@@ -123,8 +123,36 @@ def test_la_tarjeta_escribe_la_edad_del_dato_en_vez_de_sin_datos():
     assert "if (lane.current == null) return 'SIN DATOS';" in cuerpo
 
 
-def test_la_cinta_local_sigue_siendo_el_respaldo():
-    """Si el modelo no viaja, la seccion no puede quedarse muda."""
+def test_no_queda_una_segunda_ruta_hacia_las_tarjetas():
+    """v1.56.2 · Esta prueba exigia justo lo contrario, y estaba equivocada.
+
+    El respaldo desde la cinta local era la UI consumiendo las estructuras
+    internas del motor, que es lo que el punto 6 prohibe. Y era peor que una
+    duplicacion: hacia que un bundle roto se viera SANO —las tarjetas se
+    rellenaban por el otro camino— y un fallo que se disimula solo es un fallo
+    que nadie arregla.
+
+    Sin modelo, la seccion lo dice.
+    """
     js = Path("app/static/itmq_orderflow.js").read_text(encoding="utf-8")
-    resumen = js[js.index("function renderSummary()"):]
-    assert "S.buckets" in resumen[:2000]
+    resumen = js[js.index("function renderSummary() {"):js.index("function setMinPremium(v)")]
+    assert "renderSummaryFromModel(S.flowView); return;" in resumen
+    assert "S.buckets" not in resumen, "queda una segunda ruta hacia las tarjetas"
+    assert "el modelo de flujo no llego en este ciclo" in resumen.replace("ó", "o")
+
+
+def test_la_ui_no_lee_los_prints_del_trace():
+    """«Pueden quedarse internamente, pero la UI no puede consumirlas.»"""
+    flow = Path("app/static/itmq_orderflow.js").read_text(encoding="utf-8")
+    app = Path("app/static/itmq_app.js").read_text(encoding="utf-8")
+    for js, nombre in ((flow, "FLUJO"), (app, "APP")):
+        lecturas = [l for l in js.splitlines()
+                    if "option_prints" in l and not l.lstrip().startswith(("*", "//", "/*"))]
+        assert not lecturas, f"{nombre} sigue leyendo el trace:\n" + "\n".join(lecturas)
+
+
+def test_los_prints_de_la_seccion_salen_del_carril_del_modelo():
+    js = Path("app/static/itmq_orderflow.js").read_text(encoding="utf-8")
+    cuerpo = js[js.index("function applyFlowView(vm)"):js.index("function renderedBarCount()")]
+    assert "S.flowView && S.flowView.prints" in cuerpo
+    assert "S.prints = (lane && Array.isArray(lane.current)) ? lane.current : [];" in cuerpo

@@ -1642,7 +1642,17 @@
     if (!payload || typeof payload !== 'object') return;
     S.symbol = String(payload.symbol || '');
     S.candles = Array.isArray(payload.candles) ? payload.candles : [];
-    S.prints = Array.isArray(payload.option_prints) ? payload.option_prints : [];
+    /* v1.56.2 · LA UI NO LEE `option_prints` DEL TRACE.
+     *
+     * Punto 6 del cierre: «si esas estructuras todavía son necesarias para el
+     * motor, pueden quedarse internamente, pero la UI no puede consumirlas».
+     * Eso incluía este respaldo, que yo había dejado a propósito y que era
+     * exactamente la UI consumiéndolas.
+     *
+     * Los prints salen ahora del carril `prints` del FlowViewModel, que es la
+     * MISMA cinta de la que salen las tarjetas, las barras y QFLOW. Una sola
+     * ruta: si el modelo no viaja, la sección lo dice en vez de rellenarse por
+     * otro camino y parecer sana. */
     const last = S.candles.length ? S.candles[S.candles.length - 1] : null;
     const spot = Q.num(last && last.c, Q.num(payload?.profiles?.spot, NaN));
     // Los mismos niveles estructurales que TRACE: leer el flujo contra Call Wall,
@@ -1741,6 +1751,10 @@
 
   function applyFlowView(vm) {
     S.flowView = (vm && typeof vm === 'object' && vm.premiums) ? vm : null;
+    // ÚNICA fuente de los prints de la sección. Con LKG: un ciclo vacío no los
+    // borra, igual que no borra las barras.
+    const lane = S.flowView && S.flowView.prints;
+    S.prints = (lane && Array.isArray(lane.current)) ? lane.current : [];
     // Las barras de opciones salen del modelo, así que al llegar hay que
     // reconstruirlas: si sólo se repintaran las tarjetas, los carriles de
     // AGRESOR y PRIMA seguirían enseñando lo que hubiera calculado la cinta
@@ -1758,54 +1772,39 @@
     return S.buckets.filter(b => (Q.num(b.total, 0) > 0)).length;
   }
 
+  /**
+   * v1.56.2 · UNA sola ruta. La rama que recalculaba las tarjetas desde la
+   * cinta local desaparece.
+   *
+   * Existía como respaldo por si el modelo no viajaba, y era justo lo que el
+   * punto 6 prohíbe: dos fuentes para la misma pantalla. Peor aún, el respaldo
+   * hacía que un bundle roto se viera SANO —las tarjetas se rellenaban por el
+   * otro camino— y un fallo que se disimula solo es un fallo que nadie arregla.
+   *
+   * Sin modelo, la sección lo dice.
+   */
   function renderSummary() {
     if (S.flowView) { renderSummaryFromModel(S.flowView); return; }
     const set = (id, v) => { const x = document.getElementById(id); if (x) x.textContent = v; };
-    let buy = 0, sell = 0, total = 0, biggest = null;
-    let unknown = 0;
-    for (const b of S.buckets) { buy += b.buy; sell += b.sell; total += b.total; unknown += (b.unknown || 0); }
-    for (const p of S.prints) {
-      const prem = Math.abs(Q.num(p.premium, 0));
-      if (!biggest || prem > Math.abs(Q.num(biggest.premium, 0))) biggest = p;
-    }
-    // v1.43.0 · Sin cinta observada NO se publica `$0.0`.
-    //
-    // Un cero aquí afirma «hoy no se negoció prima», y eso es una conclusión, no un
-    // hueco. Cuando la sesión todavía no ha dejado ningún print —arranque, mercado
-    // cerrado, proveedor caído— el panel ya dice SIN FLUJO DIRECCIONAL debajo; que
-    // los KPIs de arriba dijeran `$0.0` a la vez era contradecirse en la misma
-    // pantalla. Un cero sólo se muestra cuando hubo prints y su suma es realmente
-    // cero, que es lo que distingue un dato de un vacío.
-    const conCinta = S.prints.length > 0 || total > 0;
-    const prima = (v) => (conCinta ? Q.money(v, 1) : 'SIN DATOS');
-    set('ofTotalPremium', prima(total));
-    set('ofBuyPremium', prima(buy));
-    set('ofSellPremium', prima(sell));
-    set('ofNetPremium', prima(buy - sell));
-    // La cobertura de clasificación explica el sesgo: un 8% clasificado no sostiene
-    // la misma lectura que un 95%, y eso tiene que verse junto al número.
-    const cov = total > 0 ? (buy + sell) / total * 100 : 0;
-    set('ofPrintCount', total > 0
-      ? `${S.prints.length} prints · ${cov.toFixed(0)}% con agresor`
-        + (unknown > 0 ? ` · ${Q.money(unknown, 1)} sin clasificar` : '')
-      : (conCinta ? String(S.prints.length) : 'sin cinta observada'));
-    set('ofBiggest', biggest ? Q.money(Math.abs(Q.num(biggest.premium)), 1) : '—');
-    set('ofBiggestDetail', biggest
-      ? `${Q.hhmm(Q.parseTime(biggest.t))} · ${String(biggest.option_type || '').toUpperCase()} ${Q.num(biggest.strike) || ''} · ${biggest.aggressor || ''}`
-      : '—');
-    // El sesgo se mide sobre la prima CLASIFICADA, no sobre el total: dividir por
-    // prima sin agresor diluía el sesgo hacia EQUILIBRADO siempre que la cinta
-    // llegara sin cotización, que es justo cuando peor se lee.
-    const clasificada = buy + sell;
-    const bias = clasificada > 0 ? (buy - sell) / clasificada : 0;
-    set('ofBias', clasificada <= 0
-      ? (total > 0 ? 'SIN CLASIFICAR' : '—')
-      : (bias > 0.12 ? 'COMPRADOR' : bias < -0.12 ? 'VENDEDOR' : 'EQUILIBRADO'));
+    for (const id of ['ofTotalPremium', 'ofBuyPremium', 'ofSellPremium', 'ofNetPremium'])
+      set(id, 'SIN DATOS');
+    set('ofPrintCount', 'el modelo de flujo no llegó en este ciclo');
+    set('ofBuyNote', 'agresor en ask');
+    set('ofSellNote', 'agresor en bid');
+    set('ofBiggest', '—');
+    set('ofBiggestDetail', '—');
+    set('ofBias', '—');
   }
 
   function setMinPremium(v) { S.minPremium = Math.max(0, Q.num(v, 0)); rebuild(); invalidateAll(); }
   function setMode(m) { S.mode = m === 'line' ? 'line' : 'area'; invalidateAll(); }
-  function setFollow(on) { S.link.follow = !!on; if (on) applyTrace({ symbol: S.symbol, candles: S.candles, option_prints: S.prints, levels: S.levels, bar_interval_ms: S.bucketMs }); }
+  function setFollow(on) {
+    S.link.follow = !!on;
+    // Sin `option_prints`: los prints son del modelo y no se reinyectan por la
+    // puerta de atrás al reencuadrar.
+    if (on) applyTrace({ symbol: S.symbol, candles: S.candles, levels: S.levels,
+                         bar_interval_ms: S.bucketMs });
+  }
 
   /** Criterio de marcado en oro del carril TOTAL. */
   function setGoldRule(rule) {

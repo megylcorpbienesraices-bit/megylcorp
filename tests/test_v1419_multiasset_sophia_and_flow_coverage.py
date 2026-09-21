@@ -181,8 +181,11 @@ def test_the_bias_is_measured_over_classified_premium_only():
     """Dividir por prima sin agresor diluía el sesgo hacia EQUILIBRADO justo cuando
     peor se lee."""
     src = text("app/static/itmq_orderflow.js")
-    assert "const clasificada = buy + sell;" in src
-    assert "(buy - sell) / clasificada" in src
+    # v1.56.2 · La rama que recalculaba desde la cinta local desapareció (punto
+    # 6: la UI no puede consumir las estructuras internas). La MISMA regla vive
+    # ahora en la única ruta, la del FlowViewModel.
+    assert "const clasificada = b + sl;" in src
+    assert "(b - sl) / clasificada" in src
     assert "'SIN CLASIFICAR'" in src
 
 
