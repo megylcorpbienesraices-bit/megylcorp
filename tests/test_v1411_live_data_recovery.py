@@ -228,6 +228,17 @@ def test_unknown_quota_advances_slowly_instead_of_blindly():
     from app.providers.quantdata.shared import QuotaGuard
 
     q = QuotaGuard()                      # sin telemetría todavía
+    # v1.57.4 · El tope de 4 era para «no avanzar a ciegas». Ya no se avanza a
+    # ciegas: el contador local aplica el contrato entero (240/60 s y 20/1 s)
+    # antes de pedir nada. En el PRIMER ciclo del proceso el freno es el contrato
+    # —ocho por segundo para el carril de páginas—, no una constante prudente.
+    # La garantía que importa sigue en pie: acotado y nunca ilimitado.
+    from app.providers.quantdata.shared import BURST_LIMIT, ENGINE_RESERVE
+    assert 1 <= q.budget_for_pages(30) <= BURST_LIMIT - ENGINE_RESERVE
+    # Y lo que SÍ tiene que seguir avanzando despacio: la telemetría RANCIA.
+    import time
+    q.note(remaining=240, limit=240, reset_seconds=60.0)
+    q.updated_at = time.time() - 300.0
     assert 1 <= q.budget_for_pages(30) <= 4
 
 

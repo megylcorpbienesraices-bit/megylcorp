@@ -2306,8 +2306,28 @@
     setInterval(() => { if (document.visibilityState === 'visible' && !replay.active) pullTrace(); }, 2500);
     // El precio es una lectura barata: puede ir mucho más rápido que la estructura.
     setInterval(() => { if (document.visibilityState === 'visible' && !replay.active) pullTick(); }, 350);
-    setInterval(() => { if (document.visibilityState === 'visible' && !replay.active) pullBundle(); }, 6000);
-    setInterval(() => { if (document.visibilityState === 'visible' && state.view === 'fuentes') pullDiagnostics(); }, 15000);
+    // v1.57.4 · EL PRIMER MINUTO NO ES EL RÉGIMEN PERMANENTE.
+    //
+    // 6 s para el paquete y 15 s para el diagnóstico es la cadencia correcta con
+    // la pantalla ya dibujada. Al abrir el programa no lo es: el carril de
+    // páginas hidrata el catálogo entero en unos segundos y la pantalla se
+    // enteraba hasta quince segundos después. Lo que el operador veía como «el
+    // programa tarda» era, en parte, la pantalla sin preguntar.
+    //
+    // Es una llamada local: no toca la cuota del proveedor. Se acelera sólo el
+    // arranque y se vuelve al régimen solo, sin depender de ningún estado.
+    const ARRANQUE_MS = 45000;
+    const abierto = Date.now();
+    const arrancando = () => (Date.now() - abierto) < ARRANQUE_MS;
+    const cadencia = (fn, rapido, regimen, cuando) => {
+      const paso = () => {
+        if (document.visibilityState === 'visible' && (!cuando || cuando())) fn();
+        setTimeout(paso, arrancando() ? rapido : regimen);
+      };
+      setTimeout(paso, arrancando() ? rapido : regimen);
+    };
+    cadencia(pullBundle, 1500, 6000, () => !replay.active);
+    cadencia(pullDiagnostics, 4000, 15000, () => state.view === 'fuentes');
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') { if (!replay.active) { pullTrace(); pullBundle(); } Q.redrawAll(); }
     });

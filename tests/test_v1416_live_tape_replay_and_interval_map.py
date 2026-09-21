@@ -158,10 +158,16 @@ def test_seeking_replays_every_section_not_only_trace():
 
 def test_the_live_cycle_never_overwrites_the_instant_being_replayed():
     src = text("app/static/itmq_app.js")
-    for guard in ("pullTrace(); }, 2500)", "pullBundle(); }, 6000)", "pullTick(); }, 350)"):
+    # v1.57.4 · El paquete y el diagnóstico ya no usan `setInterval` con una
+    # constante: el primer minuto va más deprisa y luego vuelve al régimen. Lo que
+    # se comprueba aquí no es la cadencia sino la GUARDA: ningún ciclo en vivo
+    # puede pisar el instante que el operador está reproduciendo.
+    for guard in ("pullTrace(); }, 2500)", "pullTick(); }, 350)"):
         i = src.find(guard)
         assert i > 0, guard
         assert "!replay.active" in src[max(0, i - 160):i], guard
+    assert "cadencia(pullBundle, 1500, 6000, () => !replay.active)" in src, (
+        "el paquete dejó de respetar la reproducción")
 
 
 def test_playback_waits_for_each_step_instead_of_stacking_requests():

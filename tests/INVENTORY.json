@@ -3413,8 +3413,34 @@
     "test_una_respuesta_suelta_NO_levanta_la_retencion_antes_de_tiempo",
     "test_una_ventana_deslizante_no_permite_el_doble_en_el_cambio_de_cubo"
    ]
+  },
+  "tests/test_v1574_arranque_instantaneo.py": {
+   "casos": 21,
+   "tests": [
+    "test_NUNCA_toca_el_entorno_ni_la_memoria_ni_las_credenciales",
+    "test_borra_por_patron_cerrado_no_por_comodin_abierto",
+    "test_como_estaba_tardaba_MAS_DE_DOS_MINUTOS",
+    "test_con_rafaga_el_catalogo_entero_esta_en_segundos",
+    "test_el_arranque_arma_la_rafaga",
+    "test_el_bat_es_de_windows",
+    "test_el_cambio_de_activo_NO_es_un_arranque_en_frio",
+    "test_el_ciclo_de_la_rafaga_es_la_ventana_de_rafaga",
+    "test_el_presupuesto_en_frio_es_el_del_contrato_no_el_de_regimen",
+    "test_el_primer_minuto_tiene_su_propia_cadencia",
+    "test_en_frio_la_rafaga_cubre_el_catalogo_entero",
+    "test_la_aceleracion_no_toca_la_cuota_del_proveedor",
+    "test_la_cadencia_rapida_CADUCA_sola",
+    "test_la_concurrencia_es_exactamente_lo_que_el_contrato_deja",
+    "test_la_pestaña_oculta_sigue_sin_preguntar",
+    "test_la_rafaga_entera_cabe_en_el_contrato",
+    "test_la_rafaga_es_al_menos_diez_veces_mas_rapida",
+    "test_la_telemetria_RANCIA_sigue_avanzando_despacio",
+    "test_no_queda_la_nota_suelta_de_la_auditoria",
+    "test_sin_rafaga_sigue_siendo_cosa_de_minutos",
+    "test_solo_borra_lo_que_se_regenera_solo"
+   ]
   }
  },
- "total_minimo": 2859,
+ "total_minimo": 2880,
  "version": "1.56.0"
 }

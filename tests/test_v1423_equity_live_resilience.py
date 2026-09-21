@@ -103,7 +103,13 @@ def test_quantdata_page_lane_is_bounded_and_not_motor_authority():
     # donde no hay nada en pantalla que proteger. Sigue siendo un semáforo con
     # una constante declarada, nunca ilimitado.
     assert "asyncio.Semaphore(BURST_CONCURRENCY if burst else PAGE_MAX_CONCURRENCY)" in src
-    assert "BURST_CONCURRENCY = 5" in src
+    # v1.57.4 · La constante ya no es un número a ojo: sale del contrato
+    # publicado —20 peticiones por segundo menos la reserva del motor—, así que
+    # la ráfaga no puede rozar el límite por mucho que cambie el plan.
+    assert "BURST_CONCURRENCY = BURST_LIMIT - ENGINE_RESERVE" in src
+    from app.providers.quantdata.intelligence import BURST_CONCURRENCY
+    from app.providers.quantdata.shared import BURST_LIMIT, ENGINE_RESERVE
+    assert 0 < BURST_CONCURRENCY <= BURST_LIMIT - ENGINE_RESERVE
     # Y la ráfaga está acotada por plazo, alcance y salida anticipada.
     assert "BURST_SECONDS" in src and "BURST_MAX_PRIORITY" in src
     assert "self._burst_until = 0.0" in src

@@ -388,10 +388,20 @@ class QuotaGuard:
             margen = self._margen(now, ENGINE_RESERVE)
             stale = (now - self.updated_at) > 120.0 if self.updated_at else True
             sin_telemetria = self.remaining is None or stale
+            nunca_vista = not self.updated_at
         if sin_telemetria:
-            # Sin cabeceras frescas queda el contador local, que ya es un freno
-            # real. Aun así se avanza despacio: el contador no sabe lo que hayan
-            # gastado otras instancias de la misma cuenta.
+            # v1.57.4 · NUNCA VISTA ≠ ENVEJECIDA. Son dos situaciones distintas y
+            # tratarlas igual estrangulaba el arranque.
+            #
+            #   · Nunca vista (`updated_at == 0`): es el primer ciclo del proceso.
+            #     No hay nada que hayan podido gastar «mientras no mirábamos»
+            #     porque no ha habido un mientras. El contador local ya aplica el
+            #     contrato entero, y la primera respuesta trae las cabeceras.
+            #   · Envejecida: llevamos dos minutos sin saber nada del servidor. Ahí
+            #     sí se avanza despacio, porque otra instancia de la misma cuenta
+            #     pudo gastar sin que nos enteráramos.
+            if nunca_vista:
+                return max(0, min(int(requested), margen))
             return max(0, min(int(requested), margen, 4))
         return max(0, min(int(requested), margen))
 

@@ -1,0 +1,290 @@
+"""v1.57.4 · AL ABRIR EL PROGRAMA NO HABÍA NINGUNA RÁFAGA.
+
+La ráfaga de arranque estaba armada SÓLO en `select_asset`. Al abrir la terminal
+—el único momento en el que el operador está mirando la pantalla vacía— el
+carril de páginas salía con el presupuesto de régimen: cuatro herramientas por
+ciclo, ciclos de quince segundos, concurrencia dos.
+
+Treinta y seis herramientas a ese ritmo son NUEVE CICLOS. Más de dos minutos.
+
+Y encima el contrato lo pagaba de sobra: 240 peticiones por 60 s dan para
+hidratar el catálogo entero en segundos. No era una limitación del proveedor;
+era que nadie había armado la ráfaga en el único sitio donde más falta hacía.
+
+Tres frenos, los tres nuestros:
+
+    1 · sin ráfaga al arrancar         → 4 por ciclo en vez de 8 por segundo
+    2 · presupuesto «nunca vista» = 4  → se trataba igual que telemetría rancia
+    3 · la pantalla preguntaba cada 6 s y el diagnóstico cada 15 s
+"""
+from __future__ import annotations
+
+import pytest
+
+from app.providers.quantdata.intelligence import (
+    BURST_CONCURRENCY, BURST_CYCLE_SECONDS, BURST_SECONDS, QuantDataIntelligence,
+    effective_priority,
+)
+from app.providers.quantdata.shared import (
+    BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE, QuotaGuard,
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1 · LA RÁFAGA SE ARMA AL ARRANCAR
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_el_arranque_arma_la_rafaga(monkeypatch):
+    """Con una clave válida, abrir el programa tiene que armar la ráfaga."""
+    import asyncio
+    import app.providers.quantdata.intelligence as I
+
+    monkeypatch.setenv("QUANTDATA_API_KEY", "qd_" + "0" * 32)
+    monkeypatch.setenv("QUANTDATA_ENABLED", "1")
+
+    class _ClienteMudo:
+        def __init__(self, *a, **k): pass
+        async def start(self): pass
+        async def close(self): pass
+
+    monkeypatch.setattr(I, "QuantDataClient", _ClienteMudo)
+
+    m = I.QuantDataIntelligence()
+    assert not m._bursting(), "recién construido no hay ráfaga todavía"
+
+    async def _abrir():
+        await m.start("DIA")
+        # El bucle no debe correr durante la prueba: sólo interesa el estado que
+        # deja `start`.
+        if m._task is not None:
+            m._task.cancel()
+            try:
+                await m._task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    asyncio.run(_abrir())
+    assert m.settings.configured, "la clave de prueba no pasó la validación"
+    assert m._bursting(), "al abrir el programa no había ráfaga"
+    assert m._arranque_en_frio is True
+
+
+def test_el_cambio_de_activo_NO_es_un_arranque_en_frio():
+    """En un cambio la pantalla ya tiene forma: sólo urge lo que dibuja."""
+    import asyncio
+    m = QuantDataIntelligence()
+    m._arranque_en_frio = True
+    asyncio.run(m.select_asset("QQQ"))
+    assert m._bursting()
+    assert m._arranque_en_frio is False
+
+
+def test_en_frio_la_rafaga_cubre_el_catalogo_entero():
+    """Guardia de código: la clase de prioridad no puede excluir a nadie en frío."""
+    import pathlib
+    src = pathlib.Path("app/providers/quantdata/intelligence.py").read_text("utf-8")
+    cuerpo = src.split("burst = self._bursting()", 1)[1].split("batch = sorted", 1)[0]
+    assert "self._arranque_en_frio" in cuerpo, (
+        "la ráfaga de arranque volvió a filtrar como si fuera un cambio de activo")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2 · EL TAMAÑO DE LA RÁFAGA SALE DEL CONTRATO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_la_concurrencia_es_exactamente_lo_que_el_contrato_deja():
+    assert BURST_CONCURRENCY == BURST_LIMIT - ENGINE_RESERVE == 8
+
+
+def test_el_ciclo_de_la_rafaga_es_la_ventana_de_rafaga():
+    assert BURST_CYCLE_SECONDS == BURST_WINDOW_S == 1.0
+
+
+def test_la_rafaga_entera_cabe_en_el_contrato():
+    """25 s de ráfaga a 8 por segundo no pueden romper las 240/60 s."""
+    peticiones = BURST_CONCURRENCY * (BURST_SECONDS / BURST_CYCLE_SECONDS)
+    assert peticiones <= 240, f"{peticiones:.0f} peticiones en la ráfaga"
+
+
+def test_el_presupuesto_en_frio_es_el_del_contrato_no_el_de_regimen():
+    q = QuotaGuard()                      # nunca se vio una cabecera
+    assert q.budget_for_pages(36) == BURST_LIMIT - ENGINE_RESERVE
+
+
+def test_la_telemetria_RANCIA_sigue_avanzando_despacio():
+    """No se relaja el caso que sí lo merece: otra instancia pudo gastar."""
+    import time
+    q = QuotaGuard()
+    q.note(remaining=240, limit=240, reset_seconds=60.0)
+    q.updated_at = time.time() - 300.0
+    assert q.budget_for_pages(36) == 4
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3 · CUÁNTO TARDA DE VERDAD, MEDIDO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _avanzar(q: QuotaGuard, segundos: float) -> None:
+    """Envejece el contador local sin dormir.
+
+    El guardián mide con el reloj real; la simulación avanza por ciclos. Se
+    retrasan los sellos en vez de esperar, que es lo mismo para una ventana
+    deslizante y no hace la prueba dependiente de la velocidad de la máquina.
+    """
+    from collections import deque
+    for v in (q._sostenida, q._rafaga):
+        v._sellos = deque(t - segundos for t in v._sellos)
+
+
+def _simular_arranque(*, con_rafaga: bool, tope_regimen: int | None = None) -> float:
+    """Reproduce el selector real y devuelve los segundos hasta tener todo.
+
+    No mide reloj de pared: cuenta ciclos del programador con su presupuesto y
+    su cadencia, que es lo que decide la espera del operador.
+    """
+    m = QuantDataIntelligence()
+    claves = list(m.catalog.keys())
+    pendientes = set(claves)
+    q = QuotaGuard()
+    t = 0.0
+    while pendientes and t < 600.0:
+        if con_rafaga and t < BURST_SECONDS:
+            presupuesto = q.burst_ceiling(len(pendientes))
+            paso = BURST_CYCLE_SECONDS
+        else:
+            presupuesto = q.budget_for_pages(len(pendientes))
+            if tope_regimen is not None:
+                presupuesto = min(presupuesto, tope_regimen)
+            paso = 15.0
+        orden = sorted(pendientes, key=lambda k: effective_priority(k, 0.0))
+        for k in orden[:presupuesto]:
+            pendientes.discard(k)
+        q.spend(presupuesto)
+        t += paso
+        _avanzar(q, paso)
+    return t
+
+
+def test_con_rafaga_el_catalogo_entero_esta_en_segundos():
+    segundos = _simular_arranque(con_rafaga=True)
+    assert segundos <= 10.0, f"{segundos:.0f} s hasta tener las 36 herramientas"
+
+
+def test_como_estaba_tardaba_MAS_DE_DOS_MINUTOS():
+    """La prueba de que el defecto era real y no una mejora cosmética.
+
+    Tal y como estaba: sin ráfaga y con el presupuesto de «telemetría dudosa»
+    aplicado también al primer ciclo del proceso —cuatro herramientas por ciclo
+    de quince segundos—.
+    """
+    segundos = _simular_arranque(con_rafaga=False, tope_regimen=4)
+    assert segundos >= 120.0, (
+        f"{segundos:.0f} s; si esto ya fuera rápido, la corrección no haría falta")
+
+
+def test_sin_rafaga_sigue_siendo_cosa_de_minutos():
+    """Sólo con arreglar el presupuesto no bastaba: hacía falta la ráfaga."""
+    segundos = _simular_arranque(con_rafaga=False)
+    assert segundos >= 60.0, f"{segundos:.0f} s"
+
+
+def test_la_rafaga_es_al_menos_diez_veces_mas_rapida():
+    con = _simular_arranque(con_rafaga=True)
+    antes = _simular_arranque(con_rafaga=False, tope_regimen=4)
+    assert antes / max(con, 1e-9) >= 10.0, f"{antes:.0f} s → {con:.0f} s"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4 · LA PANTALLA PREGUNTA MÁS DEPRISA MIENTRAS ARRANCA
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _js() -> str:
+    import pathlib
+    return pathlib.Path("app/static/itmq_app.js").read_text("utf-8")
+
+
+def test_el_primer_minuto_tiene_su_propia_cadencia():
+    js = _js()
+    assert "ARRANQUE_MS" in js, "la pantalla volvió a preguntar cada 6 s desde el segundo cero"
+    assert "cadencia(pullBundle, 1500, 6000" in js
+    assert "cadencia(pullDiagnostics, 4000, 15000" in js
+
+
+def test_la_cadencia_rapida_CADUCA_sola():
+    """Acelerar para siempre sería otra clase de defecto."""
+    js = _js()
+    trozo = js.split("const ARRANQUE_MS", 1)[1].split("cadencia(pullBundle", 1)[0]
+    assert "Date.now() - abierto" in trozo
+    assert "< ARRANQUE_MS" in trozo
+
+
+def test_la_aceleracion_no_toca_la_cuota_del_proveedor():
+    """Son llamadas al propio servidor de la terminal, no al proveedor."""
+    js = _js()
+    trozo = js.split("const ARRANQUE_MS", 1)[1].split("window.addEventListener", 1)[0]
+    for prohibido in ("quantdata", "fetchProvider", "X-RateLimit"):
+        assert prohibido not in trozo
+
+
+def test_la_pestaña_oculta_sigue_sin_preguntar():
+    js = _js()
+    trozo = js.split("const cadencia = ", 1)[1].split("cadencia(pullBundle", 1)[0]
+    assert "document.visibilityState === 'visible'" in trozo
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5 · LA LIMPIEZA BORRA CACHÉS, NO TRABAJO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _limpiar() -> str:
+    import pathlib
+    p = pathlib.Path("LIMPIAR.bat")
+    assert p.exists(), "hace falta una forma de limpiar sin borrar nada del programa"
+    crudo = p.read_bytes()
+    assert b"\r\n" in crudo and b"\n" not in crudo.replace(b"\r\n", b""), "CRLF"
+    return p.read_text("utf-8", errors="replace")
+
+
+def test_solo_borra_lo_que_se_regenera_solo():
+    txt = _limpiar()
+    for cache in ("__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+                  "*.pyc", "*.pyo"):
+        assert cache in txt, cache
+
+
+def test_NUNCA_toca_el_entorno_ni_la_memoria_ni_las_credenciales():
+    """Un limpiador que borra de más es peor que no limpiar."""
+    import re
+    txt = _limpiar()
+    ordenes = [l for l in txt.splitlines()
+               if re.search(r"\b(rd|del|rmdir|erase|format)\b", l, re.I)
+               and not l.strip().upper().startswith("REM")]
+    assert ordenes, "el limpiador dejó de borrar nada"
+    for orden in ordenes:
+        for intocable in (".venv", "storage", ".env", "logs", "data"):
+            assert intocable not in orden, (intocable, orden)
+
+
+def test_borra_por_patron_cerrado_no_por_comodin_abierto():
+    import re
+    txt = _limpiar()
+    for l in txt.splitlines():
+        if l.strip().upper().startswith("REM"):
+            continue
+        assert not re.search(r"\b(rd|rmdir)\s+/s\s+/q\s+\"?[A-Za-z]:", l), l
+        assert not re.search(r"del\s+/s\s+/q\s+\*\.\*", l), l
+
+
+def test_el_bat_es_de_windows():
+    txt = _limpiar()
+    for linux in ("/dev/null", "export ", "#!/bin/", "&&", "$(", "source "):
+        assert linux not in txt, f"«{linux}» no existe en Windows"
+    assert "pause" in txt
+
+
+def test_no_queda_la_nota_suelta_de_la_auditoria():
+    """`AUDIT_FIX.md` era una nota de una pasada concreta, ya en el CHANGELOG."""
+    import pathlib
+    assert not pathlib.Path("AUDIT_FIX.md").exists()
+    changelog = pathlib.Path("CHANGELOG_v1.56.0.md").read_text("utf-8")
+    assert "df2ca9d" in changelog, "el contenido tiene que seguir estando en algún sitio"

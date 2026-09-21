@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2859 casos / 183 ficheros**.
+sentinela en vez de describirlo. Inventario: **2880 casos / 184 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,7 +272,7 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2859 casos / 183 ficheros**.
+25 regresiones nuevas. Inventario: **2880 casos / 184 ficheros**.
 
 ## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
 
@@ -324,4 +324,52 @@ Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
 Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
 contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
 una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
-ráfaga. Inventario: **2859 casos / 183 ficheros**.
+ráfaga. Inventario: **2880 casos / 184 ficheros**.
+
+## REVISIÓN SOBRE `d6b8611` · Al abrir el programa no había ninguna ráfaga
+
+La ráfaga de arranque estaba armada **sólo** en `select_asset`. Al abrir la
+terminal —el único momento en el que el operador mira una pantalla vacía— el
+carril de páginas salía con el presupuesto de régimen: cuatro herramientas por
+ciclo, ciclos de quince segundos, concurrencia dos. Treinta y seis herramientas
+a ese ritmo son **nueve ciclos**.
+
+Y el contrato lo pagaba de sobra: 240 peticiones / 60 s dan para hidratar el
+catálogo entero en segundos. No era una limitación del proveedor.
+
+Tres frenos, los tres nuestros:
+
+1. **Sin ráfaga al arrancar.** Ahora se arma en `start()`, y en frío cubre el
+   catálogo **entero** —no sólo lo que dibuja la pantalla—, porque en frío no hay
+   a quién ceder el turno. En un cambio de activo sigue cubriendo sólo lo que
+   dibuja, que es donde esa distinción tiene sentido.
+2. **«Nunca vista» se trataba igual que «rancia».** El presupuesto de cuatro por
+   ciclo era para telemetría envejecida —otra instancia pudo gastar sin que nos
+   enteráramos—. En el primer ciclo del proceso no ha habido ningún «mientras»:
+   el freno es el contrato. La telemetría rancia sigue avanzando despacio.
+3. **La pantalla preguntaba cada 6 s y el diagnóstico cada 15 s** desde el
+   segundo cero. El primer minuto va a 1,5 s y 4 s, y vuelve al régimen solo.
+   Son llamadas al propio servidor: no tocan la cuota del proveedor.
+
+La concurrencia de ráfaga y su ciclo dejan de ser números a ojo y salen del
+contrato: `BURST_CONCURRENCY = BURST_LIMIT − ENGINE_RESERVE` = 8 por segundo, con
+ciclos de 1 s —la ventana de ráfaga—. Medido con el selector real:
+
+```
+ANTES (sin ráfaga, 4 por ciclo de 15 s) ····· 135 s
+AHORA (ráfaga en frío, 8 por segundo) ·······   5 s
+```
+
+### Residuos
+
+Barrido completo del repositorio: módulos de `app/` sin referencias (0), ficheros
+vacíos, sufijos de copia (`.bak`, `.orig`, `~`), `.bat` apuntando a rutas
+inexistentes, estáticos no cargados por ninguna plantilla y scripts sin usar.
+**El único huérfano real era `AUDIT_FIX.md`**, una nota de una pasada concreta
+cuyo contenido ya está en este CHANGELOG. Eliminado.
+
+Se añade `LIMPIAR.bat`, que borra **sólo** lo que se regenera solo —`__pycache__`,
+`*.pyc`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`— y tiene regresiones que
+le prohíben tocar `.venv`, `app\storage`, `.env`, logs o datos de mercado.
+
+21 regresiones nuevas. Inventario: **2880 casos / 184 ficheros**.

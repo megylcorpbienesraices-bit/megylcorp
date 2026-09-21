@@ -27,7 +27,8 @@ from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
                     TOOL_FORBIDDEN_FIELDS,
                     STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
-from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa
+from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
+                     BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE)
 from ...core.obs import note as _obs_note, expected as _obs_expected
 from ...core.data_hub_runtime import HUB_RUNTIME
 
@@ -51,8 +52,12 @@ PAGE_MAX_CONCURRENCY = 2
 # en cuanto esa prioridad está servida. Nunca toca la reserva del motor.
 BURST_SECONDS = 25.0
 BURST_MAX_PRIORITY = 1
-BURST_CONCURRENCY = 5
-BURST_CYCLE_SECONDS = 1.2
+# v1.57.4 · Ceñidos al contrato, no a una corazonada. El tope de ráfaga son 20
+# peticiones por segundo y la reserva del motor son 12: al carril de páginas le
+# quedan OCHO por segundo. Con ciclos de un segundo —la ventana de ráfaga— eso
+# es exactamente el máximo que el contrato permite sin rozarlo.
+BURST_CONCURRENCY = BURST_LIMIT - ENGINE_RESERVE
+BURST_CYCLE_SECONDS = BURST_WINDOW_S
 
 # Orden de carga tras un cambio de activo. Número más bajo = se pide antes.
 #
@@ -154,6 +159,10 @@ class QuantDataIntelligence:
         self._running = False
         self._cycle = 0
         self._burst_until = 0.0
+        # ¿Es la primera ráfaga del proceso? En frío no hay nada en pantalla y la
+        # ráfaga cubre el catálogo entero; en un cambio de activo, sólo lo que
+        # dibuja. Ver `refresh_due`.
+        self._arranque_en_frio = False
         # v1.57.1 · Instante desde el que una herramienta NUNCA SERVIDA lleva
         # esperando. Sin esta referencia, `now - self._fetched_at.get(key, 0.0)`
         # medía la espera desde 1970: toda herramienta sin servir envejecía de
@@ -178,7 +187,19 @@ class QuantDataIntelligence:
             self.client = QuantDataClient(self.settings)
             await self.client.start()
         self._stop = False
+        # v1.57.4 · LA RÁFAGA TAMBIÉN AL ARRANCAR.
+        #
+        # Estaba armada sólo en `select_asset`, así que al abrir el programa no
+        # había ninguna: el carril de páginas salía con presupuesto de régimen
+        # —4 por ciclo— y ciclos de 15 s. Treinta y seis herramientas a ese ritmo
+        # son NUEVE CICLOS: más de dos minutos de pantalla a medias en el peor
+        # momento posible, que es el único en el que el operador está mirando.
+        #
+        # Al abrir no hay nada en pantalla: es exactamente el caso para el que se
+        # escribió la ráfaga. El contrato la paga de sobra (240/60 s).
         if self._task is None or self._task.done():
+            self._burst_until = time.monotonic() + BURST_SECONDS
+            self._arranque_en_frio = True
             self._task = asyncio.create_task(self._loop(), name="itmq-quantdata-builtin-pages")
         self._wake.set()
 
@@ -223,8 +244,10 @@ class QuantDataIntelligence:
         # sembrada por una consulta previa y ser más vieja que este cambio.
         RAW_CACHE.clear_symbol(previous)
         RAW_CACHE.clear_symbol(sym)
-        # Ráfaga de arranque: lo que dibuja la pantalla, ya.
+        # Ráfaga de cambio de activo: lo que dibuja la pantalla, ya. A diferencia
+        # del arranque en frío, aquí la pantalla ya tiene forma.
         self._burst_until = time.monotonic() + BURST_SECONDS
+        self._arranque_en_frio = False
         if self.settings.configured:
             self._wake.set()
 
@@ -314,8 +337,13 @@ class QuantDataIntelligence:
                 # prioridad BASE mientras el lote ordena por la EFECTIVA dejaba el
                 # envejecimiento a medias: una herramienta que ya había ascendido a
                 # la clase que dibuja la pantalla seguía excluida de la ráfaga.
-                priority_due = [t for t in remaining_due
-                                if in_burst_class(t.key, self._waited(t.key, now))]
+                # En un cambio de activo la pantalla ya tiene forma y sólo urge lo
+                # que dibuja. En el ARRANQUE no hay nada, así que no hay a quién
+                # ceder el turno: entran todas, ordenadas por prioridad, y el
+                # contrato pone el techo.
+                priority_due = (list(remaining_due) if self._arranque_en_frio else
+                                [t for t in remaining_due
+                                 if in_burst_class(t.key, self._waited(t.key, now))])
                 if priority_due:
                     remaining_due = priority_due
                     # v1.57.2 · La ráfaga adelanta el RITMO, nunca cruza el LÍMITE.
@@ -327,6 +355,7 @@ class QuantDataIntelligence:
                     # Ya está servido lo que importa: la ráfaga se apaga sola sin
                     # esperar a que se cumpla su plazo.
                     self._burst_until = 0.0
+                    self._arranque_en_frio = False
                     burst = False
             # v1.44.0 · Los datos CRÍTICOS primero.
             #
