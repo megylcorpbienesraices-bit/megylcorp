@@ -20,6 +20,7 @@ from typing import Any, Dict
 from .client import QuantDataClient, QuantDataError
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
+from ...core.endpoint_runtime import EndpointRegistry
 from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
                     _validation_detail, repair_body, classify_provider_failure,
                     STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
@@ -100,6 +101,11 @@ _PRIORITY_DEFAULT = 3
 #: activo la exposición sigue yendo primero—, y una que lleva esperando sube de
 #: puesto hasta que le toca. Nadie se queda fuera para siempre.
 AGING_SECONDS = 45.0
+
+#: Runtime POR ENDPOINT: plazo calibrado con latencia medida, reintento con
+#: jitter y cortacircuitos. Nada se comparte entre herramientas, así que
+#: `dark_flow` con el circuito abierto no cambia un byte de `gex_by_strike`.
+ENDPOINT_RUNTIME = EndpointRegistry(default_timeout=10.0)
 
 #: Nada sube por encima de la clase crítica por envejecer: la exposición que
 #: dibuja el gráfico principal no puede perder su turno frente a las noticias.
@@ -392,6 +398,22 @@ class QuantDataIntelligence:
         epoch = self._epoch
         last_err = None
 
+        # v1.57.0 · El cortacircuitos decide SI se llama. No decide qué se
+        # muestra: mientras está abierto, el último valor bueno se sigue
+        # publicando con su edad. Dejar de llamar a un endpoint caído libera el
+        # turno para los que sí van a contestar.
+        rt = ENDPOINT_RUNTIME.get(tool.key)
+        permitido, motivo = rt.allow()
+        if not permitido:
+            snap = rt.snapshot()
+            detalle = (f"circuito {motivo}: {snap['consecutive_failures']} fallos seguidos · "
+                       f"reabre en {snap['open_seconds_remaining']:.0f} s · "
+                       f"último error: {snap['last_error'] or 'sin detalle'}")
+            tool.provider_status = STATUS_TRANSIENT
+            self._note_fault(tool, STATUS_TRANSIENT, detalle)
+            self._fetched_at[tool.key] = time.time()
+            return
+
         for path in tool.candidates():
             # Como máximo tres correcciones por ciclo. Un 400 que sobrevive a tres
             # correcciones dictadas por el propio proveedor no se arregla probando
@@ -431,10 +453,23 @@ class QuantDataIntelligence:
             # aislamiento por canal y Last Known Good. Cada herramienta es su propio
             # canal, así que un fallo de `dark-pool-levels` no tumba a `dark-flow`.
             _client = self.client
+            # v1.57.0 · PLAZO MEDIDO, no uno fijo para las treinta y seis.
+            #
+            # Un plazo único se equivoca en las dos direcciones: demasiado
+            # paciente con el que contesta en 200 ms —se esperan diez segundos
+            # para saber que está muerto, y ese turno se lo quitas a los sanos—
+            # y demasiado impaciente con el que legítimamente tarda ocho.
+            #
+            # Hasta tener muestra suficiente se usa el configurado: calibrar con
+            # tres datos es peor que no calibrar.
+            _rt = ENDPOINT_RUNTIME.get(tool.key)
+            _plazo = _rt.timeout() if _rt.calibrated() else (
+                self.settings.request_timeout_seconds + 1.0)
+            _t0 = time.monotonic()
             gate = await HUB_RUNTIME.fetch(
                 tool.key, ticker,
                 lambda: _client.post(path, body),
-                timeout_s=self.settings.request_timeout_seconds + 1.0,
+                timeout_s=_plazo,
                 accept_stale=False)
             if not gate.get("ready"):
                 inner = gate.get("exception")
@@ -444,15 +479,22 @@ class QuantDataIntelligence:
                 tool.note_attempt(path, detail)
                 tool.provider_status = STATUS_TRANSIENT
                 tool.mark_transient(detail)
+                _rt.record_failure(detail, status=STATUS_TRANSIENT)
                 self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
                 self._fetched_at[tool.key] = time.time()
                 return "STOP", detail
+            # Latencia REAL de esta llamada: es la que calibra el plazo futuro.
+            _rt.record_success(time.monotonic() - _t0)
             response = gate["payload"]
         except QuantDataError as exc:
             msg = str(exc)
             status = classify_provider_failure(exc)
             tool.provider_status = status
             tool.note_attempt(path, msg)
+            # Un 400 es culpa del cuerpo, no del canal: no cuenta para abrir el
+            # circuito, porque reintentarlo menos no lo arregla.
+            if status != STATUS_REQUEST_INVALID:
+                ENDPOINT_RUNTIME.get(tool.key).record_failure(msg, status=status)
 
             if status == STATUS_REQUEST_INVALID:
                 fields = getattr(exc, "validation_fields", None) or []
@@ -553,6 +595,64 @@ class QuantDataIntelligence:
     def snapshot(self) -> Dict[str, Any]:
         return {k: dict(v) for k, v in self._data.items()}
 
+    @staticmethod
+    def _pending_diagnosis(tool: Any, state: str, runtime: Dict[str, Any]) -> Dict[str, Any]:
+        """Por qué esta herramienta NO está sirviendo, clasificado y accionable.
+
+        v1.57.0 · PARA NO TENER QUE BUSCARLO A MANO.
+
+        El Auditor ya enseñaba el error crudo y las rutas probadas, pero dejaba
+        al lector la parte difícil: decidir si una herramienta en PENDIENTE es
+        un endpoint que NO EXISTE, uno que existe y NO ESTÁ AUTORIZADO, uno que
+        existe y FALLA, o uno que simplemente no se ha llamado todavía.
+
+        Son cuatro remedios distintos y confundirlos cuesta una tarde. Aquí se
+        decide con lo que el proveedor contestó, no con una suposición.
+        """
+        if state == "LIVE":
+            return {"verdict": "OK", "action": "", "evidence": ""}
+
+        intentos = list(getattr(tool, "attempts", None) or [])
+        err = str(getattr(tool, "last_error", "") or "")
+        status = str(getattr(tool, "provider_status", "") or "")
+        low = err.lower()
+
+        if not intentos and not err:
+            return {
+                "verdict": "SIN_INTENTAR",
+                "action": ("todavía no le ha tocado turno; si persiste varios minutos "
+                           "es presupuesto de cuota, no el proveedor"),
+                "evidence": f"{len(list(tool.candidates()))} ruta(s) declarada(s), 0 intentos",
+            }
+        if "401" in err or "403" in err or "unauthor" in low or "forbidden" in low:
+            return {"verdict": "NO_AUTORIZADO",
+                    "action": "el plan no incluye esta herramienta: no se puede arreglar desde aquí",
+                    "evidence": err[:200]}
+        if status == STATUS_MISSING_TOOL or "404" in err or "not found" in low:
+            return {"verdict": "NO_EXISTE",
+                    "action": ("ninguna ruta declarada respondió: la herramienta no existe o "
+                               "el proveedor la renombró. NO inventar un sustituto"),
+                    "evidence": err[:200]}
+        if status == STATUS_REQUEST_INVALID or "400" in err or "422" in err:
+            campos = list(getattr(tool, "stripped_fields", None) or [])
+            return {"verdict": "EXISTE_CUERPO_INVALIDO",
+                    "action": ("el endpoint existe y rechaza el cuerpo: hay que corregir "
+                               "request/schema, no reintentarlo"),
+                    "evidence": (getattr(tool, "validation_error", "") or err)[:200],
+                    "fields": campos[:8]}
+        if runtime.get("breaker") == "OPEN":
+            return {"verdict": "EXISTE_FALLA",
+                    "action": (f"circuito abierto tras {runtime.get('consecutive_failures')} "
+                               f"fallos; reabre en {runtime.get('open_seconds_remaining')} s"),
+                    "evidence": (runtime.get("last_error") or err)[:200]}
+        if err:
+            return {"verdict": "EXISTE_FALLA",
+                    "action": "el endpoint responde y falla: corregir parsing o esperar al proveedor",
+                    "evidence": err[:200]}
+        return {"verdict": "SIN_DATOS",
+                "action": "el proveedor respondió bien y no había actividad en la ventana",
+                "evidence": ""}
+
     def coverage(self) -> Dict[str, Any]:
         """Cobertura real por página integrada del proveedor."""
         now = time.time()
@@ -617,6 +717,12 @@ class QuantDataIntelligence:
                 "route": route,
                 "empty_reason": None if state in ("LIVE", "PENDIENTE") else empty["detail"],
                 "session": empty["session"]["session_date"],
+                # Plazo calibrado, latencia medida y cortacircuitos de ESTE endpoint.
+                "runtime": ENDPOINT_RUNTIME.get(key).snapshot(),
+                # El veredicto ya clasificado: existe / no existe / no autorizado /
+                # existe y falla / sin intentar, con el remedio de cada uno.
+                "diagnosis": self._pending_diagnosis(
+                    tool, state, ENDPOINT_RUNTIME.get(key).snapshot()),
             })
 
         pages = []
@@ -631,11 +737,20 @@ class QuantDataIntelligence:
                 "state": "LIVE" if live == len(states) and states else "PARCIAL" if live else "PENDIENTE",
             })
 
+        por_veredicto: Dict[str, List[str]] = {}
+        for t in tools:
+            v = str((t.get("diagnosis") or {}).get("verdict") or "OK")
+            if v != "OK":
+                por_veredicto.setdefault(v, []).append(t["key"])
+
         return {
             "configured": self.settings.configured,
             "running": self._running,
             "symbol": self._symbol,
             "cycle": self._cycle,
+            # Resumen accionable: qué hay que hacer y con cuántas herramientas.
+            "pending_by_verdict": {k: sorted(v) for k, v in sorted(por_veredicto.items())},
+            "endpoint_runtime": ENDPOINT_RUNTIME.snapshot(),
             "tools": sorted(tools, key=lambda t: (t["page"], t["title"])),
             "pages": pages,
             "live_tools": sum(1 for t in tools if t["state"] == "LIVE"),

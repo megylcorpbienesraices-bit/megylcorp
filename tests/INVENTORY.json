@@ -3193,6 +3193,26 @@
     "test_una_operacion_sin_lado_no_entra_con_signo_inventado"
    ]
   },
+  "tests/test_v1570_live_dia_spy_qqq.py": {
+   "casos": 45,
+   "tests": [
+    "test_cero_filas_no_se_publica_como_error",
+    "test_delta_min_cuadra_operacion_a_operacion",
+    "test_delta_min_no_depende_de_la_cadena",
+    "test_delta_min_publica_su_cobertura",
+    "test_el_muro_es_DERIVED_nunca_dato_del_proveedor",
+    "test_el_plazo_se_calibra_con_la_latencia_medida",
+    "test_el_resumen_agrupa_las_pendientes_por_remedio",
+    "test_los_dolares_son_las_acciones_por_el_spot",
+    "test_los_muros_declaran_como_se_puntuo_SU_strike",
+    "test_ninguna_herramienta_se_publica_LIVE_con_su_llamada_fallando",
+    "test_ninguna_herramienta_sigue_sin_intentarse_tras_varios_ciclos",
+    "test_si_varios_paneles_caen_a_la_vez_se_declara_UN_eslabon",
+    "test_toda_herramienta_que_no_sirve_lleva_su_causa_clasificada",
+    "test_un_carril_con_filas_no_se_publica_como_seccion_rota",
+    "test_un_circuito_abierto_no_arrastra_a_los_demas"
+   ]
+  },
   "tests/test_v1570_net_drift_y_flujo.py": {
    "casos": 12,
    "tests": [
@@ -3225,6 +3245,35 @@
     "test_una_herramienta_recien_servida_conserva_su_prioridad"
    ]
   },
+  "tests/test_v1570_runtime_por_endpoint.py": {
+   "casos": 24,
+   "tests": [
+    "test_abierto_no_se_martillea_al_proveedor",
+    "test_el_circuito_abierto_deja_de_LLAMAR_no_de_MOSTRAR",
+    "test_el_circuito_abre_tras_los_fallos_declarados",
+    "test_el_fetch_pregunta_al_cortacircuitos_antes_de_llamar",
+    "test_el_fetch_usa_el_plazo_medido_y_registra_la_latencia",
+    "test_el_jitter_respeta_el_techo_exponencial",
+    "test_el_plazo_esta_acotado_por_arriba_y_por_abajo",
+    "test_el_plazo_sigue_a_un_cambio_real_de_la_api",
+    "test_el_registro_publica_la_politica_para_poder_discutirla",
+    "test_el_techo_esta_acotado",
+    "test_la_espera_crece_con_los_fallos",
+    "test_la_ventana_de_apertura_esta_acotada",
+    "test_la_ventana_de_latencias_no_crece_sin_limite",
+    "test_seis_endpoints_que_fallan_a_la_vez_no_reintentan_a_la_vez",
+    "test_si_la_prueba_falla_el_circuito_se_reabre_mas_tiempo",
+    "test_sin_fallos_no_hay_espera",
+    "test_sin_muestra_suficiente_se_usa_el_plazo_configurado",
+    "test_un_cuerpo_invalido_no_abre_el_circuito",
+    "test_un_endpoint_caido_no_toca_el_estado_de_ningun_otro",
+    "test_un_endpoint_legitimamente_lento_no_se_corta_antes_de_tiempo",
+    "test_un_endpoint_rapido_deja_de_robar_diez_segundos_a_la_ronda",
+    "test_un_fallo_no_borra_las_latencias_medidas",
+    "test_una_prueba_acertada_cierra_el_circuito_y_reinicia_la_ventana",
+    "test_vencida_la_apertura_pasa_UNA_sola_prueba"
+   ]
+  },
   "tests/test_v1570_walls_oi_ausente.py": {
    "casos": 13,
    "tests": [
@@ -3241,6 +3290,6 @@
    ]
   }
  },
- "total_minimo": 2669,
+ "total_minimo": 2738,
  "version": "1.56.0"
 }
