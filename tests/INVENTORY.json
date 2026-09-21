@@ -3209,6 +3209,22 @@
     "test_un_minuto_sin_dato_no_se_dibuja_como_cero"
    ]
   },
+  "tests/test_v1570_programador_sin_hambre.py": {
+   "casos": 13,
+   "tests": [
+    "test_aguanta_presupuestos_distintos",
+    "test_cada_ventana_de_espera_gana_un_puesto",
+    "test_el_orden_entre_clases_se_respeta",
+    "test_el_orden_estricto_SI_mataba_de_hambre_a_la_cola",
+    "test_el_selector_real_usa_la_regla",
+    "test_lo_que_dibuja_el_grafico_se_sirve_en_el_primer_ciclo",
+    "test_nada_sube_por_encima_de_la_clase_critica",
+    "test_ninguna_herramienta_se_queda_sin_intentar",
+    "test_una_critica_no_se_degrada_ni_se_mejora",
+    "test_una_espera_absurda_no_rompe_la_regla",
+    "test_una_herramienta_recien_servida_conserva_su_prioridad"
+   ]
+  },
   "tests/test_v1570_walls_oi_ausente.py": {
    "casos": 13,
    "tests": [
@@ -3225,6 +3241,6 @@
    ]
   }
  },
- "total_minimo": 2656,
+ "total_minimo": 2669,
  "version": "1.56.0"
 }

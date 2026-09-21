@@ -76,6 +76,49 @@ _PRIORITY: dict[str, int] = {
 }
 _PRIORITY_DEFAULT = 3
 
+#: Cada cuántos segundos de espera una herramienta gana un puesto de prioridad.
+#:
+#: v1.57.0 · LA COLA SE MORÍA DE HAMBRE.
+#:
+#: El lote se elegía así:
+#:
+#:     batch = sorted(due, key=lambda t: (_PRIORITY[t.key], ultimo_fetch))[:presupuesto]
+#:
+#: Con cuota corta, el presupuesto no da para todas. Y como el orden es estricto
+#: por prioridad, una herramienta de la cola NO entra mientras quede una de
+#: cabeza pendiente. Con refresco rápido, las de cabeza vencen en cada ciclo, así
+#: que las de cola no entran NUNCA.
+#:
+#: Medido sobre el catálogo real con presupuesto de 6 páginas por ciclo:
+#: 26 de 36 herramientas sin un solo intento en 200 ciclos. Eso es lo que el
+#: Auditor enseñaba como «sin intentos · 1 rutas candidatas» y como 15/34
+#: herramientas vivas: no era un fallo del proveedor ni de autorización, era el
+#: programador que jamás las llamaba.
+#:
+#: El envejecimiento lo arregla sin tocar el orden cuando importa: una
+#: herramienta recién servida conserva su prioridad —así que tras un cambio de
+#: activo la exposición sigue yendo primero—, y una que lleva esperando sube de
+#: puesto hasta que le toca. Nadie se queda fuera para siempre.
+AGING_SECONDS = 45.0
+
+#: Nada sube por encima de la clase crítica por envejecer: la exposición que
+#: dibuja el gráfico principal no puede perder su turno frente a las noticias.
+AGING_FLOOR = 0
+
+
+def effective_priority(key: str, waited_seconds: float) -> int:
+    """Prioridad con la espera descontada. Más bajo = antes.
+
+    Pura y sin estado a propósito: es la regla que decide quién entra en el lote
+    y tiene que poder probarse sola.
+    """
+    base = _PRIORITY.get(key, _PRIORITY_DEFAULT)
+    if base <= AGING_FLOOR:
+        return base
+    espera = max(0.0, float(waited_seconds or 0.0))
+    ascensos = int(espera // AGING_SECONDS)
+    return max(AGING_FLOOR, base - ascensos)
+
 
 class QuantDataIntelligence:
     """Recolector de páginas integradas del proveedor."""
@@ -246,8 +289,11 @@ class QuantDataIntelligence:
             # mientras la exposición —que es la que dibuja TRACE— esperaba al ciclo
             # siguiente. La prioridad la fija para qué sirve cada herramienta, no
             # cuánto lleva sin refrescarse.
+            # v1.57.0 · Con el tiempo esperado descontado, para que la cola no
+            # se muera de hambre. Ver `effective_priority`.
             batch = sorted(remaining_due,
-                           key=lambda t: (_PRIORITY.get(t.key, _PRIORITY_DEFAULT),
+                           key=lambda t: (effective_priority(
+                                              t.key, now - self._fetched_at.get(t.key, 0.0)),
                                           self._fetched_at.get(t.key, 0.0)))[:allowed]
             if batch:
                 # Las páginas son corroboración, no autoridad del motor. Lanzar ocho
