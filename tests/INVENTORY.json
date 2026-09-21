@@ -3096,7 +3096,7 @@
    ]
   },
   "tests/test_v1570_auditoria_integral.py": {
-   "casos": 13,
+   "casos": 15,
    "tests": [
     "test_atribuir_concentraciones_no_barre_toda_la_cinta",
     "test_describir_un_nivel_no_avanza_su_contador_de_persistencia",
@@ -3107,13 +3107,15 @@
     "test_el_lkg_no_crece_sin_limite_al_pasar_las_sesiones",
     "test_el_mismo_ciclo_leido_diez_veces_sigue_siendo_un_ciclo",
     "test_el_nivel_que_se_mueve_reestrena_contador_aunque_repita_ciclo",
+    "test_el_preflight_de_empaquetado_no_ensucia_el_arbol_que_va_a_sellar",
     "test_el_trace_nombra_el_ciclo_al_auditar_la_identidad_de_niveles",
     "test_la_ventana_de_atribucion_sigue_siendo_la_misma",
+    "test_las_herramientas_de_release_declaran_que_no_escriben_bytecode",
     "test_ningun_modulo_de_app_sella_con_datetime_now_ingenuo",
     "test_un_ciclo_nuevo_si_avanza_el_contador"
    ]
   }
  },
- "total_minimo": 2554,
+ "total_minimo": 2556,
  "version": "1.56.0"
 }

@@ -15,6 +15,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# v1.57.0 · El gate comprueba que el árbol está limpio de artefactos de build.
+# Si sus propios imports y sus subprocesos de pytest dejan `__pycache__` por el
+# camino, se suspende a sí mismo. Sólo lee y verifica: no escribe bytecode.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 PRODUCTION_LOCK = ROOT / "requirements.production.lock.txt"
 WINDOWS_LOCK = ROOT / "requirements.windows.lock.txt"
 TEST_LOCK = ROOT / "requirements.test.lock.txt"

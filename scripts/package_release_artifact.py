@@ -24,13 +24,27 @@ FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 ZIP_COMPRESSION = zipfile.ZIP_STORED  # cross-host byte reproducibility; no zlib dependency
 
 # The packager must not dirty the tree merely by importing its release guards.
-_previous_dont_write_bytecode = sys.dont_write_bytecode
+#
+# v1.57.0 · LA GUARDA SE LEVANTABA DEMASIADO PRONTO.
+#
+# Esto protegía SÓLO el import de `release_gate_full` y devolvía la bandera a su
+# sitio a continuación. Pero `release_traceability_guard()` importa
+# `verify_release_artifact` de forma perezosa, ya dentro del preflight y con la
+# bandera restaurada, así que escribía
+# `scripts/__pycache__/verify_release_artifact.cpython-3XX.pyc`… y la línea
+# siguiente, `artifact_cleanliness_guard()`, rechazaba el árbol por contener un
+# artefacto de build. Sobre un árbol limpio la comprobación fallaba por algo que
+# se acababa de escribir ella misma, y no había forma de que pasara nunca.
+#
+# El empaquetador sólo LEE y COMPRIME: no tiene ningún motivo para dejar
+# bytecode en el árbol que está a punto de sellar. Así que la bandera se pone y
+# se queda puesta durante toda la ejecución, y viaja también por el entorno para
+# que los subprocesos —el gate completo lanza pytest por particiones— no
+# ensucien lo que luego se va a hashear.
 sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.path.insert(0, str(SCRIPTS))
-try:
-    import release_gate_full as gate  # noqa: E402
-finally:
-    sys.dont_write_bytecode = _previous_dont_write_bytecode
+import release_gate_full as gate  # noqa: E402
 
 
 class PackageError(SystemExit):

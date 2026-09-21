@@ -295,3 +295,73 @@ def test_la_ventana_de_atribucion_sigue_siendo_la_misma(monkeypatch):
         assert fila["trades"] == esperadas, (
             f"en {fila['t']} la ventana trajo {fila['trades']} operaciones y "
             f"por definición caben {esperadas}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5 · EL EMPAQUETADO SE SUSPENDÍA A SÍ MISMO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_el_preflight_de_empaquetado_no_ensucia_el_arbol_que_va_a_sellar():
+    """Fallaba por un artefacto de build que acababa de escribir él mismo.
+
+    `release_traceability_guard()` importa `verify_release_artifact` de forma
+    perezosa, dentro del preflight. La guarda que evitaba dejar bytecode cubría
+    sólo el import de `release_gate_full` y se levantaba justo después, así que
+    ese segundo import escribía `scripts/__pycache__/verify_release_artifact
+    .cpython-3XX.pyc` — y la línea SIGUIENTE, `artifact_cleanliness_guard()`,
+    rechazaba el árbol por contener un artefacto de build.
+
+    Sobre un árbol limpio la comprobación no podía pasar NUNCA, ni con el
+    toolchain correcto: `PACKAGING UNLOCKED` era inalcanzable.
+
+    Lo que se mide es el DELTA, no el estado: esta misma suite deja su propio
+    `__pycache__` al ejecutarse, así que exigir un árbol limpio haría la prueba
+    dependiente de quién corrió antes. Lo que no puede ocurrir es que el
+    preflight añada ni un fichero.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+
+    def residuo() -> set:
+        fuera = set()
+        for d in root.rglob("__pycache__"):
+            if "node_modules" in d.parts or ".git" in d.parts:
+                continue
+            fuera.add(str(d.relative_to(root)))
+            fuera.update(str(f.relative_to(root)) for f in d.glob("*.pyc"))
+        return fuera
+
+    antes = residuo()
+    proc = subprocess.run(
+        [sys.executable, str(root / "scripts/package_release_artifact.py"), "--check"],
+        cwd=str(root), capture_output=True, text=True, timeout=600,
+    )
+    nuevos = sorted(residuo() - antes)
+
+    assert not nuevos, (
+        "el preflight dejó bytecode en el árbol que está a punto de sellar, y "
+        "es lo que después hace que se rechace a sí mismo: " + ", ".join(nuevos))
+
+    # Con el árbol limpio de partida, además tiene que LLEGAR a un veredicto.
+    # Cuál sea depende del toolchain de la máquina, y eso es otra cosa.
+    salida = proc.stdout + proc.stderr
+    if not antes:
+        assert ("PACKAGING PREFLIGHT PASS" in salida
+                or "PACKAGING BLOCKED" in salida), salida[-600:]
+        assert "artefactos de desarrollo/temporal/build empaquetados" not in salida
+
+
+def test_las_herramientas_de_release_declaran_que_no_escriben_bytecode():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("scripts/package_release_artifact.py", "scripts/release_gate_full.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        assert "sys.dont_write_bytecode = True" in src, rel
+        assert 'os.environ["PYTHONDONTWRITEBYTECODE"] = "1"' in src, (
+            f"{rel}: los subprocesos de pytest también ensucian el árbol")
+    # Y la guarda ya no se devuelve a su sitio a mitad de la ejecución.
+    src = (root / "scripts/package_release_artifact.py").read_text(encoding="utf-8")
+    assert "_previous_dont_write_bytecode" not in src
