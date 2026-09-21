@@ -241,14 +241,29 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
     # primer valor MEDIDO. Así, una sesión en la que el proveedor nunca publicó
     # prima de calls no enseña «0 $ acumulados» —que es una afirmación— sino
     # SIN DATOS, que es la verdad.
+    # v1.57.0 · LA PRIMA A MEDIO SE RECIBÍA, SE GUARDABA Y NO LA MIRABA NADIE.
+    #
+    # `midMarketCallPremium` / `midMarketPutPremium` llegan del proveedor, se
+    # normalizan a `mid_call_premium` / `mid_put_premium` y se copian al bucket
+    # como `mid_call` / `mid_put`. Ahí morían: no se acumulaban y no se dibujaban.
+    #
+    # Y no son un adorno. La prima PAGADA y la prima A MEDIO miden lo mismo con
+    # dos varas distintas: cuánto se desembolsó frente a cuánto valía el contrato
+    # en el punto medio de la horquilla. Que las dos curvas se separen es la
+    # lectura: si lo pagado va muy por encima de lo que valía a medio, alguien
+    # está cruzando la horquilla con prisa, y esa prisa es la señal.
     call_cum = put_cum = call_vol_cum = put_vol_cum = None
-    missing = {"call": 0, "put": 0, "call_volume": 0, "put_volume": 0, "price": 0}
+    mid_call_cum = mid_put_cum = None
+    missing = {"call": 0, "put": 0, "call_volume": 0, "put_volume": 0, "price": 0,
+               "mid_call": 0, "mid_put": 0}
     series: List[Dict[str, Any]] = []
     for i, c in enumerate(clean):
         call_cum = _acc(call_cum, c["call"])
         put_cum = _acc(put_cum, c["put"])
         call_vol_cum = _acc(call_vol_cum, c["call_volume"])
         put_vol_cum = _acc(put_vol_cum, c["put_volume"])
+        mid_call_cum = _acc(mid_call_cum, c["mid_call"])
+        mid_put_cum = _acc(mid_put_cum, c["mid_put"])
         for field in missing:
             if c.get(field) is None:
                 missing[field] += 1
@@ -268,6 +283,9 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
             "cum_net": _r(_add(call_cum, put_cum)),
             "cum_call_volume": _r(call_vol_cum),
             "cum_put_volume": _r(put_vol_cum),
+            "cum_mid_call": _r(mid_call_cum),
+            "cum_mid_put": _r(mid_put_cum),
+            "cum_mid_net": _r(_add(mid_call_cum, mid_put_cum)),
             "open": bool(open_bucket and i == len(clean) - 1),
         })
 
@@ -296,6 +314,9 @@ def build_net_drift(rows: Any, *, symbol: str, now: Optional[datetime] = None,
         "cum_net_premium": _r(_add(call_cum, put_cum)),
         "cum_call_volume": _r(call_vol_cum),
         "cum_put_volume": _r(put_vol_cum),
+        "cum_mid_call_premium": _r(mid_call_cum),
+        "cum_mid_put_premium": _r(mid_put_cum),
+        "cum_mid_net_premium": _r(_add(mid_call_cum, mid_put_cum)),
         # Cuántos buckets llegaron SIN cada campo. Si esto no es cero, la curva
         # tiene huecos reales y el Auditor puede decir exactamente cuántos.
         "missing_by_field": dict(missing),

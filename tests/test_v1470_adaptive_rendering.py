@@ -1025,7 +1025,12 @@ def test_net_drift_has_a_total_lane_with_declared_gold_marking():
     assert "S.goldRule" in body, "el criterio se elige"
     assert "mean * 10" in body and "slice(0, 3)" in body
     # La media se dibuja: es contra lo que destacan.
-    assert "media ${Q.money(mean, 0)}" in body
+    # v1.57.0 · La media pasó de la CABECERA a una pastilla sobre su propia
+    # línea: leer «cuánto destaca esta barra» obligaba a saltar de la línea al
+    # encabezado y volver. Lo que este guardia protege es que la media SE VEA y
+    # esté rotulada, no en qué esquina se imprime.
+    assert "Prom ${Q.money(mean, 0)}" in body, "la media tiene que llevar su cifra"
+    assert "setLineDash([4, 3])" in body, "y su línea discontinua de referencia"
     assert "function setGoldRule(" in js
     html = _read("app/templates/terminal.html")
     assert 'id="ofDriftTotal"' in html and 'id="ofGold"' in html

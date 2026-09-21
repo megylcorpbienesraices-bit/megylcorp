@@ -716,6 +716,7 @@
     ctx.save();
     ctx.beginPath(); ctx.rect(box.x, box.y - 14, box.w, box.h + 14); ctx.clip();
     const tall = [];
+    const sumas = [];
     let painted = 0;
     const totalBins = laneBins(box, win);
     for (const r of totalBins.rows) {
@@ -738,6 +739,37 @@
       ctx.fillRect(bx, y0 - h, bw, h);
       painted += 1;
       if (big) tall.push({ x: bx + bw / 2, y, total: agg.sum });
+      sumas.push(agg.sum);
+    }
+
+    /* v1.57.0 · LA MEDIA, para saber contra qué destaca una barra.
+     *
+     * Sin referencia, una barra alta sólo dice «ésta es la más alta de lo que
+     * se ve». Con la media dibujada dice cuántas veces la supera, que es la
+     * pregunta real. Misma línea y misma pastilla que en Net Drift: el mismo
+     * significado se lee igual en las dos pantallas.
+     */
+    if (sumas.length) {
+      const media = sumas.reduce((a, b) => a + b, 0) / sumas.length;
+      if (media > 0) {
+        const my = Math.round(sy(media)) + 0.5;
+        if (my > box.y && my < box.y + box.h) {
+          const avgC = Q.token('--info-600', '#3b82f6');
+          ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = Q.alpha(avgC, 0.85); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(box.x, my); ctx.lineTo(box.x + box.w, my); ctx.stroke();
+          ctx.setLineDash([]);
+          const txt = `Prom ${Q.money(media, 0)}`;
+          ctx.font = '700 9px ui-monospace, monospace';
+          const pw = ctx.measureText(txt).width + 12;
+          const px0 = box.x + box.w - pw - 2;
+          ctx.fillStyle = Q.alpha(avgC, 0.9);
+          Q.roundRect(ctx, px0, my - 7, pw, 14, 4); ctx.fill();
+          ctx.fillStyle = Q.token('--panel', '#0d131c');
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(txt, px0 + pw / 2, my);
+        }
+      }
     }
     // Ejes dibujados pero ningun contenedor con prima: el carril quedaria en
     // blanco sin decir por que. Un carril vacio sin causa es indistinguible de
@@ -1038,7 +1070,8 @@
       // v1.55.0 · Un bucket sin acumulado es un HUECO, no un cero. Con `0` la
       // curva caia al eje y afirmaba que la sesion se habia vaciado.
       vis.push({ t, call: Q.num(p.cum_call, NaN), put: Q.num(p.cum_put, NaN),
-        net: Q.num(p.cum_net, NaN), price: Q.num(p.price, NaN), open: !!p.open });
+        net: Q.num(p.cum_net, NaN), mid: Q.num(p.cum_mid_net, NaN),
+        price: Q.num(p.price, NaN), open: !!p.open });
     }
     if (!vis.length) { empty(ctx, env, 'SIN DATOS EN LA VENTANA'); return false; }
 
@@ -1046,7 +1079,7 @@
     // es la lectura: una curva que no muestra su cruce por cero no dice nada.
     let lo = 0, hi = 0;
     for (const v of vis) {
-      for (const x of [v.call, v.put, v.net]) {
+      for (const x of [v.call, v.put, v.net, v.mid]) {
         if (!Q.isNum(x)) continue;   // un hueco no estira ni encoge la escala
         lo = Math.min(lo, x); hi = Math.max(hi, x);
       }
@@ -1081,7 +1114,18 @@
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.stroke();
       ctx.restore();
     };
-    line('net', Q.alpha(Q.token('--text-dim', '#8494ad'), 0.75), 1, [4, 3]);
+    /* v1.57.0 · CUATRO CURVAS, y cada una dice algo distinto.
+     *
+     * El NETO pasa a blanco sólido: es la que se lee primero y con trazo
+     * discontinuo y apagado competía con la rejilla.
+     *
+     * La cuarta —prima A MEDIO— es dato del proveedor que se recibía y no se
+     * dibujaba. Va en azul y más fina que las otras: acompaña a la de prima
+     * pagada, no compite con ella. Su distancia a la blanca ES la lectura.
+     */
+    const midC = Q.token('--info-600', '#3b82f6');
+    line('mid', Q.alpha(midC, 0.9), 1.5);
+    line('net', Q.token('--text', '#e6edf7'), 1.8);
     line('call', posC, 1.8);
     line('put', negC, 1.8);
 
@@ -1095,8 +1139,9 @@
     const tail = vis[vis.length - 1];
     if (tail) {
       const marks = [
-        ['net', Q.alpha(Q.token('--text-dim', '#8494ad'), 0.95)],
+        ['net', Q.token('--text', '#e6edf7')],
         ['call', posC], ['put', negC],
+        ['mid', Q.token('--info-600', '#3b82f6')],
       ].map(([k, c]) => ({ v: Q.num(tail[k], NaN), col: c, y: sy(Q.num(tail[k], NaN)) }))
        .filter(m => Q.isNum(m.v))   // sin valor no hay cifra que rotular
        .sort((a, b) => a.y - b.y);
@@ -1362,13 +1407,30 @@
     }
 
     // La media, como referencia de contra qué destacan.
+    //
+    // v1.57.0 · Su cifra iba en la cabecera, lejos de la línea que la
+    // representa. Leer «cuánto destaca esta barra» obligaba a saltar de la
+    // línea al encabezado y volver. La cifra va AHORA sobre la propia línea,
+    // en su extremo, que es donde la vista ya está.
     if (mean > 0) {
       const my = Math.round(sy(mean)) + 0.5;
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = Q.alpha(Q.token('--text-mute', '#5b6880'), 0.9);
+      const avgC = Q.token('--info-600', '#3b82f6');
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = Q.alpha(avgC, 0.85);
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(box.x, my); ctx.lineTo(box.x + box.w, my); ctx.stroke();
       ctx.setLineDash([]);
+
+      const txt = `Prom ${Q.money(mean, 0)}`;
+      ctx.font = '700 9px ui-monospace, monospace';
+      const pw = ctx.measureText(txt).width + 12;
+      const py = Q.clamp(my, box.y + 7, box.y + box.h - 7);
+      const px0 = box.x + box.w - pw - 2;
+      ctx.fillStyle = Q.alpha(avgC, 0.9);
+      Q.roundRect(ctx, px0, py - 7, pw, 14, 4); ctx.fill();
+      ctx.fillStyle = Q.token('--panel', '#0d131c');
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(txt, px0 + pw / 2, py);
     }
     ctx.restore();
 
@@ -1384,10 +1446,6 @@
     ctx.fillStyle = Q.alpha(dim, 0.85);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText('TOTAL · PRIMA POR INTERVALO', box.x + 4, box.y - 10);
-    if (mean > 0) {
-      ctx.textAlign = 'right';
-      ctx.fillText(`media ${Q.money(mean, 0)}`, box.x + box.w - 4, box.y - 10);
-    }
     ctx.restore();
     return false;
   }
@@ -1465,6 +1523,76 @@
    * en buckets del mismo tamaño. Se busca el bucket de la cinta que contiene el
    * instante elegido y se listan sus impresiones ordenadas por prima.
    */
+  /**
+   * NOTIONAL / MIN · cuánto nocional se movió en cada minuto.
+   *
+   * v1.57.0 · Este carril faltaba. Net Drift publicaba la curva acumulada y la
+   * prima por intervalo, pero no el RITMO: cuántos dólares por minuto está
+   * absorbiendo el mercado ahora mismo.
+   *
+   * No es lo mismo que el carril TOTAL de arriba. TOTAL dibuja barras y sirve
+   * para encontrar EL minuto en que se pagó algo grande. Éste va en línea
+   * continua y sirve para ver el PULSO: si la sesión se está acelerando o
+   * apagando. Una barra aislada y una meseta alta son lecturas distintas, y con
+   * barras las dos se ven igual.
+   *
+   * Nocional del intervalo = |prima call| + |prima put|. Los dos lados suman en
+   * valor absoluto a propósito: mide actividad, no dirección. La dirección ya la
+   * dicen las curvas de arriba, y mezclarlas aquí restaría un lado del otro.
+   */
+  function drawDriftNotional(ctx, env) {
+    const box = driftBox(env);
+    box.y = 12; box.h = env.h - 26;
+    if (box.w <= 8 || box.h <= 8) return false;
+    const rows = driftRows();
+    const win = window_();
+    if (!rows.length || !win) { empty(ctx, env, 'SIN NOCIONAL POR MINUTO'); return false; }
+    const sx = Q.scale(win.t0, win.t1, box.x, box.x + box.w);
+
+    const vis = [];
+    for (const p of rows) {
+      const t = driftT(p);
+      if (!Q.isNum(t) || t < win.t0 - S.bucketMs || t > win.t1) continue;
+      const c = Q.num(p.call, NaN), pu = Q.num(p.put, NaN);
+      // Un minuto SIN dato no es un minuto de cero nocional: se salta.
+      if (!Q.isNum(c) && !Q.isNum(pu)) continue;
+      vis.push({ t, v: Math.abs(Q.isNum(c) ? c : 0) + Math.abs(Q.isNum(pu) ? pu : 0) });
+    }
+    if (!vis.length) { empty(ctx, env, 'SIN NOCIONAL POR MINUTO'); return false; }
+
+    const peak = Math.max.apply(null, vis.map(r => r.v));
+    if (!(peak > 0)) { empty(ctx, env, 'SIN NOCIONAL POR MINUTO'); return false; }
+    const sy = Q.scale(0, peak * 1.15, box.y + box.h, box.y);
+    const col = Q.token('--info-600', '#3b82f6');
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y - 6, box.w, box.h + 12); ctx.clip();
+
+    // Relleno tenue bajo la curva: da cuerpo al pulso sin taparlo.
+    ctx.beginPath();
+    ctx.moveTo(sx(vis[0].t), box.y + box.h);
+    for (const r of vis) ctx.lineTo(sx(r.t), sy(r.v));
+    ctx.lineTo(sx(vis[vis.length - 1].t), box.y + box.h);
+    ctx.closePath();
+    ctx.fillStyle = Q.alpha(col, 0.12); ctx.fill();
+
+    ctx.beginPath();
+    vis.forEach((r, i) => { const x = sx(r.t), y = sy(r.v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.stroke();
+    ctx.restore();
+
+    // Escala: sólo el máximo, que es la referencia que se busca aquí.
+    ctx.save();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.85);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('NOTIONAL / MIN', box.x + 4, box.y - 10);
+    ctx.textAlign = 'right';
+    ctx.fillText(Q.money(peak, 1), box.x + box.w - 4, box.y - 10);
+    ctx.restore();
+    return false;
+  }
+
   function pickDriftAt(clientX, panel) {
     const rows = driftRows();
     if (!rows.length) return;
@@ -1594,6 +1722,8 @@
       ? new Q.Panel(ids.driftVolume, drawDriftVolume, driftOpts('flow:driftvol')) : null;
     S.panels.driftTotal = ids.driftTotal
       ? new Q.Panel(ids.driftTotal, drawDriftTotal, driftOpts('flow:drifttotal')) : null;
+    S.panels.driftNotional = ids.driftNotional
+      ? new Q.Panel(ids.driftNotional, drawDriftNotional, driftOpts('flow:driftnotional')) : null;
     for (const k in S.panels) if (!S.panels[k]) delete S.panels[k];
     S.link.on(invalidateAll);
     renderDriftPick();

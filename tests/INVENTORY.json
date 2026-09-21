@@ -3133,6 +3133,22 @@
     "test_una_cadena_sin_precio_ya_no_tumba_el_refresco"
    ]
   },
+  "tests/test_v1570_net_drift_y_flujo.py": {
+   "casos": 12,
+   "tests": [
+    "test_el_neto_se_traza_solido_no_apagado",
+    "test_el_nocional_por_minuto_va_en_linea_no_en_barras",
+    "test_el_nocional_suma_los_dos_lados_en_valor_absoluto",
+    "test_existe_el_carril_de_nocional_por_minuto",
+    "test_la_cuarta_curva_se_dibuja_y_lleva_su_cifra_en_el_extremo",
+    "test_la_media_se_dibuja_sobre_su_linea_en_las_dos_pantallas",
+    "test_la_media_ya_no_vive_en_la_cabecera_lejos_de_su_linea",
+    "test_la_prima_a_medio_se_acumula_y_se_publica",
+    "test_la_prima_pagada_y_la_prima_a_medio_no_se_confunden",
+    "test_sin_prima_a_medio_el_acumulado_es_None_no_cero",
+    "test_un_minuto_sin_dato_no_se_dibuja_como_cero"
+   ]
+  },
   "tests/test_v1570_walls_oi_ausente.py": {
    "casos": 13,
    "tests": [
@@ -3149,6 +3165,6 @@
    ]
   }
  },
- "total_minimo": 2584,
+ "total_minimo": 2596,
  "version": "1.56.0"
 }

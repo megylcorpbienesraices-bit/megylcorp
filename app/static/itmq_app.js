@@ -2219,7 +2219,7 @@
     Flow.mount({ price: el('ofPrice'), aggressor: el('ofAggressor'), net: el('ofNet'),
       volume: el('ofVolume'), total: el('ofTotal'),
       drift: el('ofDrift'), driftTotal: el('ofDriftTotal'),
-      driftVolume: el('ofDriftVolume') });
+      driftVolume: el('ofDriftVolume'), driftNotional: el('ofDriftNotional') });
 
     bindControls();
 
