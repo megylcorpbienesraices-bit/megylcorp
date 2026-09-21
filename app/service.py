@@ -1761,9 +1761,31 @@ VIEW_FIELDS: tuple[str, ...] = (
     'analytics_revision','replay_context','asset_warmup',
 )
 
+def _qd_expiry_selection():
+    """El registro de vencimientos, tomado del módulo en cada uso."""
+    from .providers.quantdata import shared as _qd
+    return _qd.EXPIRY_SELECTION
+
+
+def _publicar_vencimientos(symbol: str, expiry_info: Dict[str, Any] | None) -> None:
+    """Pasa al catálogo del proveedor los vencimientos que la terminal aplica.
+
+    Puente de una sola dirección y sin lógica propia a propósito: el carril de
+    páginas necesita el vencimiento para `max-pain`, y la única fuente legítima
+    es la ventana que ya se aplicó a la cadena. Cualquier otra sería inventarse
+    una fecha, y un max pain del vencimiento equivocado es un número creíble y
+    falso, que es peor que no tener número.
+    """
+    try:
+        # Del MÓDULO, no por referencia: `tools` lo lee así, y atarlo aquí por
+        # referencia haría que los dos lados apuntaran a registros distintos.
+        from .providers.quantdata import shared as _qd
+        _qd.EXPIRY_SELECTION.publicar(symbol, list((expiry_info or {}).get("expirations") or []))
+    except Exception as exc:
+        _obs_note("service:publicar_vencimientos", exc)
+
+
 @dataclass(frozen=True)
-
-
 class StateView:
     generation: int
     stage: str
@@ -2417,6 +2439,10 @@ class PlatformState:
                                     "reason": f"el cálculo falló: {type(exc).__name__}"}}
                 self.gamma, self.gamma_delta = gamma, gd
                 self.expiry_info, self.expiry_confluence_data = expiry_info, confluence
+                # v1.57.7 · Los vencimientos que la pantalla tiene DE VERDAD, para
+                # que `/v1/options/tool/max-pain` —que exige `expirationDate`—
+                # pueda construir un cuerpo válido sin inventarse una fecha.
+                _publicar_vencimientos(self.symbol, expiry_info)
                 self.flow_events, self.flow_summary = events, flow
                 try:
                     _px_live = _live_ticks_for(self.symbol) if self.mode == "LIVE" else pd.DataFrame()
@@ -2834,6 +2860,9 @@ class PlatformState:
             self.vol={}; self.positioning={}; self.targets={}; self.command={}; self.chain_insights={}
             self.macro={}; self.large_prints=pd.DataFrame(); self.large_print_summary={}; self.premarket_tape={}; self.session_flow_tape={}; self.scanner={}
             self.expiry_info={}; self.expiry_confluence_data={}
+            # Los vencimientos del activo anterior no describen al nuevo: se
+            # retiran ANTES de que nadie pueda construir un cuerpo con ellos.
+            _qd_expiry_selection().clear_symbol(_sym)
             self.model_controls_report={}; self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
             self.exposure_scenarios_report={}; self.american_model_report={}; self.greeks_diagnostics={}; self.session_memory_report={}
             self.dealer_intelligence_report={}; self.external_market_report={}; self.source_health_report={}; self.source_fusion_report={}; self.research_storage_report={}; self.institutional_research_report={}; self.tape_archive_report={}; self.audit_persistence_report={}; self.market_state_field={}; self.causality_report={}; self.temporal_truth_report={}; self.derivatives_intelligence_report={}; self.expiry_intelligence_report={}; self.structural_intelligence_report={}; self.profile_bundle_report={}; self.versioned_market_state_report={}; self.operational_readiness_report={}; self.scenario_lab_report={}; self.quantum_shadow_report={}; self.flow_kinematics_report={}; self.premarket_analysis_report={}; self.trace_orderflow_report={}
@@ -2974,6 +3003,9 @@ class PlatformState:
             self.vol={}; self.positioning={}; self.targets={}; self.command={}; self.chain_insights={}
             self.macro={}; self.large_prints=pd.DataFrame(); self.large_print_summary={}; self.premarket_tape={}; self.session_flow_tape={}; self.scanner={}
             self.expiry_info={}; self.expiry_confluence_data={}
+            # Los vencimientos del activo anterior no describen al nuevo: se
+            # retiran ANTES de que nadie pueda construir un cuerpo con ellos.
+            _qd_expiry_selection().clear_symbol(_sym)
             self.model_controls_report={}; self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
             self.exposure_scenarios_report={}; self.american_model_report={}; self.greeks_diagnostics={}; self.session_memory_report={}
             self.dealer_intelligence_report={}; self.external_market_report={}; self.source_health_report={}; self.source_fusion_report={}; self.research_storage_report={}; self.institutional_research_report={}; self.tape_archive_report={}; self.audit_persistence_report={}; self.market_state_field={}; self.causality_report={}; self.temporal_truth_report={}; self.derivatives_intelligence_report={}; self.expiry_intelligence_report={}; self.structural_intelligence_report={}; self.profile_bundle_report={}; self.versioned_market_state_report={}; self.operational_readiness_report={}; self.scenario_lab_report={}; self.quantum_shadow_report={}; self.flow_kinematics_report={}; self.premarket_analysis_report={}; self.trace_orderflow_report={}

@@ -95,7 +95,7 @@ CONSUMIDOR: Dict[str, Dict[str, Any]] = {
     "volatility_drift":    {"modulo": "VOLATILIDAD · deriva", "panel": None},
     "term_structure":      {"modulo": "VOLATILIDAD · estructura temporal", "panel": None},
     "contract_statistics": {"modulo": "ESTADÍSTICAS · contratos", "panel": None},
-    "trade_side_statistics": {"modulo": "ESTADÍSTICAS · por lado", "panel": None},
+    "contract_trade_side_statistics": {"modulo": "ESTADÍSTICAS · por lado", "panel": None},
     "market_share":        {"modulo": "ESTADÍSTICAS · cuota", "panel": None},
     "gainers_losers":      {"modulo": "MACRO · ganadores/perdedores", "panel": None},
     "news":                {"modulo": "MACRO · noticias", "panel": None},

@@ -192,6 +192,69 @@ def _pick(row: Any, *names: str) -> Any:
     return None
 
 
+class FaltaRequisito(Exception):
+    """El endpoint exige un campo que ahora mismo NO tenemos.
+
+    v1.57.7 · No es un fallo del proveedor ni de la ruta: es que el contrato pide
+    un dato que la terminal todavía no ha resuelto. Mandar la petición igualmente
+    produce un 400 que se lee como si el endpoint estuviera roto, y rellenar el
+    campo a ojo produce un número creíble y falso. Se dice qué falta y se espera.
+    """
+
+    def __init__(self, campo: str, detalle: str = "") -> None:
+        self.campo = campo
+        self.detalle = detalle or f"el endpoint exige {campo} y no hay valor real"
+        super().__init__(self.detalle)
+
+
+def _cuerpo_max_pain(ticker: str) -> Dict[str, Any]:
+    """Contrato oficial de `/v1/options/tool/max-pain`.
+
+    Obligatorios: `filter.ticker` y `filter.expirationDate`. `sessionDate` es
+    opcional. NADA MÁS: el endpoint rechaza campos ajenos.
+
+    El vencimiento sale de los que la terminal tiene en pantalla. Si no hay, se
+    levanta `FaltaRequisito` en vez de mandar un cuerpo que el proveedor va a
+    rechazar. Para el max pain de TODOS los vencimientos existe otro endpoint,
+    `max-pain-over-time`, que sólo pide el ticker; es el que usa el carril del
+    motor y el que sirve `max_pain_over_time`.
+    """
+    from .shared import EXPIRY_SELECTION
+
+    symbol = str(ticker or "").strip().upper()
+    vencimiento = EXPIRY_SELECTION.principal(symbol)
+    if not vencimiento:
+        raise FaltaRequisito(
+            "filter.expirationDate",
+            "max-pain exige un vencimiento y la terminal aún no ha resuelto la "
+            "ventana de vencimientos de este activo. Para todos los vencimientos "
+            "está max-pain-over-time, que no lo necesita")
+    # `sessionDate` es OPCIONAL en este endpoint y está en la lista de campos
+    # heredados que `strip_inherited_fields` quita del catálogo entero: se metía
+    # de una herramienta en otra y provocaba 400 donde no tocaba. Como es
+    # opcional, no se manda: sólo lo obligatorio, que es lo que pide el contrato.
+    return {"filter": {"ticker": symbol, "expirationDate": vencimiento}}
+
+
+def _cuerpo_trade_side(ticker: str) -> Dict[str, Any]:
+    """Contrato oficial de `/v1/options/tool/contract-trade-side-statistics`.
+
+    `dataMode` es OBLIGATORIO y sólo admite PREMIUM, TRADE_COUNT o VOLUME.
+    Se pide PREMIUM porque es lo que consume el panel: reparto de PRIMA entre
+    lado comprador y lado vendedor. Pedir TRADE_COUNT y dibujarlo como prima
+    sería mezclar dos magnitudes distintas bajo la misma barra.
+    """
+    # `sessionDate` es opcional y está en la lista de heredados (ver
+    # `_cuerpo_max_pain`): no se manda. Obligatorios, `dataMode` y el ticker.
+    return {"dataMode": TRADE_SIDE_DATA_MODE,
+            "filter": {"ticker": str(ticker or "").strip().upper()}}
+
+
+#: Los tres únicos valores que el contrato admite en `dataMode`.
+TRADE_SIDE_DATA_MODES = ("PREMIUM", "TRADE_COUNT", "VOLUME")
+TRADE_SIDE_DATA_MODE = "PREMIUM"
+
+
 def _tf(ticker: str) -> Dict[str, Any]:
     """Filtro canónico de ticker para las herramientas Quant Data.
 
@@ -1661,7 +1724,7 @@ def build_catalog() -> Dict[str, QuantDataTool]:
         QuantDataTool(
             "max_pain", "Open Interest", "Max Pain",
             ("/v1/options/tool/max-pain",),
-            lambda t: _tf(t),
+            _cuerpo_max_pain,
             lambda p: {"ready": es_payload(p), "value": _f(_pick(p, "maxPain", "value", "strike")), "raw": p}, "SLOW"),
         QuantDataTool(
             "oi_by_strike", "Open Interest", "OI por strike",
@@ -1719,9 +1782,12 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             lambda t: {"limit": 100, **_tf(t)},
             norm_stats, "MEDIUM"),
         QuantDataTool(
-            "trade_side_statistics", "Statistics", "Estadística por lado",
-            ("/v1/options/tool/trade-side-statistics",),
-            lambda t: _tf(t),
+            # v1.57.7 · La ruta era incorrecta: `/v1/options/tool/trade-side-statistics`
+            # devuelve 404 porque no existe. La oficial es
+            # `/v1/options/tool/contract-trade-side-statistics`, y exige `dataMode`.
+            "contract_trade_side_statistics", "Statistics", "Estadística por lado",
+            ("/v1/options/tool/contract-trade-side-statistics",),
+            _cuerpo_trade_side,
             norm_stats, "MEDIUM"),
         QuantDataTool(
             "market_share", "Statistics", "Cuota de mercado",
@@ -1796,7 +1862,7 @@ PAGES: Dict[str, List[str]] = {
     "Flow Analysis": ["net_flow", "net_drift", "interval_map_gamma", "interval_map_delta",
                       "interval_map_vanna", "interval_map_charm", "options_order_flow_raw"],
     "Dark Pool / Equities": ["dark_flow", "dark_pool_levels", "equity_prints", "stock_price_over_time"],
-    "Statistics": ["contract_statistics", "trade_side_statistics", "market_share"],
+    "Statistics": ["contract_statistics", "contract_trade_side_statistics", "market_share"],
     "Open Interest": ["max_pain", "max_pain_over_time", "oi_change", "oi_by_strike", "oi_by_expiration", "oi_over_time"],
     "Volatility Analysis": ["volatility_drift", "iv_rank", "volatility_skew", "term_structure"],
 }

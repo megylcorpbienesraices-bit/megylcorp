@@ -3490,8 +3490,38 @@
     "test_un_tipo_inesperado_se_denuncia_con_su_nombre",
     "test_ya_no_se_lee_punto_payload_sobre_lo_que_da_el_hub"
    ]
+  },
+  "tests/test_v1577_contrato_max_pain_y_trade_side.py": {
+   "casos": 28,
+   "tests": [
+    "test_NO_se_disfraza_de_sin_datos",
+    "test_SIN_vencimiento_no_se_manda_nada_y_se_dice_que_falta",
+    "test_con_vencimiento_el_cuerpo_lleva_los_DOS_obligatorios",
+    "test_el_cambio_de_activo_retira_los_vencimientos_del_anterior",
+    "test_el_carril_del_motor_usa_el_endpoint_SIN_vencimiento",
+    "test_el_cuerpo_NO_lleva_campos_ajenos",
+    "test_el_cuerpo_lleva_dataMode_obligatorio",
+    "test_el_dataMode_es_uno_de_los_tres_del_contrato",
+    "test_el_estado_dice_QUE_campo_falta",
+    "test_el_programador_no_llama_cuando_falta_el_requisito",
+    "test_el_puente_no_revienta_con_basura",
+    "test_el_renombrado_llego_a_todos_los_consumidores",
+    "test_el_vencimiento_de_OTRO_activo_no_sirve",
+    "test_el_vencimiento_sale_de_la_ventana_de_la_terminal",
+    "test_la_clave_vieja_ya_no_existe",
+    "test_la_publicacion_cuelga_de_la_ventana_ya_aplicada",
+    "test_la_ruta_de_max_pain_es_la_oficial",
+    "test_la_ruta_oficial_esta_en_el_catalogo",
+    "test_la_ruta_vieja_NO_puede_volver",
+    "test_la_terminal_publica_sus_vencimientos_reales",
+    "test_max_pain_over_time_sigue_pidiendo_solo_el_ticker",
+    "test_se_pide_PREMIUM_porque_es_lo_que_el_panel_DIBUJA",
+    "test_sin_ventana_resuelta_no_se_publica_nada",
+    "test_un_vencimiento_viejo_CADUCA",
+    "test_una_fecha_con_formato_raro_NO_entra"
+   ]
   }
  },
- "total_minimo": 2925,
+ "total_minimo": 2953,
  "version": "1.56.0"
 }

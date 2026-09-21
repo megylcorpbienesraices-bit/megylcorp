@@ -729,7 +729,7 @@ def _trade_side_from_provider(intel: Dict[str, Any]) -> List[Dict[str, Any]]:
     negoció nada», que es una afirmación falsa sobre el mercado. El proveedor publica
     ese reparto y hasta ahora se descargaba sin usarse.
     """
-    rows = _qd_rows(intel, "trade_side_statistics")
+    rows = _qd_rows(intel, "contract_trade_side_statistics")
     if not rows:
         return []
     ask = sum(_f(r.get("ask_side"), 0.0) or 0.0 for r in rows)
@@ -893,7 +893,7 @@ def _estadisticas(trace: Dict[str, Any], state: Dict[str, Any], intel: Dict[str,
              "value": max(0.0, premium - (buy or 0.0) - (sell or 0.0))},
         ] if (premium or 0.0) > 0 else _trade_side_from_provider(intel)),
         "trade_side_source": ("PRINTS_OBSERVADOS" if (premium or 0.0) > 0
-                              else ("QUANTDATA_TRADE_SIDE" if _qd_rows(intel, "trade_side_statistics") else None)),
+                              else ("QUANTDATA_TRADE_SIDE" if _qd_rows(intel, "contract_trade_side_statistics") else None)),
     }
 
 

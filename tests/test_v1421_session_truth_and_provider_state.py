@@ -102,7 +102,7 @@ def test_the_candle_bootstrap_no_longer_asks_for_todays_clock():
 # ══════════════════════════════════════════════ rutas Quant Data
 
 def test_no_tool_derives_invented_routes():
-    from app.providers.quantdata.tools import build_catalog, path_variants
+    from app.providers.quantdata.tools import FaltaRequisito, build_catalog, path_variants
 
     assert path_variants(("/v1/options/tool/order-flow",)) == ("/v1/options/tool/order-flow",)
     multi = {k: t.paths for k, t in build_catalog().items() if len(t.paths) != 1}
@@ -362,7 +362,18 @@ def test_quantdata_catalog_bodies_all_build_without_nameerror():
     catalog = build_catalog()
     assert len(catalog) >= 31
     for key, tool in catalog.items():
-        body = tool.body("dia")
+        try:
+            body = tool.body("dia")
+        except FaltaRequisito as falta:
+            # v1.57.7 · `max-pain` EXIGE `filter.expirationDate`. Cuando la
+            # terminal todavía no ha resuelto la ventana de vencimientos no hay
+            # cuerpo válido que construir, y mandar uno inválido es exactamente
+            # el 400 que teníamos. Levantar `FaltaRequisito` es la conducta
+            # correcta; lo que sería un fallo es un NameError, un KeyError o
+            # inventarse la fecha.
+            assert falta.campo, f"{key}: falta un campo sin decir cuál"
+            assert falta.detalle, f"{key}: falta sin explicación"
+            continue
         assert isinstance(body, dict), key
 
 

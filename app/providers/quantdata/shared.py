@@ -499,6 +499,75 @@ ENGINE_FAST_REQUESTS = len(ENGINE_FAST_JOBS)
 # Cada cuántos ciclos rápidos entra el bloque estructural.
 ENGINE_SLOW_EVERY_N_CYCLES = 10
 
+class VencimientoSeleccionado:
+    """Los vencimientos que la terminal tiene REALMENTE en pantalla, por activo.
+
+    v1.57.7 · `/v1/options/tool/max-pain` exige `filter.expirationDate`. No hay
+    forma de construir un cuerpo válido sin un vencimiento, y no vale inventarlo:
+    un max pain del vencimiento equivocado es un número creíble y falso, que es
+    peor que no tener número.
+
+    De modo que el vencimiento sale de donde ya estaba: la ventana de vencimiento
+    que la terminal aplica a la cadena. Esto es sólo el sitio donde se publica
+    para que el carril de páginas pueda leerlo sin importar `service`.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._por_simbolo: Dict[str, Tuple[float, list]] = {}
+
+    def publicar(self, symbol: str, fechas) -> None:
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return
+        limpias = []
+        for f in (fechas or []):
+            texto = str(f or "").strip()[:10]
+            # ISO o nada. Un formato distinto es un error de quien publica, no
+            # algo que este registro deba adivinar.
+            if len(texto) == 10 and texto[4] == "-" and texto[7] == "-":
+                limpias.append(texto)
+        with self._lock:
+            if limpias:
+                self._por_simbolo[sym] = (time.time(), sorted(set(limpias)))
+            else:
+                self._por_simbolo.pop(sym, None)
+
+    def principal(self, symbol: str, *, max_age_s: float = 900.0) -> str | None:
+        """El vencimiento más cercano de los que están en pantalla. `None` = no hay.
+
+        Caduca: un vencimiento publicado hace un cuarto de hora puede ser de otra
+        sesión o de otro activo ya cerrado. Sin dato fresco se devuelve `None` y
+        quien pregunte tendrá que decir que le falta el requisito.
+        """
+        sym = str(symbol or "").strip().upper()
+        with self._lock:
+            entrada = self._por_simbolo.get(sym)
+        if not entrada:
+            return None
+        cuando, fechas = entrada
+        if (time.time() - cuando) > float(max_age_s) or not fechas:
+            return None
+        return fechas[0]
+
+    def todos(self, symbol: str) -> list:
+        sym = str(symbol or "").strip().upper()
+        with self._lock:
+            entrada = self._por_simbolo.get(sym)
+        return list(entrada[1]) if entrada else []
+
+    def clear_symbol(self, symbol: str) -> None:
+        with self._lock:
+            self._por_simbolo.pop(str(symbol or "").strip().upper(), None)
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {k: {"expirations": v[1], "age_seconds": round(time.time() - v[0], 1)}
+                    for k, v in self._por_simbolo.items()}
+
+
+EXPIRY_SELECTION = VencimientoSeleccionado()
+
 RAW_CACHE = RawCache()
 QUOTA = QuotaGuard()
 

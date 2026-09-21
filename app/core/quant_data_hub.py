@@ -102,7 +102,7 @@ TOOL_METRIC: Dict[str, str] = {
     "dark_pool_levels": "QD_DARK_POOL_LEVELS",
     "equity_prints": "QD_EQUITY_PRINTS",
     "contract_statistics": "QD_CONTRACT_STATISTICS",
-    "trade_side_statistics": "QD_TRADE_SIDE_STATISTICS",
+    "contract_trade_side_statistics": "QD_TRADE_SIDE_STATISTICS",
     "market_share": "QD_MARKET_SHARE",
     "gainers_losers": "QD_GAINERS_LOSERS",
     "interval_map_gamma": "QD_INTERVAL_MAP",
@@ -875,7 +875,7 @@ def statistics(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
     sym = str(symbol or "").upper()
     out: Dict[str, Any] = {}
     for tool, metric, name in (("contract_statistics", "QD_CONTRACT_STATISTICS", "contracts"),
-                               ("trade_side_statistics", "QD_TRADE_SIDE_STATISTICS", "trade_side"),
+                               ("contract_trade_side_statistics", "QD_TRADE_SIDE_STATISTICS", "trade_side"),
                                ("market_share", "QD_MARKET_SHARE", "market_share"),
                                ("gainers_losers", "QD_GAINERS_LOSERS", "movers")):
         rows = _rows(intel, tool)

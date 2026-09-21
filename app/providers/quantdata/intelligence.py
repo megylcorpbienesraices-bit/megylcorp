@@ -21,7 +21,7 @@ from .client import QuantDataClient, QuantDataError
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
 from ...core.endpoint_runtime import EndpointRegistry
-from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
+from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_validation_error,
                     _validation_detail, repair_body, classify_provider_failure,
                     STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
                     TOOL_FORBIDDEN_FIELDS,
@@ -77,7 +77,7 @@ _PRIORITY: dict[str, int] = {
     "gex_by_expiration": 3, "dex_by_expiration": 3, "vex_by_expiration": 3,
     "chex_by_expiration": 3, "oi_by_expiration": 3, "oi_over_time": 3,
     "equity_prints": 3, "stock_price_over_time": 3,
-    "contract_statistics": 3, "trade_side_statistics": 3, "market_share": 3,
+    "contract_statistics": 3, "contract_trade_side_statistics": 3, "market_share": 3,
     "gainers_losers": 4, "news": 4,
 }
 _PRIORITY_DEFAULT = 3
@@ -487,7 +487,26 @@ class QuantDataIntelligence:
             # correcciones dictadas por el propio proveedor no se arregla probando
             # una cuarta: se arregla leyendo el diagnóstico.
             for _attempt in range(3):
-                body = tool.request_body(ticker)
+                try:
+                    body = tool.request_body(ticker)
+                except FaltaRequisito as falta:
+                    # v1.57.7 · El contrato exige un campo que todavía no tenemos.
+                    # No es el proveedor ni la ruta: mandar la petición igualmente
+                    # devuelve un 400 que se lee como endpoint roto, y rellenar el
+                    # campo a ojo produce un número creíble y FALSO.
+                    self._data[tool.key] = {
+                        "ready": False, "rows": [], "count": 0,
+                        "state": "REQUISITO_AUSENTE", "symbol": ticker,
+                        "path": path, "request_body": None,
+                        "lane_status": "REQUISITO_AUSENTE",
+                        "lane_fields": [falta.campo],
+                        "lane_detail": falta.detalle[:240],
+                        "detail": falta.detalle,
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    self._fetched_at[tool.key] = time.time()
+                    _obs_expected(f"quantdata.{tool.key}.requisito_ausente")
+                    return
                 # La cuota la anota el cliente, que es el único sitio por donde
                 # pasan los dos carriles. Ver `QuantDataClient.post`.
                 outcome, detail = await self._attempt(tool, path, body, ticker, epoch)

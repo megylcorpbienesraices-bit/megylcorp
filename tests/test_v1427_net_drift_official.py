@@ -723,7 +723,7 @@ def test_statistics_uses_the_providers_contract_and_side_tables_when_there_is_no
         "contract_statistics": {"ready": True, "rows": [
             {"label": "C 600", "premium": 4.2e6, "contracts": 1800.0, "trades": 42,
              "ask_side": 3.0e6, "bid_side": 1.2e6}]},
-        "trade_side_statistics": {"ready": True, "rows": [
+        "contract_trade_side_statistics": {"ready": True, "rows": [
             {"label": "total", "premium": 4.2e6, "ask_side": 3.0e6, "bid_side": 1.2e6}]},
     }
     out = _estadisticas({"option_prints": [], "profiles": {"rows": []}}, {}, intel)

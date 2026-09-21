@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2925 casos / 186 ficheros**.
+sentinela en vez de describirlo. Inventario: **2953 casos / 187 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,7 +272,7 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.
+25 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
 
 ## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
 
@@ -324,7 +324,7 @@ Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
 Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
 contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
 una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
-ráfaga. Inventario: **2925 casos / 186 ficheros**.
+ráfaga. Inventario: **2953 casos / 187 ficheros**.
 
 ## REVISIÓN SOBRE `d6b8611` · Al abrir el programa no había ninguna ráfaga
 
@@ -372,7 +372,7 @@ Se añade `LIMPIAR.bat`, que borra **sólo** lo que se regenera solo —`__pycac
 `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`— y tiene regresiones que
 le prohíben tocar `.venv`, `app\storage`, `.env`, logs o datos de mercado.
 
-21 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.
+21 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
 
 ## REVISIÓN SOBRE `45fc6ad` · La regresión que fija el arranque en frío
 
@@ -431,7 +431,7 @@ Dos columnas nuevas en el informe, medidas contra la terminal viva:
   1.920 s no puede repetirse en silencio.
 
 Un activo que falle sigue sin detener a los demás. 24 regresiones nuevas.
-Inventario: **2925 casos / 186 ficheros**.
+Inventario: **2953 casos / 187 ficheros**.
 
 ## REVISIÓN SOBRE `76521d9` · La colisión de carriles en la ranura del hub
 
@@ -491,4 +491,51 @@ Esto no adivina el cuerpo correcto de `max_pain` ni inventa una ruta para
 `trade_side_statistics` (404 en `/v1/options/tool/trade-side-statistics`): las
 dos necesitan lo que conteste el proveedor, y ahora se ve.
 
-23 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.
+23 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
+
+## REVISIÓN SOBRE `bc5a228` · Max Pain y Trade Side, contra el contrato oficial
+
+Los dos fallos del arranque no eran del proveedor: eran de nuestras dos
+integraciones, y la documentación oficial de Quant Data los explica los dos.
+
+### MAX PAIN · faltaba el vencimiento
+
+`/v1/options/tool/max-pain` exige `filter.ticker` **y** `filter.expirationDate`.
+Enviábamos sólo el ticker: de ahí el `400 Request validation failed`.
+
+Lo importante del arreglo es de dónde sale el vencimiento: **no se inventa**.
+Sale de la ventana de vencimientos que la terminal ya aplicó a la cadena, que es
+la única fuente legítima. `service` la publica en `EXPIRY_SELECTION` cuando la
+resuelve y la retira en los dos reseteos de símbolo, para que los vencimientos
+de DIA no construyan nunca un cuerpo de SPY.
+
+Y cuando todavía no hay ventana resuelta, la herramienta **no llama**: levanta
+`FaltaRequisito` y publica `REQUISITO_AUSENTE` diciendo qué campo falta y cuál es
+la alternativa legítima. No es `SIN_DATOS` —el operador lo pidió explícitamente—
+ni un fallo del proveedor: es un requisito que aún no tenemos. Un max pain del
+vencimiento equivocado es un número creíble y falso, que es peor que no tenerlo.
+
+Para el max pain de **todos** los vencimientos ya existe
+`/v1/options/tool/max-pain-over-time`, que sólo pide el ticker; es el que usa el
+carril del motor y el que sirve `max_pain_over_time`.
+
+El cuerpo va con lo obligatorio y nada más. `sessionDate` es opcional y además
+está en la lista de campos heredados que se quitan del catálogo entero —se metía
+de una herramienta en otra y provocaba 400 donde no tocaba—, así que no se manda.
+
+### TRADE SIDE · la ruta estaba mal
+
+No es `/v1/options/tool/trade-side-statistics` —no existe, de ahí el 404— sino
+**`/v1/options/tool/contract-trade-side-statistics`**, y exige `dataMode`, que
+sólo admite `PREMIUM`, `TRADE_COUNT` o `VOLUME`.
+
+Se pide **PREMIUM** porque es lo que el panel dibuja: reparto de prima entre lado
+comprador y vendedor. Pedir `TRADE_COUNT` y pintarlo como prima sería mezclar dos
+magnitudes bajo la misma barra, y hay una prueba que ata las dos cosas: si el
+panel deja de consumir `premium`, salta.
+
+La herramienta se renombra a `contract_trade_side_statistics` en sus cinco
+consumidores, y una regresión recorre los cinco ficheros línea a línea para que
+la ruta vieja no pueda volver.
+
+28 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
