@@ -267,3 +267,96 @@ def test_el_bat_invoca_el_certificador_con_ruta_de_windows():
     txt = Path("CERTIFICAR_LIVE.bat").read_text(encoding="utf-8", errors="replace")
     assert "scripts\\certificar_live.py" in txt
     assert "scripts/certificar_live.py" not in txt
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7 · v1.57.5 · LA CERTIFICACIÓN MIDE EL ARRANQUE Y LA VENTANA APLICADA
+#
+# El operador pidió dos cosas de la ejecución LIVE, además de la tabla por
+# herramienta: confirmar que `ASUMIDA_DIARIA` desapareció y medir el tiempo
+# real de hidratación. Las dos salen ahora del mismo informe, medidas contra la
+# terminal viva, no estimadas.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _bundle_con_cuota(**q):
+    base = {"window_source": "CONTRATO", "engine_interval_seconds": 15.0,
+            "contract": {"sustained_used": 20, "sustained_limit": 240,
+                         "sustained_window_seconds": 60.0, "burst_used": 3,
+                         "burst_limit": 20, "burst_window_seconds": 1.0}}
+    base.update(q)
+    return {"fuentes": {"quantdata_coverage": {"quota": base}}}
+
+
+def test_el_contrato_aplicado_se_certifica():
+    c = CL.contrato_de_cuota(_bundle_con_cuota())
+    assert c["resultado"] == "PASS"
+    assert c["window_source"] == "CONTRATO"
+    assert c["sustained"] == "20/240 en 60.0s"
+    assert c["burst"] == "3/20 en 1.0s"
+
+
+def test_una_ventana_DIARIA_vuelve_a_fallar_el_informe():
+    """El episodio que dejó el ciclo del motor en 1.920 s no puede repetirse mudo."""
+    c = CL.contrato_de_cuota(_bundle_con_cuota(window_source="ASUMIDA_DIARIA",
+                                               engine_interval_seconds=1920.0))
+    assert c["resultado"] == "FAIL"
+    assert any("DIARIA" in p for p in c["problemas"])
+    assert any("1920" in p for p in c["problemas"])
+
+
+def test_un_ciclo_del_motor_demasiado_lento_se_denuncia():
+    c = CL.contrato_de_cuota(_bundle_con_cuota(engine_interval_seconds=300.0))
+    assert c["resultado"] == "FAIL"
+
+
+def test_sin_cuota_publicada_no_se_inventa_un_PASS():
+    c = CL.contrato_de_cuota({})
+    assert c["resultado"] == "FAIL"
+    assert c["window_source"] == "—"
+
+
+def test_la_medicion_de_hidratacion_se_para_en_la_meseta(monkeypatch):
+    """Tres lecturas sin subir es el final del arranque, no un tiempo fijo."""
+    serie = [0, 0, 5, 18, 34, 36, 36, 36, 36, 36, 36]
+    llamadas = {"n": 0}
+
+    def _fake_get(url, timeout):
+        i = min(llamadas["n"], len(serie) - 1)
+        llamadas["n"] += 1
+        return {"fuentes": {"quantdata_coverage": {
+            "live_tools": serie[i], "total_tools": 36}}}
+
+    monkeypatch.setattr(CL, "_http_get", _fake_get)
+    monkeypatch.setattr(CL.time, "sleep", lambda *_: None)
+    h = CL.medir_hidratacion("http://x", "DIA", limite=30.0, timeout=5.0)
+    assert h["live_al_final"] == 36
+    assert h["total_herramientas"] == 36
+    assert h["primera_live_s"] is not None
+    assert llamadas["n"] < len(serie), "no se paró en la meseta"
+
+
+def test_la_medicion_no_revienta_si_la_terminal_falla(monkeypatch):
+    def _explota(url, timeout):
+        raise RuntimeError("caída")
+
+    monkeypatch.setattr(CL, "_http_get", _explota)
+    monkeypatch.setattr(CL.time, "sleep", lambda *_: None)
+    h = CL.medir_hidratacion("http://x", "SPY", limite=0.05, timeout=1.0)
+    assert h["live_al_final"] == 0 and h["primera_live_s"] is None
+
+
+def test_el_informe_lleva_las_dos_medidas():
+    import pathlib
+    src = pathlib.Path("scripts/certificar_live.py").read_text("utf-8")
+    assert '"hidratacion": hidrataciones' in src
+    assert '"contrato_de_cuota": contratos' in src
+    assert "HIDRATACIÓN MEDIDA" in src and "CONTRATO DE CUOTA APLICADO" in src
+
+
+def test_un_activo_que_falla_no_impide_medir_los_otros():
+    """La garantía de siempre: ningún fallo detiene a los demás."""
+    import pathlib
+    src = pathlib.Path("scripts/certificar_live.py").read_text("utf-8")
+    bloque = src[src.find("for sym in simbolos:"):src.find("print(tabla(filas))")]
+    assert "continue" in bloque
+    assert "incidencias.append" in bloque

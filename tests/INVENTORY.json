@@ -3157,7 +3157,7 @@
    ]
   },
   "tests/test_v1570_certificador_live.py": {
-   "casos": 34,
+   "casos": 42,
    "tests": [
     "test_cada_estado_da_el_veredicto_correcto",
     "test_cada_fila_lleva_las_ocho_columnas",
@@ -3168,20 +3168,28 @@
     "test_el_bat_no_usa_comandos_de_linux",
     "test_el_bat_redirige_al_nulo_de_WINDOWS",
     "test_el_consumidor_por_ruta_mira_el_bundle_de_verdad",
+    "test_el_contrato_aplicado_se_certifica",
+    "test_el_informe_lleva_las_dos_medidas",
     "test_el_informe_se_escribe_aunque_haya_fallos",
+    "test_la_medicion_de_hidratacion_se_para_en_la_meseta",
+    "test_la_medicion_no_revienta_si_la_terminal_falla",
     "test_la_redaccion_no_se_cuelga_con_anidamiento_absurdo",
     "test_la_tabla_y_el_resumen_se_generan_sin_romperse",
     "test_lo_que_no_es_secreto_se_conserva",
     "test_los_siete_estados_existen_y_son_los_acordados",
     "test_ninguna_credencial_sobrevive_a_la_redaccion",
     "test_no_son_fallo_solo_los_tres_que_no_lo_son",
+    "test_sin_cuota_publicada_no_se_inventa_un_PASS",
     "test_toda_herramienta_del_catalogo_declara_su_consumidor",
     "test_un_LIVE_OK_cuyo_modulo_esta_vacio_es_FAIL",
     "test_un_LIVE_OK_que_llega_a_su_modulo_es_PASS",
+    "test_un_activo_que_falla_no_impide_medir_los_otros",
     "test_un_activo_que_no_arranca_no_impide_certificar_los_otros",
+    "test_un_ciclo_del_motor_demasiado_lento_se_denuncia",
     "test_una_clave_larga_suelta_tambien_se_redacta",
     "test_una_herramienta_que_revienta_no_para_a_las_demas",
-    "test_una_ruta_vacia_se_denuncia_con_su_camino"
+    "test_una_ruta_vacia_se_denuncia_con_su_camino",
+    "test_una_ventana_DIARIA_vuelve_a_fallar_el_informe"
    ]
   },
   "tests/test_v1570_controles_del_modelo.py": {
@@ -3415,15 +3423,20 @@
    ]
   },
   "tests/test_v1574_arranque_instantaneo.py": {
-   "casos": 21,
+   "casos": 29,
    "tests": [
     "test_NUNCA_toca_el_entorno_ni_la_memoria_ni_las_credenciales",
     "test_borra_por_patron_cerrado_no_por_comodin_abierto",
+    "test_cada_orden_de_borrado_apunta_a_algo_de_la_lista_BLANCA",
     "test_como_estaba_tardaba_MAS_DE_DOS_MINUTOS",
     "test_con_rafaga_el_catalogo_entero_esta_en_segundos",
+    "test_el_arranque_NO_supera_las_20_por_segundo",
+    "test_el_arranque_NO_supera_las_240_por_60_segundos",
     "test_el_arranque_arma_la_rafaga",
+    "test_el_arranque_deja_sitio_al_carril_del_motor",
     "test_el_bat_es_de_windows",
     "test_el_cambio_de_activo_NO_es_un_arranque_en_frio",
+    "test_el_catalogo_COMPLETO_se_hidrata_en_frio_en_segundos",
     "test_el_ciclo_de_la_rafaga_es_la_ventana_de_rafaga",
     "test_el_presupuesto_en_frio_es_el_del_contrato_no_el_de_regimen",
     "test_el_primer_minuto_tiene_su_propia_cadencia",
@@ -3434,13 +3447,27 @@
     "test_la_pestaña_oculta_sigue_sin_preguntar",
     "test_la_rafaga_entera_cabe_en_el_contrato",
     "test_la_rafaga_es_al_menos_diez_veces_mas_rapida",
+    "test_la_rafaga_se_apaga_y_el_regimen_NO_machaca_al_proveedor",
+    "test_la_simulacion_seria_ROJA_con_el_comportamiento_viejo",
     "test_la_telemetria_RANCIA_sigue_avanzando_despacio",
+    "test_los_seis_patrones_regenerables_siguen_cubiertos",
     "test_no_queda_la_nota_suelta_de_la_auditoria",
     "test_sin_rafaga_sigue_siendo_cosa_de_minutos",
     "test_solo_borra_lo_que_se_regenera_solo"
    ]
+  },
+  "tests/test_v1575_legacy_congelado.py": {
+   "casos": 6,
+   "tests": [
+    "test_la_limpieza_no_puede_llevarselo_por_delante",
+    "test_la_plantilla_de_legacy_sigue_en_su_sitio",
+    "test_la_razon_de_conservarlo_esta_escrita_en_el_codigo",
+    "test_la_ruta_legacy_sigue_existiendo",
+    "test_la_terminal_actual_NO_depende_de_legacy",
+    "test_legacy_conserva_TODOS_sus_estaticos"
+   ]
   }
  },
- "total_minimo": 2880,
+ "total_minimo": 2902,
  "version": "1.56.0"
 }

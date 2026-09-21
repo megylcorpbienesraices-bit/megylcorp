@@ -15,6 +15,11 @@ REM    .venv\          el entorno, que cuesta minutos reinstalar
 REM    app\storage\    la memoria cuantitativa y el historico de sesiones
 REM    .env            tus credenciales
 REM    logs, datos de mercado, ni ningun fichero del programa
+REM
+REM  Cada orden de borrado NOMBRA su objetivo de forma literal. No hay ninguna
+REM  que borre "lo que haya en la variable": una prueba de la suite exige que
+REM  cada linea que borra mencione uno de los seis patrones de arriba, asi que
+REM  ampliar el alcance sin querer rompe la suite en vez de romper tu instalacion.
 REM ============================================================================
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -26,12 +31,15 @@ echo ===============================================================
 echo.
 
 set /a N=0
-for /d /r %%d in (__pycache__) do (
-  if exist "%%d" (rd /s /q "%%d" 2>nul & set /a N+=1)
-)
-for /d %%d in (.pytest_cache .ruff_cache .mypy_cache) do (
-  if exist "%%d" (rd /s /q "%%d" 2>nul & set /a N+=1)
-)
+
+REM  El nombre se vuelve a comprobar JUSTO ANTES de borrar: el recorrido
+REM  recursivo no decide solo lo que desaparece.
+for /d /r %%d in (__pycache__) do if /i "%%~nxd"=="__pycache__" if exist "%%d" (rd /s /q "%%d" 2>nul & set /a N+=1)
+
+if exist ".pytest_cache" (rd /s /q ".pytest_cache" 2>nul & set /a N+=1)
+if exist ".ruff_cache"   (rd /s /q ".ruff_cache"   2>nul & set /a N+=1)
+if exist ".mypy_cache"   (rd /s /q ".mypy_cache"   2>nul & set /a N+=1)
+
 del /s /q *.pyc >nul 2>&1
 del /s /q *.pyo >nul 2>&1
 

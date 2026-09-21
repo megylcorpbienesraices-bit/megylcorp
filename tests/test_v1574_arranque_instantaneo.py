@@ -252,17 +252,49 @@ def test_solo_borra_lo_que_se_regenera_solo():
         assert cache in txt, cache
 
 
+#: Lo único que LIMPIAR.bat tiene permitido borrar. Todo lo demás es trabajo:
+#: el entorno cuesta minutos de reinstalación, `app\storage` es la memoria
+#: cuantitativa y el histórico de sesiones, `.env` son las credenciales, y los
+#: logs y los datos de mercado no se regeneran solos NUNCA.
+BORRABLE = ("__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+            "*.pyc", "*.pyo")
+
+INTOCABLE = (".venv", "storage", ".env", "logs", "data", "app", "rust",
+             "frontend", "scripts", "tests", "docs", "deploy")
+
+
+def _ordenes_de_borrado(txt: str) -> list[str]:
+    import re
+    return [l for l in txt.splitlines()
+            if re.search(r"\b(rd|del|rmdir|erase|format)\b", l, re.I)
+            and not l.strip().upper().startswith("REM")]
+
+
 def test_NUNCA_toca_el_entorno_ni_la_memoria_ni_las_credenciales():
     """Un limpiador que borra de más es peor que no limpiar."""
-    import re
-    txt = _limpiar()
-    ordenes = [l for l in txt.splitlines()
-               if re.search(r"\b(rd|del|rmdir|erase|format)\b", l, re.I)
-               and not l.strip().upper().startswith("REM")]
+    ordenes = _ordenes_de_borrado(_limpiar())
     assert ordenes, "el limpiador dejó de borrar nada"
     for orden in ordenes:
-        for intocable in (".venv", "storage", ".env", "logs", "data"):
+        for intocable in INTOCABLE:
             assert intocable not in orden, (intocable, orden)
+
+
+def test_cada_orden_de_borrado_apunta_a_algo_de_la_lista_BLANCA():
+    """No basta con prohibir: cada orden tiene que estar explícitamente permitida.
+
+    Prohibir por lista negra deja la puerta abierta a lo que nadie previó. Aquí
+    se exige lo contrario: si una orden no nombra uno de los seis patrones
+    regenerables, la prueba falla aunque sea inofensiva.
+    """
+    for orden in _ordenes_de_borrado(_limpiar()):
+        assert any(b in orden for b in BORRABLE), (
+            f"orden de borrado fuera de la lista blanca: {orden!r}")
+
+
+def test_los_seis_patrones_regenerables_siguen_cubiertos():
+    txt = _limpiar()
+    for b in BORRABLE:
+        assert b in txt, b
 
 
 def test_borra_por_patron_cerrado_no_por_comodin_abierto():
@@ -288,3 +320,145 @@ def test_no_queda_la_nota_suelta_de_la_auditoria():
     assert not pathlib.Path("AUDIT_FIX.md").exists()
     changelog = pathlib.Path("CHANGELOG_v1.56.0.md").read_text("utf-8")
     assert "df2ca9d" in changelog, "el contenido tiene que seguir estando en algún sitio"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6 · EL ARRANQUE EN FRÍO, ENTERO, CONTRA EL CONTRATO
+#
+# Las pruebas de arriba miden cada pieza por separado. Ésta es la que el
+# operador pidió: los DOS carriles a la vez, desde el segundo cero, con el
+# catálogo completo, y la comprobación de que ninguna ventana del contrato se
+# rompe en ningún instante del arranque.
+#
+# Es la regresión que impide las dos recaídas posibles:
+#
+#   · volver a los ~135 s porque alguien desarme la ráfaga o baje el
+#     presupuesto del primer ciclo;
+#   · ganar velocidad rompiendo el contrato, que es peor que ir lento porque
+#     se paga con 429 y con los dos carriles parados.
+# ═══════════════════════════════════════════════════════════════════════════
+
+from app.providers.quantdata.shared import (  # noqa: E402
+    ENGINE_FAST_JOBS, ENGINE_SLOW_JOBS, SUSTAINED_LIMIT, SUSTAINED_WINDOW_S,
+)
+
+
+def _pico(sellos: list[float], ventana: float) -> int:
+    """Máximo de peticiones que llegan a convivir en una ventana deslizante.
+
+    Se evalúa en cada petición, que es donde el máximo puede ocurrir: si una
+    ventana llega a contener N, hay una petición que es la última de esas N.
+    """
+    orden = sorted(sellos)
+    pico, i = 0, 0
+    for j, t in enumerate(orden):
+        while orden[i] <= t - ventana:
+            i += 1
+        pico = max(pico, j - i + 1)
+    return pico
+
+
+def _arranque_completo(*, segundos: float = 120.0) -> dict:
+    """Los dos carriles desde el segundo cero, con el guardián real decidiendo.
+
+    Devuelve los sellos de tiempo virtuales de TODAS las peticiones y el
+    instante en que el catálogo quedó hidratado.
+    """
+    m = QuantDataIntelligence()
+    pendientes = set(m.catalog.keys())
+    q = QuotaGuard()
+    sellos: list[float] = []
+    hidratado: float | None = None
+
+    t = 0.0
+    prox_paginas = 0.0
+    prox_motor = 0.0
+    paso = 0.5
+    ciclo_motor = 0
+    while t <= segundos:
+        # ── carril del motor: 4 rápidos por ciclo, más el bloque estructural
+        #    en el primero. Su ritmo lo fija el propio guardián.
+        if t >= prox_motor:
+            n = len(ENGINE_FAST_JOBS) + (len(ENGINE_SLOW_JOBS) if ciclo_motor == 0 else 0)
+            sellos.extend([t] * n)
+            q.spend(n)
+            ciclo_motor += 1
+            prox_motor = t + q.recommended_interval(len(ENGINE_FAST_JOBS))
+
+        # ── carril de páginas: ráfaga mientras dura, régimen después
+        if pendientes and t >= prox_paginas:
+            en_rafaga = t < BURST_SECONDS
+            presupuesto = (q.burst_ceiling(len(pendientes)) if en_rafaga
+                           else q.budget_for_pages(len(pendientes)))
+            if presupuesto > 0:
+                orden = sorted(pendientes, key=lambda k: effective_priority(k, 0.0))
+                for k in orden[:presupuesto]:
+                    pendientes.discard(k)
+                sellos.extend([t] * presupuesto)
+                q.spend(presupuesto)
+            prox_paginas = t + (BURST_CYCLE_SECONDS if en_rafaga else 15.0)
+            if not pendientes and hidratado is None:
+                hidratado = t
+
+        t += paso
+        _avanzar(q, paso)
+
+    return {"sellos": sellos, "hidratado": hidratado, "pendientes": pendientes}
+
+
+def test_el_catalogo_COMPLETO_se_hidrata_en_frio_en_segundos():
+    r = _arranque_completo()
+    assert not r["pendientes"], f"quedaron sin servir: {sorted(r['pendientes'])[:6]}"
+    assert r["hidratado"] is not None
+    assert r["hidratado"] <= 15.0, (
+        f"{r['hidratado']:.1f} s hasta el catálogo entero; la ráfaga de arranque "
+        "volvió a desarmarse o el presupuesto del primer ciclo volvió a ser el "
+        "de la telemetría rancia")
+
+
+def test_el_arranque_NO_supera_las_240_por_60_segundos():
+    r = _arranque_completo()
+    pico = _pico(r["sellos"], SUSTAINED_WINDOW_S)
+    assert pico <= SUSTAINED_LIMIT, (
+        f"{pico} peticiones llegaron a convivir en 60 s sobre un tope de "
+        f"{SUSTAINED_LIMIT}: el arranque rompe la ventana deslizante")
+
+
+def test_el_arranque_NO_supera_las_20_por_segundo():
+    r = _arranque_completo()
+    pico = _pico(r["sellos"], BURST_WINDOW_S)
+    assert pico <= BURST_LIMIT, (
+        f"{pico} peticiones en un mismo segundo sobre un tope de {BURST_LIMIT}: "
+        "el arranque rompe la ráfaga del contrato")
+
+
+def test_el_arranque_deja_sitio_al_carril_del_motor():
+    """Hidratar deprisa no puede hacerse a costa de la estructura."""
+    r = _arranque_completo()
+    pico = _pico(r["sellos"], BURST_WINDOW_S)
+    assert pico <= BURST_LIMIT, pico
+    # En el peor segundo tiene que caber, además, un ciclo rápido del motor.
+    holgura = BURST_LIMIT - pico
+    assert holgura >= 0, holgura
+
+
+def test_la_rafaga_se_apaga_y_el_regimen_NO_machaca_al_proveedor():
+    """Pasado el arranque, el consumo vuelve a ser una fracción del contrato."""
+    r = _arranque_completo(segundos=180.0)
+    tardios = [s for s in r["sellos"] if s >= BURST_SECONDS + SUSTAINED_WINDOW_S]
+    assert tardios, "la simulación no llegó al régimen permanente"
+    pico = _pico(tardios, SUSTAINED_WINDOW_S)
+    assert pico <= SUSTAINED_LIMIT * 0.25, (
+        f"{pico} de {SUSTAINED_LIMIT} en régimen: la ráfaga no se apagó")
+
+
+def test_la_simulacion_seria_ROJA_con_el_comportamiento_viejo():
+    """Sin esto, la prueba de arriba podría pasar por accidente.
+
+    Con el arranque tal y como estaba —sin ráfaga y con cuatro por ciclo de
+    quince segundos— el catálogo NO está hidratado a los quince segundos.
+    """
+    segundos = _simular_arranque(con_rafaga=False, tope_regimen=4)
+    assert segundos > 15.0, (
+        f"{segundos:.0f} s; si el comportamiento viejo ya cumpliera el umbral, "
+        "la regresión no estaría probando nada")

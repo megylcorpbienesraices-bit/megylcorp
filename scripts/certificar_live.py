@@ -164,6 +164,96 @@ def cambiar_activo(base: str, sym: str, *, espera: float, timeout: float) -> Dic
     return {"ok": False, "detalle": ultimo or f"{sym} no llegó en {espera:.0f} s"}
 
 
+def _cobertura(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    f = bundle.get("fuentes") or {}
+    return (f.get("quantdata_coverage") or {}) if isinstance(f, dict) else {}
+
+
+def contrato_de_cuota(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """Qué ventana está aplicando la terminal y con qué consumo.
+
+    v1.57.5 · Es la comprobación que cierra el episodio de `ASUMIDA_DIARIA`: si
+    la terminal vuelve a inventarse una ventana más lenta que la publicada, el
+    informe lo dice con nombre y apellidos en vez de dejarlo en una pastilla.
+    """
+    q = (_cobertura(bundle).get("quota") or {})
+    fuente = str(q.get("window_source") or "—")
+    ct = q.get("contract") or {}
+    ritmo = q.get("engine_interval_seconds")
+    problemas = []
+    if fuente not in ("DECLARADA", "CABECERA", "MEDIDA", "CONTRATO"):
+        problemas.append(f"ventana de origen desconocido: {fuente}")
+    if fuente == "ASUMIDA_DIARIA":
+        problemas.append("la terminal volvió a asumir una ventana DIARIA")
+    if isinstance(ritmo, (int, float)) and ritmo > 60.0:
+        problemas.append(f"el ciclo del motor es de {ritmo:.0f} s: demasiado lento "
+                         "para un contrato de 240/60 s")
+    return {
+        "window_source": fuente,
+        "engine_interval_seconds": ritmo,
+        "sustained": f"{ct.get('sustained_used')}/{ct.get('sustained_limit')}"
+                     f" en {ct.get('sustained_window_seconds')}s" if ct else None,
+        "burst": f"{ct.get('burst_used')}/{ct.get('burst_limit')}"
+                 f" en {ct.get('burst_window_seconds')}s" if ct else None,
+        "pages_paused": (q.get("pages_paused") or {}).get("reason"),
+        "problemas": problemas,
+        "resultado": "PASS" if not problemas else "FAIL",
+    }
+
+
+def medir_hidratacion(base: str, sym: str, *, limite: float, timeout: float,
+                      intervalo: float = 0.5) -> Dict[str, Any]:
+    """Cuánto tarda el catálogo en hidratarse, medido contra la terminal viva.
+
+    No se cronometra «hasta que se ve algo»: se cuenta cuándo aparece la primera
+    herramienta LIVE y cuándo el recuento deja de subir durante tres lecturas
+    seguidas. Esa meseta es el final real del arranque.
+    """
+    #: Lecturas seguidas sin que suba el recuento para dar el arranque por
+    #: terminado. Se cuentan LECTURAS y no segundos a propósito: si la terminal
+    #: tarda en responder, el reloj avanza sin que hayamos mirado nada, y eso no
+    #: es una meseta, es una espera.
+    MESETA_LECTURAS = 3
+
+    t0 = time.time()
+    primera: float | None = None
+    mejor = -1
+    estable_desde: float | None = None
+    quietas = 0
+    serie: List[Dict[str, Any]] = []
+    total = None
+    while time.time() - t0 < limite:
+        try:
+            b = _http_get(f"{base}/api/terminal/bundle", timeout)
+        except Exception:
+            time.sleep(intervalo)
+            continue
+        cov = _cobertura(b)
+        vivas = int(cov.get("live_tools") or 0)
+        total = cov.get("total_tools") or total
+        t = round(time.time() - t0, 1)
+        serie.append({"t": t, "live": vivas})
+        if vivas > 0 and primera is None:
+            primera = t
+        if vivas > mejor:
+            mejor, estable_desde, quietas = vivas, t, 0
+        else:
+            quietas += 1
+            # Una meseta en cero no es el final del arranque: es que no ha
+            # empezado. Ahí se agota el plazo, que es lo que hay que informar.
+            if mejor > 0 and quietas >= MESETA_LECTURAS:
+                break
+        time.sleep(intervalo)
+    return {
+        "activo": sym,
+        "primera_live_s": primera,
+        "meseta_s": estable_desde,
+        "live_al_final": mejor if mejor >= 0 else 0,
+        "total_herramientas": total,
+        "muestras": serie[-40:],
+    }
+
+
 def _por_ruta(bundle: Dict[str, Any], ruta: List[str]) -> Any:
     cur: Any = bundle
     for k in ruta:
@@ -337,6 +427,8 @@ def main() -> int:
 
     filas: List[Dict[str, Any]] = []
     incidencias: List[Dict[str, Any]] = []
+    hidrataciones: List[Dict[str, Any]] = []
+    contratos: List[Dict[str, Any]] = []
     for sym in simbolos:
         print(f"\n→ {sym}")
         try:
@@ -348,7 +440,22 @@ def main() -> int:
             print(f"   NO se pudo certificar: {res.get('detalle')}")
             incidencias.append({"activo": sym, "detalle": str(res.get("detalle"))[:300]})
             continue
-        b = res["bundle"]
+        # El cronómetro arranca en cuanto el bundle ya es del activo nuevo.
+        hid = medir_hidratacion(base, sym, limite=min(args.espera, 90.0),
+                                timeout=args.timeout)
+        hidrataciones.append(hid)
+        print(f"   hidratación: primera LIVE {hid['primera_live_s']} s · "
+              f"meseta {hid['meseta_s']} s · "
+              f"{hid['live_al_final']}/{hid['total_herramientas']} herramientas")
+        try:
+            b = _http_get(f"{base}/api/terminal/bundle", args.timeout)
+        except Exception:
+            b = res["bundle"]
+        cont = contrato_de_cuota(b)
+        cont["activo"] = sym
+        contratos.append(cont)
+        for p in cont["problemas"]:
+            print(f"   CONTRATO: {p}")
         nuevas = certificar_activo(b, sym)
         filas.extend(nuevas)
         print(f"   {len(nuevas)} herramientas analizadas · "
@@ -356,6 +463,19 @@ def main() -> int:
 
     print(tabla(filas))
     print(resumen(filas))
+    if hidrataciones:
+        print("\nHIDRATACIÓN MEDIDA (segundos desde el cambio de activo)")
+        print(f"  {'ACTIVO':<8} {'1ª LIVE':>9} {'MESETA':>8} {'HERRAMIENTAS':>14}")
+        for h in hidrataciones:
+            print(f"  {h['activo']:<8} {str(h['primera_live_s']):>9} "
+                  f"{str(h['meseta_s']):>8} "
+                  f"{h['live_al_final']}/{h['total_herramientas']}".rjust(0))
+    if contratos:
+        print("\nCONTRATO DE CUOTA APLICADO")
+        for c in contratos:
+            print(f"  {c['activo']:<8} ventana {c['window_source']:<12} "
+                  f"ciclo {c['engine_interval_seconds']} s · "
+                  f"sostenida {c['sustained']} · ráfaga {c['burst']} → {c['resultado']}")
     if incidencias:
         print("\nACTIVOS QUE NO SE PUDIERON CERTIFICAR:")
         for i in incidencias:
@@ -366,6 +486,7 @@ def main() -> int:
         "generado_en": datetime.now(timezone.utc).isoformat(),
         "base_url": base, "activos": simbolos,
         "filas": filas, "incidencias": incidencias,
+        "hidratacion": hidrataciones, "contrato_de_cuota": contratos,
         "total": len(filas),
         "pass": sum(1 for f in filas if f["resultado"] == "PASS"),
         "fail": sum(1 for f in filas if f["resultado"] == "FAIL"),

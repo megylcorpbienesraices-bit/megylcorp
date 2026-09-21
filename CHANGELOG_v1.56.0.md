@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2880 casos / 184 ficheros**.
+sentinela en vez de describirlo. Inventario: **2902 casos / 185 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,7 +272,7 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2880 casos / 184 ficheros**.
+25 regresiones nuevas. Inventario: **2902 casos / 185 ficheros**.
 
 ## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
 
@@ -324,7 +324,7 @@ Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
 Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
 contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
 una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
-ráfaga. Inventario: **2880 casos / 184 ficheros**.
+ráfaga. Inventario: **2902 casos / 185 ficheros**.
 
 ## REVISIÓN SOBRE `d6b8611` · Al abrir el programa no había ninguna ráfaga
 
@@ -372,4 +372,63 @@ Se añade `LIMPIAR.bat`, que borra **sólo** lo que se regenera solo —`__pycac
 `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`— y tiene regresiones que
 le prohíben tocar `.venv`, `app\storage`, `.env`, logs o datos de mercado.
 
-21 regresiones nuevas. Inventario: **2880 casos / 184 ficheros**.
+21 regresiones nuevas. Inventario: **2902 casos / 185 ficheros**.
+
+## REVISIÓN SOBRE `45fc6ad` · La regresión que fija el arranque en frío
+
+El arranque quedó como estaba —ráfaga desde `start()`, presupuesto derivado del
+contrato, «nunca vista» separada de «rancia» y refresco rápido del frontend sin
+tocar la cuota del proveedor— y ahora hay una regresión que lo **sostiene**.
+
+`_arranque_completo()` simula **los dos carriles a la vez** desde el segundo cero
+con el guardián real decidiendo cada presupuesto, y registra el sello de tiempo
+de cada petición. Sobre ese registro se comprueban las tres cosas que importan:
+
+```
+peticiones totales en el arranque : 77
+catálogo completo hidratado a los : 5,0 s   (umbral de la prueba: 15 s)
+pico en 60 s                      : 57 / 240
+pico en  1 s                      :  9 / 20
+```
+
+Impide las **dos** recaídas posibles, no sólo una: volver a los ~135 s porque
+alguien desarme la ráfaga o baje el presupuesto del primer ciclo, y ganar
+velocidad rompiendo el contrato —que es peor que ir lento, porque se paga con
+429 y con los dos carriles parados—. Una prueba extra verifica que el
+comportamiento viejo **no** cumpliría el umbral, para que el umbral no pueda
+pasarse por accidente.
+
+### `LIMPIAR.bat`, por lista blanca
+
+La guardia pasa de prohibir a **permitir**: cada orden de borrado tiene que
+nombrar uno de los seis patrones regenerables, y falla aunque la orden sea
+inofensiva. Eso destapó una debilidad real —`rd /s /q "%%d"` borraba «lo que
+hubiera en la variable»—, así que ahora el nombre se vuelve a comprobar justo
+antes de borrar y las tres cachés sueltas van en líneas literales.
+`.env`, `.venv`, `app\storage`, logs y datos de mercado están en la lista de
+intocables, comprobada orden por orden.
+
+### `/legacy` congelado, no eliminado
+
+Se conserva como referencia de comparación y diagnóstico **hasta que el frontend
+actual pase la certificación LIVE completa en DIA, SPY y QQQ**. Seis pruebas lo
+fijan: la ruta existe, su plantilla existe, **todos** sus estáticos existen, la
+razón está escrita en el propio código, la terminal actual **no depende** de él
+—para que el día que se quite salga de una pieza— y la limpieza no puede
+llevárselo por delante.
+
+### La certificación LIVE mide ahora el arranque y la ventana
+
+Dos columnas nuevas en el informe, medidas contra la terminal viva:
+
+- **HIDRATACIÓN MEDIDA** · segundos hasta la primera herramienta LIVE y hasta la
+  meseta, con el recuento final. La meseta se detecta contando **lecturas** sin
+  crecimiento, no segundos: si la terminal tarda en responder, eso es una espera,
+  no una meseta. Una meseta en cero no cierra la medición.
+- **CONTRATO DE CUOTA APLICADO** · qué ventana está usando la terminal. Si vuelve
+  a aparecer `ASUMIDA_DIARIA`, o el ciclo del motor pasa de 60 s con un contrato
+  de 240/60 s, el informe lo marca **FAIL** con el motivo. El episodio de los
+  1.920 s no puede repetirse en silencio.
+
+Un activo que falle sigue sin detener a los demás. 24 regresiones nuevas.
+Inventario: **2902 casos / 185 ficheros**.
