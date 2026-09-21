@@ -4,7 +4,7 @@ from .instruments import sigma_horizon as instrument_sigma_horizon
 
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from pathlib import Path
 
@@ -918,7 +918,15 @@ def build_quant_scanner(symbol: str, result: Dict[str, Any], flow: Dict[str, Any
         },
         "candidate_zones": zones.sort_values("structural_score", ascending=False).head(12).to_dict("records"),
         "method_note": "Scanner estructural: decide zona/dirección con Gamma/GEX, Delta/DEX, OI, volumen, Vol/OI, Flip/Centers/Walls, Q-Flow, prints, volatilidad, contexto y feature fusion de proveedores, ecosistema normalizado ETF/índice/futuro y estructura observada de derivados. Los proveedores no tienen rango fijo; freshness/calidad deciden si cada observación entra. TRACE/Tape queda fuera del score y se usa solo para timing. Los scores son evidencia interna, no probabilidades garantizadas.",
-        "generated_at": datetime.now().isoformat(),
+        # v1.57.0 · LA HORA DEL SCANNER ES UTC, COMO LA DEL RESTO.
+        #
+        # Esto era `datetime.now()`: hora local del proceso y SIN zona. El resto
+        # del proyecto sella en UTC con zona, así que este campo no se podía
+        # comparar con ninguno de los demás —restar dos datetime, uno con zona y
+        # otro sin ella, es un TypeError— y, en un servidor que no esté en UTC,
+        # `save_scanner_snapshot` archivaba la fila bajo el día equivocado cerca
+        # del cambio de fecha.
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -930,7 +938,7 @@ def save_scanner_snapshot(scanner: Dict[str, Any]) -> Optional[Path]:
     if not scanner or not scanner.get("ready"):
         return None
     try:
-        ts = pd.Timestamp(scanner.get("generated_at") or datetime.now())
+        ts = pd.Timestamp(scanner.get("generated_at") or datetime.now(timezone.utc))
         symbol = str(scanner.get("symbol") or "UNKNOWN").upper()
         from . import alpaca_data
         storage = routed_dir(Path(alpaca_data.DATA_DIR), "scanner_history")

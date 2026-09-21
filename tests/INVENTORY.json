@@ -3094,8 +3094,26 @@
     "test_los_paneles_sin_barras_se_juzgan_por_si_pintan",
     "test_un_recorte_por_el_camino_se_denuncia"
    ]
+  },
+  "tests/test_v1570_auditoria_integral.py": {
+   "casos": 13,
+   "tests": [
+    "test_atribuir_concentraciones_no_barre_toda_la_cinta",
+    "test_describir_un_nivel_no_avanza_su_contador_de_persistencia",
+    "test_el_acumulado_de_sesion_tampoco_crece_sin_limite",
+    "test_el_acumulado_del_dia_en_curso_no_se_pierde_al_purgar",
+    "test_el_generated_at_del_scanner_lleva_zona_horaria",
+    "test_el_lkg_conserva_las_sesiones_recientes_y_tira_las_viejas",
+    "test_el_lkg_no_crece_sin_limite_al_pasar_las_sesiones",
+    "test_el_mismo_ciclo_leido_diez_veces_sigue_siendo_un_ciclo",
+    "test_el_nivel_que_se_mueve_reestrena_contador_aunque_repita_ciclo",
+    "test_el_trace_nombra_el_ciclo_al_auditar_la_identidad_de_niveles",
+    "test_la_ventana_de_atribucion_sigue_siendo_la_misma",
+    "test_ningun_modulo_de_app_sella_con_datetime_now_ingenuo",
+    "test_un_ciclo_nuevo_si_avanza_el_contador"
+   ]
   }
  },
- "total_minimo": 2541,
+ "total_minimo": 2554,
  "version": "1.56.0"
 }

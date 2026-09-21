@@ -1699,7 +1699,14 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
         # correctas esconde bien las dos que no lo son, asi que el recuento de
         # lineas sin identidad viaja aparte y el Auditor lo puede leer de un
         # vistazo. Mientras `unidentified` no sea cero, hay un defecto abierto.
-        auditoria = _LI.audit(kept, symbol=symbol)
+        # v1.57.0 · El ciclo se NOMBRA. `persistence.cycles` sostiene la frase
+        # «este muro lleva en pie N ciclos»; si el ciclo no tiene nombre, cada
+        # lector que describa los niveles suma uno más. El instante de la última
+        # vela es lo que de verdad distingue un refresco del siguiente aquí.
+        _velas = payload.get("candles") or []
+        _ultima = _velas[-1].get("t") if (_velas and isinstance(_velas[-1], dict)) else None
+        _ciclo = f"{symbol}#{_ultima}" if _ultima else None
+        auditoria = _LI.audit(kept, symbol=symbol, cycle_id=_ciclo)
         payload["level_identity"] = auditoria["rows"]
         payload["level_identity_audit"] = {k: v for k, v in auditoria.items() if k != "rows"}
     except Exception as exc:

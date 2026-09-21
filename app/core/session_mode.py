@@ -64,6 +64,32 @@ _LOCK = threading.Lock()
 #: (symbol, trading_date, session) → acumulado
 _ACC: Dict[tuple, Dict[str, Any]] = {}
 
+#: Cuántos DÍAS de acumulado se conservan. `close_session` sella el acumulado
+#: pero no lo borra —«se conserva para comparar»—, y comparar es con ayer o
+#: anteayer, no con el martes de hace dos meses.
+#:
+#: v1.57.0 · EL ACUMULADO SELLADO TAMBIÉN CADUCA.
+#:
+#: Sin esto el diccionario no perdía nunca una entrada: 40 días x 8 activos x 2
+#: sesiones = 640 acumulados vivos en un proceso que no se reinicia.
+RETAIN_DAYS = 3
+
+
+def _purge_locked() -> int:
+    """Deja sólo los `RETAIN_DAYS` días más recientes. Devuelve cuántos borró.
+
+    Se llama con `_LOCK` tomado. La fecha de la clave viene siempre de
+    `resolve()`, que la da en ISO, así que ordena bien como texto.
+    """
+    dias = {k[1] for k in _ACC}
+    if len(dias) <= RETAIN_DAYS:
+        return 0
+    conservar = set(sorted(dias, reverse=True)[:RETAIN_DAYS])
+    caducos = [k for k in _ACC if k[1] not in conservar]
+    for k in caducos:
+        del _ACC[k]
+    return len(caducos)
+
 
 def _ec(now: Optional[datetime] = None) -> datetime:
     ref = now or datetime.now(timezone.utc)
@@ -146,6 +172,7 @@ def accumulate(symbol: str, *, price: Optional[float] = None,
                    "prints": None, "vwap_num": None, "vwap_den": None,
                    "observations": 0, "closed": False, "closed_at": None}
             _ACC[key] = acc
+            _purge_locked()
 
         if price is not None:
             acc["last"] = price

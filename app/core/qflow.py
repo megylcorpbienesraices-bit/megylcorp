@@ -58,7 +58,9 @@ Un fallo de datos nunca se convierte en 0.0. Cada salida declara por qué está 
 from __future__ import annotations
 
 import math
+import bisect as _bisect
 from datetime import datetime, timezone
+from datetime import timedelta as _timedelta
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -685,13 +687,28 @@ def attribute_events(events: List[Dict[str, Any]], order_flow: Any,
         return {"ready": False, "rows": len(rows), "tool": tool or None,
                 "detail": f"{len(rows)} operaciones recibidas, ninguna con instante utilizable"}
     parsed.sort(key=lambda x: x["ts"])
+    # v1.57.0 · LA VENTANA SE BUSCA, NO SE BARRE.
+    #
+    # Antes, por CADA concentración se recorrían TODAS las operaciones para
+    # quedarse con las de ±90 s. Con 390 concentraciones y 1.500 operaciones
+    # —una sesión normal— eso es medio millón de comparaciones por ciclo:
+    # 195 ms medidos, y 728 ms al doblar las dos cosas. Cuadrático, y en el
+    # camino de refresco.
+    #
+    # Las operaciones ya están ordenadas por instante, así que los extremos de
+    # la ventana se localizan por búsqueda binaria y sólo se tocan las que caen
+    # dentro. La ventana sigue siendo la misma; lo que cambia es cómo se llega
+    # a ella.
+    instantes = [p["ts"] for p in parsed]
 
     detail: List[Dict[str, Any]] = []
     for e in events:
         et = _parse_ts(e.get("t"))
         if et is None:
             continue
-        window = [p for p in parsed
+        lo = _bisect.bisect_left(instantes, et - _timedelta(seconds=ATTRIBUTION_WINDOW_SECONDS))
+        hi = _bisect.bisect_right(instantes, et + _timedelta(seconds=ATTRIBUTION_WINDOW_SECONDS))
+        window = [p for p in parsed[lo:hi]
                   if abs((p["ts"] - et).total_seconds()) <= ATTRIBUTION_WINDOW_SECONDS]
         if not window:
             detail.append({"t": e.get("t"), "trades": 0, "matched": False,

@@ -173,19 +173,40 @@ def _f(v: Any) -> Optional[float]:
     return x if x == x and x not in (float("inf"), float("-inf")) else None
 
 
-def _persistence(symbol: str, kind: str, price: float, now: datetime) -> Dict[str, Any]:
-    """Ciclos consecutivos que este nivel lleva publicado en el mismo sitio."""
+def _persistence(symbol: str, kind: str, price: float, now: datetime,
+                 cycle: str) -> Dict[str, Any]:
+    """Ciclos consecutivos que este nivel lleva publicado en el mismo sitio.
+
+    v1.57.0 · UN CICLO SE CUENTA UNA VEZ, LO MIRE QUIEN LO MIRE.
+
+    El contador avanzaba en CADA llamada. Como `audit` describe por dentro,
+    cualquiera que quisiera las filas y además el recuento —describir para la
+    pantalla y auditar para el Auditor, en el mismo ciclo— sumaba dos: medido,
+    dos ciclos reales se publicaban como cinco. Y el número no es decorativo:
+    `persistence.cycles` es lo que sostiene «este muro lleva en pie N ciclos»,
+    que es un argumento para operar.
+
+    La causa era mezclar consulta y mando: `describe` decía no calcular nada y
+    estaba escribiendo historia. Ahora el avance va marcado con el `cycle` al
+    que pertenece; si vuelve a llegar el MISMO ciclo, se devuelve lo guardado
+    sin sumar. Describir dejó de tener efectos secundarios.
+    """
     key = (str(symbol or "").upper(), str(kind or ""))
     tol = max(abs(price) * SAME_LEVEL_TOLERANCE, 1e-9)
     with _LOCK:
         prev = _HISTORY.get(key)
         prev_price = _f((prev or {}).get("price"))
         moved = prev_price is None or abs(prev_price - price) > tol
-        if prev is None or moved:
-            entry = {"price": price, "cycles": 1,
+        if prev is not None and not moved and prev.get("cycle") == cycle:
+            # Este mismo ciclo ya se contó. Segundo lector, mismo número.
+            entry = dict(prev)
+            entry["price"] = price
+        elif prev is None or moved:
+            entry = {"price": price, "cycles": 1, "cycle": cycle,
                      "first_seen": now.isoformat(), "last_seen": now.isoformat()}
         else:
             entry = {"price": price, "cycles": int(prev.get("cycles", 0)) + 1,
+                     "cycle": cycle,
                      "first_seen": prev.get("first_seen") or now.isoformat(),
                      "last_seen": now.isoformat()}
         _HISTORY[key] = entry
@@ -209,13 +230,21 @@ IDENTIFIED = "IDENTIFIED"
 
 
 def describe(levels: List[Dict[str, Any]], *, symbol: str,
-             now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+             now: Optional[datetime] = None,
+             cycle_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Identidad de cada nivel publicado. NO calcula ni renombra nada.
 
     Devuelve una fila por nivel visible, en el mismo orden en que llegó, con
     la procedencia real y la persistencia medida entre ciclos.
+
+    `cycle_id` nombra el ciclo de refresco. Dos llamadas con el MISMO `cycle_id`
+    describen lo mismo y cuentan un solo ciclo de persistencia, así que la
+    pantalla y el Auditor pueden leer los dos sin inflar el contador. Si no se
+    da, el ciclo es el instante resuelto, que es lo que distinguía una llamada
+    de la siguiente hasta ahora.
     """
     ref = now or datetime.now(timezone.utc)
+    ciclo = str(cycle_id) if cycle_id else ref.isoformat()
     out: List[Dict[str, Any]] = []
     for lv in levels or []:
         if not isinstance(lv, dict):
@@ -258,7 +287,7 @@ def describe(levels: List[Dict[str, Any]], *, symbol: str,
                        or "DESCONOCIDO · este `kind` no está en LEVEL_ORIGIN"),
             "magnitude": magnitude,
             "magnitude_field": magnitude_field,
-            "persistence": _persistence(symbol, kind, price, ref),
+            "persistence": _persistence(symbol, kind, price, ref, ciclo),
             "timestamp": ref.isoformat(),
             "source_mode": lv.get("source_mode"),
             "fallback_used": bool(lv.get("fallback_used")) if lv.get("fallback_used") is not None else None,
@@ -275,13 +304,19 @@ def describe(levels: List[Dict[str, Any]], *, symbol: str,
 
 
 def audit(levels: List[Dict[str, Any]], *, symbol: str,
-          now: Optional[datetime] = None) -> Dict[str, Any]:
+          now: Optional[datetime] = None,
+          cycle_id: Optional[str] = None) -> Dict[str, Any]:
     """Identidad de cada linea MAS el recuento de las que no la tienen.
 
     El recuento es lo que convierte esto en un guardia: `describe` solo describe,
     y una lista larga de filas correctas esconde bien las dos que no lo son.
+
+    El instante se resuelve AQUÍ y se pasa hacia abajo. Antes se delegaba en
+    `describe`, que tomaba uno nuevo, y auditar el mismo ciclo que ya se había
+    descrito contaba dos veces.
     """
-    rows = describe(levels, symbol=symbol, now=now)
+    ref = now or datetime.now(timezone.utc)
+    rows = describe(levels, symbol=symbol, now=ref, cycle_id=cycle_id)
     sin_identidad = [r for r in rows if r["identity_status"] == UNIDENTIFIED]
     return {
         "rows": rows,
@@ -294,6 +329,7 @@ def audit(levels: List[Dict[str, Any]], *, symbol: str,
                    f"{len(sin_identidad)} linea(s) sin identidad: "
                    + ", ".join(sorted({r['type'] or 'SIN_KIND' for r in sin_identidad}))),
         "symbol": str(symbol or "").upper(),
+        "cycle_id": str(cycle_id) if cycle_id else None,
     }
 
 

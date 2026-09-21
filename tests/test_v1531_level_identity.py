@@ -132,7 +132,7 @@ def test_the_identity_travels_in_the_trace_bundle():
     assert 'payload["level_identity"] = auditoria["rows"]' in main
     assert 'payload["level_identity_audit"]' in main
     block = main[main.index('payload["levels"] = kept'):main.index('return walls')]
-    assert "_LI.audit(kept, symbol=symbol)" in block
+    assert "_LI.audit(kept, symbol=symbol, cycle_id=_ciclo)" in block
 
 
 def test_the_auditor_shows_the_seven_columns():

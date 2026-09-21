@@ -23,15 +23,15 @@
     "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
   ],
   "tests": {
-    "collected": 2541,
+    "collected": 2554,
     "passed": 2170,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 170,
+    "files": 171,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "80e21e9db087ebdd31736904ff797619a0edbd0ad5ab516ebf8ab0a87df293ca"
+    "plan_sha256": "b439338a8e5bc46fc4395723400f23b7ec400bed3fec4d2f2882e1238a425172"
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
   "artifact_final_sha256": "SIDECAR_AFTER_PACKAGING",

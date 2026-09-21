@@ -89,7 +89,7 @@ def test_la_linea_sin_identidad_se_dibuja_distinta():
 def test_el_trace_publica_la_auditoria_de_identidad():
     src = Path("app/main.py").read_text(encoding="utf-8")
     assert 'payload["level_identity_audit"]' in src
-    assert "_LI.audit(kept, symbol=symbol)" in src
+    assert "_LI.audit(kept, symbol=symbol, cycle_id=_ciclo)" in src
 
 
 # ── Autoridad única de muros ─────────────────────────────────────────────

@@ -371,7 +371,9 @@ def bootstrap_persistence(package_root: Optional[Path] = None, target_version: s
     has_existing = any(_iter_data_files(category_dir(cat)) for cat in CATEGORY_NAMES if cat not in {"backups", "system"})
     has_legacy = any(any(_iter_data_files(src)) for src in fresh_sources)
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # v1.57.0 · El sello del respaldo también en UTC: dos migraciones desde husos
+    # distintos ordenaban mal sus copias si cada una usaba su hora local.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     backup_path: Optional[Path] = None
     backup_files = 0
     if has_legacy:

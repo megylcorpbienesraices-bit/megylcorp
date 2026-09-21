@@ -75,6 +75,37 @@ _LOCK = threading.Lock()
 #: (symbol, session_date, dataset) → {value, at, meta}
 _LKG: Dict[tuple, Dict[str, Any]] = {}
 
+#: Cuántas FECHAS de sesión se conservan. Tres —la de hoy y las dos anteriores—
+#: son las que alguien puede llegar a pedir: el LKG existe para tapar un ciclo
+#: sin dato, no para hacer de archivo histórico.
+#:
+#: v1.57.0 · EL ÚLTIMO VALOR BUENO CADUCA.
+#:
+#: Este almacén no borraba nunca. La clave lleva la fecha dentro, así que cada
+#: día abre entradas nuevas y las del día anterior quedan ahí con su valor
+#: entero —series, matrices, cintas— sin que nada las vuelva a leer jamás.
+#: Medido: 30 sesiones x 8 activos x 10 carriles = 2.400 entradas vivas, y
+#: subiendo. En un portátil que se reinicia cada tarde no se nota; en el VPS,
+#: que no se apaga, es una fuga.
+RETAIN_SESSIONS = 3
+
+
+def _purge_locked() -> int:
+    """Deja sólo las `RETAIN_SESSIONS` fechas más recientes. Devuelve cuántas borró.
+
+    Se llama con `_LOCK` tomado. Ordena por la fecha de la clave, que es ISO y
+    por tanto ordenable como texto. Una entrada SIN fecha se considera la más
+    antigua de todas: no se sabe a qué sesión pertenece, así que no se protege.
+    """
+    fechas = {k[1] for k in _LKG}
+    if len(fechas) <= RETAIN_SESSIONS:
+        return 0
+    conservar = set(sorted(fechas, reverse=True)[:RETAIN_SESSIONS])
+    caducas = [k for k in _LKG if k[1] not in conservar]
+    for k in caducas:
+        del _LKG[k]
+    return len(caducas)
+
 
 def _now(now: Optional[datetime] = None) -> datetime:
     ref = now or datetime.now(timezone.utc)
@@ -95,6 +126,7 @@ def remember(symbol: str, session_date: str, dataset: str, value: Any,
         _LKG[_key(symbol, session_date, dataset)] = {
             "value": value, "at": ref.isoformat(), "meta": meta or {},
         }
+        _purge_locked()
 
 
 def recall(symbol: str, session_date: str, dataset: str) -> Optional[Dict[str, Any]]:
@@ -233,6 +265,8 @@ def coverage(now: Optional[datetime] = None) -> Dict[str, Any]:
         "symbols": sorted({f["symbol"] for f in filas}),
         "key": "(symbol, session_date, dataset)",
         "stale_after_minutes": STALE_AFTER_MINUTES,
+        "retain_sessions": RETAIN_SESSIONS,
+        "session_dates": sorted({f["session_date"] for f in filas}, reverse=True),
         "detail": (f"{len(filas)} carril(es) con último valor bueno"
                    if filas else "todavía no hay ningún último valor bueno guardado"),
     }
