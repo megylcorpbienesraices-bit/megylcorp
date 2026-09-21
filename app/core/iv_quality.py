@@ -203,6 +203,19 @@ def assess(*, symbol: Any, S: float, K: float, T: float, option_type: str,
                         None if spread_ratio is None else round(spread_ratio, 4), reason)
 
 
+def _campo(a: Any, nombre: str, por_defecto: Any = None) -> Any:
+    """Lee la evaluación venga como objeto o como su `describe()`.
+
+    v1.57.0 · La evaluación viaja ahora hasta el Auditor a través del estado
+    público, y el estado se serializa a JSON. Un `IVAssessment` no es
+    serializable, así que por ahí llega como diccionario. El resumen tiene que
+    funcionar con las dos formas o habría dos caminos que dan dos números.
+    """
+    if isinstance(a, dict):
+        return a.get(nombre, por_defecto)
+    return getattr(a, nombre, por_defecto)
+
+
 def chain_quality(assessments) -> Dict[str, Any]:
     """Resumen de identificabilidad para el Auditor y para la superficie."""
     rows = list(assessments or [])
@@ -211,13 +224,15 @@ def chain_quality(assessments) -> Dict[str, Any]:
         return {"ready": False, "reason": "sin contratos evaluados"}
     counts: Dict[str, int] = {}
     for a in rows:
-        counts[a.state] = counts.get(a.state, 0) + 1
-    usable = sum(1 for a in rows if a.usable_for_surface)
+        estado = str(_campo(a, "state", UNIDENTIFIABLE))
+        counts[estado] = counts.get(estado, 0) + 1
+    usable = sum(1 for a in rows if bool(_campo(a, "usable_for_surface", False)))
     return {
         "ready": True, "contracts": n, "states": counts,
         "identifiable": usable,
         "identifiable_pct": round(100.0 * usable / n, 2),
-        "mean_confidence": round(sum(a.confidence for a in rows) / n, 3),
+        "mean_confidence": round(
+            sum(float(_campo(a, "confidence", 0.0) or 0.0) for a in rows) / n, 3),
         "note": ("Sólo los contratos identificables entran al ajuste de superficie. "
                  "Ajustar contra IV no identificable es ajustar contra ruido."),
     }

@@ -1746,7 +1746,7 @@ VIEW_FIELDS: tuple[str, ...] = (
     'history','snapshot','meta','gamma','gamma_delta','flow_events','flow_summary',
     'vol','positioning','targets','command','chain_insights','macro','large_prints',
     'large_print_summary','premarket_tape','session_flow_tape','scanner',
-    'data_quality_report','model_health','regime_context','trace_attribution',
+    'model_controls_report','data_quality_report','model_health','regime_context','trace_attribution',
     'what_changed_rows','calibration','exposure_scenarios_report','american_model_report',
     'greeks_diagnostics','session_memory_report','dealer_intelligence_report',
     'external_market_report','source_health_report','source_fusion_report',
@@ -1825,6 +1825,9 @@ class PlatformState:
     premarket_tape: Dict[str, Any] = field(default_factory=dict)
     session_flow_tape: Dict[str, Any] = field(default_factory=dict)
     scanner: Dict[str, Any] = field(default_factory=dict)
+    #: IV evaluada contrato a contrato y ajuste SSVI de la cadena, para los
+    #: controles del Auditor. Se calcula donde vive la cadena.
+    model_controls_report: Dict[str, Any] = field(default_factory=dict)
     data_quality_report: Dict[str, Any] = field(default_factory=dict)
     model_health: Dict[str, Any] = field(default_factory=dict)
     regime_context: Dict[str, Any] = field(default_factory=dict)
@@ -2390,6 +2393,28 @@ class PlatformState:
                 attr = exposure_attribution(selected_history, self.symbol)
                 changed = what_changed(gd, previous_gd, scanner, previous_scanner)
                 self.history, self.snapshot, self.meta = history, snapshot, meta
+                # v1.57.0 · Los controles del Auditor se alimentan DONDE VIVE LA CADENA.
+                #
+                # `audit()` se llamaba sin `iv_assessments` y sin `surface`, así
+                # que dos controles avisaban con «no se evaluó la
+                # identificabilidad de la IV» y «no hay ajuste de superficie».
+                # Las dos frases sugerían que el motor no existía. Existe:
+                # `iv_quality.assess()` y `ssvi_shadow.fit_ssvi()`, con sus
+                # condiciones de Durrleman y su monotonía de calendario. Faltaba
+                # el cable, y va aquí: arrastrar el snapshot hasta la capa de
+                # presentación para calcularlo allí sería llevar la cadena a
+                # donde no pinta nada.
+                try:
+                    from .core import model_controls as _MC
+                    self.model_controls_report = _MC.build(
+                        snapshot, symbol=self.symbol,
+                        spot=gd.get("spot") if isinstance(gd, dict) else None)
+                except Exception as exc:
+                    _obs_note("service:model_controls", exc, severity="DEGRADED")
+                    self.model_controls_report = {
+                        "iv_assessments": [], "iv_count": 0, "chain_rows": 0,
+                        "surface": {"ready": False,
+                                    "reason": f"el cálculo falló: {type(exc).__name__}"}}
                 self.gamma, self.gamma_delta = gamma, gd
                 self.expiry_info, self.expiry_confluence_data = expiry_info, confluence
                 self.flow_events, self.flow_summary = events, flow
@@ -2768,7 +2793,7 @@ class PlatformState:
         """Fields that belong to one active asset and may be atomically replaced."""
         return [
             'history','snapshot','meta','gamma','gamma_delta','flow_events','flow_summary','vol','positioning','targets','command','chain_insights','macro',
-            'large_prints','large_print_summary','premarket_tape','scanner','data_quality_report','model_health','regime_context','trace_attribution',
+            'large_prints','large_print_summary','premarket_tape','scanner','model_controls_report','data_quality_report','model_health','regime_context','trace_attribution',
             'what_changed_rows','calibration','exposure_scenarios_report','american_model_report','greeks_diagnostics','session_memory_report',
             'dealer_intelligence_report','external_market_report','source_health_report','source_fusion_report','research_storage_report',
             'institutional_research_report','tape_archive_report','audit_persistence_report','market_state_field','market_truth_report','feature_intelligence_report','research_validation_report','decision_intelligence_report','decision_compare_snapshot','causality_report','temporal_truth_report','derivatives_intelligence_report','expiry_intelligence_report','structural_intelligence_report','profile_bundle_report','versioned_market_state_report',
@@ -2809,7 +2834,7 @@ class PlatformState:
             self.vol={}; self.positioning={}; self.targets={}; self.command={}; self.chain_insights={}
             self.macro={}; self.large_prints=pd.DataFrame(); self.large_print_summary={}; self.premarket_tape={}; self.session_flow_tape={}; self.scanner={}
             self.expiry_info={}; self.expiry_confluence_data={}
-            self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
+            self.model_controls_report={}; self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
             self.exposure_scenarios_report={}; self.american_model_report={}; self.greeks_diagnostics={}; self.session_memory_report={}
             self.dealer_intelligence_report={}; self.external_market_report={}; self.source_health_report={}; self.source_fusion_report={}; self.research_storage_report={}; self.institutional_research_report={}; self.tape_archive_report={}; self.audit_persistence_report={}; self.market_state_field={}; self.causality_report={}; self.temporal_truth_report={}; self.derivatives_intelligence_report={}; self.expiry_intelligence_report={}; self.structural_intelligence_report={}; self.profile_bundle_report={}; self.versioned_market_state_report={}; self.operational_readiness_report={}; self.scenario_lab_report={}; self.quantum_shadow_report={}; self.flow_kinematics_report={}; self.premarket_analysis_report={}; self.trace_orderflow_report={}
             self.last_error=None
@@ -2939,7 +2964,7 @@ class PlatformState:
         # Transactional switch: no state from the previous symbol is allowed to survive
         # inside the new active context.  Browser requests use the epoch to reject stale
         # responses that were already in flight.
-        fields=['symbol','history','snapshot','meta','gamma','gamma_delta','flow_events','flow_summary','vol','positioning','targets','command','chain_insights','macro','large_prints','large_print_summary','premarket_tape','session_flow_tape','scanner','data_quality_report','model_health','regime_context','trace_attribution','what_changed_rows','calibration','exposure_scenarios_report','american_model_report','greeks_diagnostics','session_memory_report','dealer_intelligence_report','external_market_report','source_health_report','source_fusion_report','research_storage_report','institutional_research_report','tape_archive_report','audit_persistence_report','market_state_field','market_truth_report','feature_intelligence_report','research_validation_report','decision_intelligence_report','decision_compare_snapshot','causality_report','temporal_truth_report','derivatives_intelligence_report','expiry_intelligence_report','structural_intelligence_report','profile_bundle_report','versioned_market_state_report','operational_readiness_report','scenario_lab_report','quantum_shadow_report','flow_kinematics_report','premarket_analysis_report','trace_orderflow_report','expiry_info','expiry_confluence_data','last_refresh_ec','last_error','mode']
+        fields=['symbol','history','snapshot','meta','gamma','gamma_delta','flow_events','flow_summary','vol','positioning','targets','command','chain_insights','macro','large_prints','large_print_summary','premarket_tape','session_flow_tape','scanner','model_controls_report','data_quality_report','model_health','regime_context','trace_attribution','what_changed_rows','calibration','exposure_scenarios_report','american_model_report','greeks_diagnostics','session_memory_report','dealer_intelligence_report','external_market_report','source_health_report','source_fusion_report','research_storage_report','institutional_research_report','tape_archive_report','audit_persistence_report','market_state_field','market_truth_report','feature_intelligence_report','research_validation_report','decision_intelligence_report','decision_compare_snapshot','causality_report','temporal_truth_report','derivatives_intelligence_report','expiry_intelligence_report','structural_intelligence_report','profile_bundle_report','versioned_market_state_report','operational_readiness_report','scenario_lab_report','quantum_shadow_report','flow_kinematics_report','premarket_analysis_report','trace_orderflow_report','expiry_info','expiry_confluence_data','last_refresh_ec','last_error','mode']
         with self.lock:
             backup={k:getattr(self,k) for k in fields}
             _sym, switch_epoch = self.set_active(symbol)
@@ -2949,7 +2974,7 @@ class PlatformState:
             self.vol={}; self.positioning={}; self.targets={}; self.command={}; self.chain_insights={}
             self.macro={}; self.large_prints=pd.DataFrame(); self.large_print_summary={}; self.premarket_tape={}; self.session_flow_tape={}; self.scanner={}
             self.expiry_info={}; self.expiry_confluence_data={}
-            self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
+            self.model_controls_report={}; self.data_quality_report={}; self.model_health={}; self.regime_context={}; self.trace_attribution={}; self.what_changed_rows=[]; self.calibration={}
             self.exposure_scenarios_report={}; self.american_model_report={}; self.greeks_diagnostics={}; self.session_memory_report={}
             self.dealer_intelligence_report={}; self.external_market_report={}; self.source_health_report={}; self.source_fusion_report={}; self.research_storage_report={}; self.institutional_research_report={}; self.tape_archive_report={}; self.audit_persistence_report={}; self.market_state_field={}; self.causality_report={}; self.temporal_truth_report={}; self.derivatives_intelligence_report={}; self.expiry_intelligence_report={}; self.structural_intelligence_report={}; self.profile_bundle_report={}; self.versioned_market_state_report={}; self.operational_readiness_report={}; self.scenario_lab_report={}; self.quantum_shadow_report={}; self.flow_kinematics_report={}; self.premarket_analysis_report={}; self.trace_orderflow_report={}
             self.publish_view("RESET")
@@ -3693,6 +3718,10 @@ class PlatformState:
                 "gamma_delta_alignment": {"label": gd.get("gamma_delta_alignment_label"), "score": gd.get("gamma_delta_alignment_score")},
                 "data_quality": (self.data_quality_report or {}).get("score", gd.get("data_quality")), "audit_warnings": warnings,
                 "data_quality_report": data_quality_public, "publication_gate": live_publication_gate, "model_health": self.model_health,
+                # IV evaluada contrato a contrato y ajuste SSVI de la cadena.
+                # Alimentan los controles del Auditor, que antes avisaban de que
+                # «no se evaluó» algo que sí tiene motor escrito detrás.
+                "model_controls": self.model_controls_report or {},
                 "regime_context": self.regime_context, "trace_attribution": self.trace_attribution,
                 "what_changed": self.what_changed_rows, "calibration": self.calibration, "live_validation": validation,
                 "exposure_scenarios": self.exposure_scenarios_report, "american_model": self.american_model_report, "greeks_diagnostics": self.greeks_diagnostics, "session_memory": self.session_memory_report,

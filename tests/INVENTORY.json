@@ -3156,6 +3156,33 @@
     "test_una_llamada_fallida_no_convierte_el_endpoint_en_inexistente"
    ]
   },
+  "tests/test_v1570_controles_del_modelo.py": {
+   "casos": 27,
+   "tests": [
+    "test_con_cadena_la_IV_se_mide_de_verdad",
+    "test_con_cadena_suficiente_la_superficie_se_ajusta",
+    "test_el_ajustador_de_superficie_existia_y_no_lo_llamaba_nadie",
+    "test_el_auditor_recibe_IV_y_SUPERFICIE",
+    "test_el_motor_SI_hace_purge_gap_y_ahora_se_declara",
+    "test_el_na_no_se_confunde_ni_con_aprobado_ni_con_aviso",
+    "test_el_reporte_sobrevive_a_un_cambio_de_simbolo",
+    "test_en_COLLECTING_se_enseña_el_metodo_declarado",
+    "test_funciona_igual_en_los_tres_activos",
+    "test_la_calibracion_distingue_todavia_no_hay_de_esta_mal_hecha",
+    "test_los_controles_se_calculan_donde_vive_la_cadena",
+    "test_pocos_strikes_por_corte_no_se_ajustan",
+    "test_sin_EV_no_hay_costes_que_auditar",
+    "test_sin_cadena_la_IV_es_NA_con_motivo_no_un_aviso",
+    "test_sin_cortes_suficientes_es_NA_con_el_numero_exacto",
+    "test_sin_magnitudes_avisa_y_con_magnitudes_pasa_por_merito",
+    "test_un_EV_con_costes_pasa",
+    "test_un_EV_publicado_SIN_costes_sigue_siendo_CRITICO",
+    "test_un_na_sin_motivo_se_rechaza",
+    "test_una_cadena_con_IV_mala_sigue_avisando",
+    "test_una_superficie_con_arbitraje_sigue_siendo_CRITICO",
+    "test_una_unidad_fuera_del_registro_es_CRITICO"
+   ]
+  },
   "tests/test_v1570_delta_min.py": {
    "casos": 37,
    "tests": [
@@ -3290,6 +3317,6 @@
    ]
   }
  },
- "total_minimo": 2738,
+ "total_minimo": 2765,
  "version": "1.56.0"
 }

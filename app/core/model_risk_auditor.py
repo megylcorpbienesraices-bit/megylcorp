@@ -57,6 +57,19 @@ SEVERITY_INFO = "INFO"
 SEVERITY_WARN = "WARN"
 SEVERITY_CRITICAL = "CRITICAL"
 
+#: v1.57.0 · NO APLICA, CON MOTIVO. No es un aprobado ni un aviso.
+#:
+#: Faltaba el estado del medio y eso obligaba a mentir en las dos direcciones.
+#: Un control cuyo objeto NO EXISTE todavía —auditar el purge gap de una
+#: validación fuera de muestra que aún no se ha hecho— no puede avisar: estaría
+#: denunciando un defecto metodológico que no hay, y quien lo lea se pondrá a
+#: buscar un fallo inexistente. Pero tampoco puede aprobar: aprobar lo que no se
+#: ha comprobado es exactamente lo que estos controles existen para impedir.
+#:
+#: `N/A` obliga a decir POR QUÉ no aplica. Un N/A sin motivo es un aviso
+#: escondido, y se rechaza en las pruebas.
+SEVERITY_NA = "N/A"
+
 AREA_QUOTE = "COTIZACIÓN"
 AREA_CONTRACT = "CONTRATO"
 AREA_PRICING = "VALORACIÓN"
@@ -113,6 +126,18 @@ def _ok(area, inv, detail="", **ev) -> Finding:
 
 def _fail(area, inv, detail, severity=SEVERITY_WARN, **ev) -> Finding:
     return Finding(area, inv, False, severity, detail, ev)
+
+
+def _na(area, inv, motivo: str, **ev) -> Finding:
+    """El control no aplica en este ciclo, y se dice por qué.
+
+    `passed=True` a propósito: no arrastra la nota del modelo hacia abajo,
+    porque no hay defecto. Pero su severidad es `N/A`, así que tampoco se
+    confunde con un control que SÍ se ejecutó y pasó.
+    """
+    if not str(motivo or "").strip():
+        raise ValueError("un N/A sin motivo es un aviso escondido")
+    return Finding(area, inv, True, SEVERITY_NA, str(motivo), ev)
 
 
 # ── controles sobre la cadena ───────────────────────────────────────────────────
@@ -217,10 +242,16 @@ def audit_chain(chain: pd.DataFrame, *, symbol: Any = None,
     return out
 
 
-def audit_iv(assessments: Sequence[Any], *, min_identifiable_pct: float = 55.0) -> List[Finding]:
+def audit_iv(assessments: Sequence[Any], *, min_identifiable_pct: float = 55.0,
+             reason: str = "") -> List[Finding]:
+    # v1.57.0 · «no se evaluó» sugería que el motor no existía. Existe
+    # —`iv_quality.assess()` y `chain_quality()`—, lo que faltaba era el cable.
+    # Sin cadena en este ciclo no hay identificabilidad que medir: eso es N/A
+    # con su motivo, no un aviso que manda a implementar lo ya implementado.
     if not assessments:
-        return [_fail(AREA_IV, "IV evaluada", "no se evaluó la identificabilidad de la IV",
-                      SEVERITY_WARN)]
+        return [_na(AREA_IV, "IV evaluada",
+                    reason or ("no hay cadena de opciones en este ciclo: no hay "
+                               "contratos cuya IV evaluar"))]
     from .iv_quality import chain_quality
     q = chain_quality(assessments)
     if not q.get("ready"):
@@ -236,9 +267,19 @@ def audit_iv(assessments: Sequence[Any], *, min_identifiable_pct: float = 55.0) 
 
 
 def audit_surface(surface: Dict[str, Any] | None) -> List[Finding]:
+    # v1.57.0 · Igual que IV: `ssvi_shadow.fit_ssvi()` existe con sus
+    # condiciones de Durrleman y su monotonía de calendario. Cuando la cadena
+    # del ciclo no da para ajustar —hacen falta dos vencimientos con cuatro
+    # strikes— eso es una condición del DATO, y se dice cuál.
     if not surface:
-        return [_fail(AREA_SURFACE, "superficie ajustada", "no hay ajuste de superficie",
-                      SEVERITY_INFO)]
+        return [_na(AREA_SURFACE, "superficie ajustada",
+                    "no se entregó ningún ajuste de superficie a este ciclo")]
+    if surface.get("ready") is False:
+        return [_na(AREA_SURFACE, "superficie ajustada",
+                    str(surface.get("reason")
+                        or "la cadena de este ciclo no permite ajustar la superficie"),
+                    model=surface.get("model"),
+                    slices_available=surface.get("slices_available"))]
     out: List[Finding] = []
     slices = surface.get("slices") or surface.get("per_slice") or []
     bf_bad = [s for s in slices if isinstance(s, dict)
@@ -359,8 +400,11 @@ def audit_decision(scanner: Dict[str, Any] | None, ev: Dict[str, Any] | None,
                          SEVERITY_CRITICAL, age_seconds=age))
 
     if ev is None:
-        out.append(_fail(AREA_EV, "costes conocidos",
-                         "no se publica EV, o se publica sin costes", SEVERITY_WARN))
+        # Sin EV publicado no hay costes que auditar. Avisar aquí denuncia un
+        # «EV bruto» que no existe. Cuando SÍ hay EV y no declara costes, eso
+        # sigue siendo CRÍTICO: un EV sin comisiones ni deslizamiento no es un EV.
+        out.append(_na(AREA_EV, "costes conocidos",
+                       "no se publica EV en este ciclo: no hay modelo de costes que auditar"))
     else:
         has_costs = any(k in ev for k in ("costs", "fees", "cost_model", "execution_costs"))
         out.append(_ok(AREA_EV, "costes conocidos", "modelo de costes declarado")
@@ -369,16 +413,38 @@ def audit_decision(scanner: Dict[str, Any] | None, ev: Dict[str, Any] | None,
                          "el EV no declara comisiones ni deslizamiento: un EV bruto no es un EV",
                          SEVERITY_CRITICAL))
 
+    # v1.57.0 · TRES ESTADOS, NO DOS.
+    #
+    # Esto avisaba «la validación no declara purge gap» siempre que la
+    # calibración no publicara la clave. Pero una calibración en COLLECTING no
+    # tiene validación fuera de muestra TODAVÍA: no hay purge gap que declarar
+    # porque no hay partición que purgar.
+    #
+    # Avisar ahí es un FALSO NEGATIVO que manda a buscar un defecto
+    # metodológico inexistente —el motor parte TRAIN → purge → VALIDATION →
+    # purge → FINAL OOS y lo publica en `method`—, y encima gasta la credibilidad
+    # del aviso de verdad, que es el de una calibración LISTA sin purgar.
     if calibration is None:
-        out.append(_fail(AREA_CALIBRATION, "OOS válido", "sin calibración disponible", SEVERITY_INFO))
+        out.append(_na(AREA_CALIBRATION, "OOS válido",
+                       "no hay calibración en este ciclo: no existe validación que auditar"))
+    elif not calibration.get("ready"):
+        estado = str(calibration.get("status") or calibration.get("stage") or "COLLECTING")
+        out.append(_na(AREA_CALIBRATION, "OOS válido",
+                       f"calibración en {estado}: todavía no hay partición fuera de muestra "
+                       f"que purgar · método declarado: "
+                       f"{str(calibration.get('method') or 'sin declarar')[:120]}",
+                       status=estado))
     else:
         purged = bool(calibration.get("purged") or calibration.get("purge_gap")
                       or calibration.get("purged_sessions"))
-        out.append(_ok(AREA_CALIBRATION, "OOS válido", "validación con purge gap")
+        out.append(_ok(AREA_CALIBRATION, "OOS válido",
+                       f"validación con purge gap · "
+                       f"{calibration.get('purged_sessions')} sesión(es) purgada(s)")
                    if purged else
                    _fail(AREA_CALIBRATION, "OOS válido",
-                         "la validación no declara purge gap; sin él la muestra 'fuera de "
-                         "muestra' comparte información con el entrenamiento", SEVERITY_WARN))
+                         "la calibración está LISTA y no declara purge gap; sin él la muestra "
+                         "'fuera de muestra' comparte información con el entrenamiento",
+                         SEVERITY_WARN))
 
     if dealer is not None:
         labelled = str(dealer.get("kind") or "").upper() == "INFERRED"
@@ -413,6 +479,7 @@ def _grade(findings: Sequence[Finding], dimension: str) -> Dict[str, Any]:
 
 def audit(*, chain: pd.DataFrame | None = None, symbol: Any = None,
           iv_assessments: Sequence[Any] = (), surface: Dict[str, Any] | None = None,
+          iv_reason: str = "",
           exposures: Iterable[Any] = (), comparisons: Iterable[Dict[str, Any]] = (),
           replay: Dict[str, Any] | None = None, flow: Dict[str, Any] | None = None,
           scanner: Dict[str, Any] | None = None, ev: Dict[str, Any] | None = None,
@@ -422,7 +489,7 @@ def audit(*, chain: pd.DataFrame | None = None, symbol: Any = None,
     findings: List[Finding] = []
     if chain is not None:
         findings += audit_chain(chain, symbol=symbol)
-    findings += audit_iv(iv_assessments)
+    findings += audit_iv(iv_assessments, reason=str(iv_reason or ""))
     findings += audit_surface(surface)
     findings += audit_exposure(exposures)
     findings += audit_provider_comparison(comparisons)

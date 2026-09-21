@@ -2558,9 +2558,25 @@ def _arquitectura(state: Dict[str, Any], trace: Dict[str, Any]) -> Dict[str, Any
     # hacer: aquí no se rebaja la severidad, se le da algo que auditar.
     exposiciones = _exposiciones_canonicas(state)
 
+    # v1.57.0 · IV y SUPERFICIE, alimentados desde la cadena real.
+    #
+    # Se calculan donde vive la cadena —en el refresco— y llegan aquí ya
+    # hechos. Si el ciclo no trajo cadena, la lista vacía y el `ready: False`
+    # hacen que el control diga N/A CON SU MOTIVO, no «no se evaluó», que
+    # sugería que el motor no existía.
+    _mc = state.get("model_controls") or {}
+    _iv = list(_mc.get("iv_assessments") or [])
+    _sup = _mc.get("surface") or None
+    _iv_motivo = ("" if _iv else
+                  (f"la cadena de este ciclo trajo {_mc.get('chain_rows', 0)} contrato(s) "
+                   f"sin datos suficientes para evaluar la IV"
+                   if _mc else
+                   "no hay cadena de opciones en este ciclo: no hay contratos cuya IV evaluar"))
+
     audit = _audit(
         chain=None, symbol=symbol,
         exposures=exposiciones,
+        iv_assessments=_iv, surface=_sup, iv_reason=_iv_motivo,
         flow={"non_causal_quotes": int(flow.get("non_causal_quotes") or 0),
               "classified_pct": _f(flow.get("classified_pct"))},
         scanner={"input_age_seconds": _f(state.get("data_age_seconds"))},
