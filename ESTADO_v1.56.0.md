@@ -261,3 +261,100 @@ el estado, porque la propia suite deja su `__pycache__` al ejecutarse y exigir u
 - **ZIP certificado**: `Python 3.11.15 ≠ 3.12.14`, `Node 22.22.2 ≠ 22.16.0`,
   `npm 10.9.7 ≠ 10.9.2`, y `pip-audit` / `ruff` / `pyzmq` ausentes. El gate es
   fail-closed a propósito y no se ha tocado.
+
+
+---
+
+## Verificación de walls y Monte Carlo · sobre el ZIP `ITMQ_156_FIX`
+
+Se pidió comprobar que Call Wall y Put Wall salen bien **en todos los activos**,
+que Monte Carlo también, y que cada sección está correcta. Esa copia traía una
+pasada externa sobre `df2ca9d` y declaraba que la suite completa **no había
+llegado a terminar** en su entorno. Aquí sí terminó, y sacó una prueba en rojo.
+
+### CALL WALL / PUT WALL · un defecto de fondo
+
+`wall_engine` lo tenía escrito en su propia documentación:
+
+> «Cuando el proveedor no publica OI para ese activo **no se penaliza al
+> strike**: se puntúa sólo con exposición y se declara. Multiplicar por un dato
+> ausente es inventar un veredicto.»
+
+La regla existía y se aplicaba **al activo entero**. Por strike, no: la
+normalización recibía `p["oi"] or 0.0`, así que un strike sin OI publicado
+entraba como **cero medido**, salía con `oi_norm = 0` y su score se anulaba —es
+una media geométrica— por grande que fuera su exposición.
+
+Medido, con el strike de mayor exposición como único sin OI:
+
+| strike | exposición | OI | score ANTES | score AHORA |
+|---|---|---|---|---|
+| **100** | **1,00e+09** | *ausente* | **0,000** | **100,000** |
+| 101 | 9,00e+08 | 49.000 | 94,868 | 94,868 |
+| 102 | 8,00e+08 | 48.000 | 88,525 | 88,525 |
+
+**El muro se iba al 101.** El dato que faltaba no era el del muro: era el del
+proveedor. Ocurría en los dos lados, call y put.
+
+No hay excepción, no hay aviso, no hay error: sólo una línea estructural
+dibujada en el strike equivocado en TRACE, en RESUMEN y en las seis secciones
+que leen esta autoridad.
+
+Corregido: el strike sin OI se puntúa con la evidencia que **sí** tiene
+—exposición sola, el mismo trato que recibe la cadena entera cuando el proveedor
+no publica OI— y se marca `oi_missing` con `score_method` propio, más un recuento
+`oi_missing_strikes` en la respuesta para que el Auditor lo vea sin deducirlo de
+un cero. Un OI **medido** a cero sigue anulando el muro, que es lo correcto.
+
+Verificado además: **ningún** branch por ticker. Los ocho activos con la misma
+cadena dan el mismo muro y el mismo score, y la histéresis está aislada por
+símbolo (SPY no contamina a DIA).
+
+### MONTE CARLO · correcto
+
+Contrastado contra solución cerrada con números propios, no con los de la suite.
+P(toque) por principio de reflexión, P(final) por N(d2), p95 por el cuantil
+lognormal exacto. 80.000 trayectorias, semilla fija:
+
+| activo | IV % | toque MC | cerrada | dif | p95 dif |
+|---|---|---|---|---|---|
+| DIA | 14,0 | 0,3908 | 0,3921 | 0,12 pp | 0,02 % |
+| SPY | 12,5 | 0,3389 | 0,3398 | 0,10 pp | 0,02 % |
+| QQQ | 17,0 | 0,4765 | 0,4774 | 0,09 pp | 0,03 % |
+| IWM | 20,0 | 0,5413 | 0,5430 | 0,16 pp | 0,03 % |
+| AAPL | 24,0 | 0,6073 | 0,6089 | 0,16 pp | 0,04 % |
+| NVDA | 42,0 | 0,7596 | 0,7620 | 0,25 pp | 0,07 % |
+| TSLA | 55,0 | 0,8103 | 0,8131 | 0,28 pp | 0,09 % |
+| MSFT | 21,0 | 0,5597 | 0,5614 | 0,17 pp | 0,04 % |
+
+Peor desviación 0,28 pp contra un error estándar declarado de ~0,18 pp, y el
+peor error de percentil 0,09 %. Determinista y con `BROWNIAN_BRIDGE_CONTINUOUS`.
+
+Una observación honesta: las ocho desviaciones de toque caen **del mismo lado**
+(MC por debajo de la cerrada). Es el sesgo de discretización conocido del puente
+browniano con pasos finitos, su magnitud está dentro del error declarado y va en
+la dirección conservadora —subestima el toque, no lo exagera—. No es un defecto,
+pero conviene saber que está ahí y no confundirlo con ruido puro.
+
+### La prueba que venía en rojo
+
+`test_the_field_never_reaches_full_opacity` exigía la **cadena literal**
+`255 * ALPHA_MAX`. El suelo tenue para la celda medida pasó a calcular el alfa
+aparte y multiplicarlo al final, así que el guardia se rompió **sin que el techo
+se moviera un píxel**: protegía la forma de la expresión, no el techo. Ahora
+comprueba que el alfa esté acotado y **evalúa la aritmética real del renderer**
+sobre los 1.001 valores del rango. Techo confirmado en 0,70.
+
+Es el mismo error que `LEVEL_STYLE`: un guardia que obliga a que sobreviva una
+forma concreta en vez de proteger la propiedad.
+
+### Lo que se integró de esa copia
+
+Flecha completa con `BUY` / `SELL` / `UNKNOWN` junto al importe (el lado sigue
+saliendo **sólo** de `aggressor`, y UNKNOWN conserva el rombo neutro), y el suelo
+tenue del Interval Map, que corrige franjas negras donde había medición real.
+Ambos verificados: la máscara viene de `AB.field.measured()`, anterior a la
+interpolación, así que un hueco interpolado **no** se hace pasar por observación.
+
+Quedaba además un alias muerto sin quitar —`flowSide` en `itmq_orderflow.js`—.
+Eliminado: ESLint queda en 0 errores y 0 avisos.

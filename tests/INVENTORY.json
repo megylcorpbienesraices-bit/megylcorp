@@ -2887,7 +2887,7 @@
    ]
   },
   "tests/test_v1560_gate2_marks.py": {
-   "casos": 16,
+   "casos": 17,
    "tests": [
     "test_compra_es_flecha_verde_hacia_arriba",
     "test_el_dorado_marca_concentracion_no_direccion",
@@ -2897,6 +2897,7 @@
     "test_la_flecha_del_motor_coincide_con_el_agresor_dominante",
     "test_la_fuente_dominante_se_pondera_por_prima_no_por_numero",
     "test_la_marca_declara_de_que_campo_salio_la_mayoria_de_los_lados",
+    "test_la_marca_escribe_buy_sell_unknown_ademas_del_color",
     "test_la_marca_se_dibuja_en_un_solo_sitio",
     "test_las_tres_pantallas_llaman_a_la_misma_funcion",
     "test_los_porcentajes_son_sobre_toda_la_prima_no_sobre_lo_clasificado",
@@ -3023,7 +3024,7 @@
    ]
   },
   "tests/test_v1560_gate8_interval_map.py": {
-   "casos": 23,
+   "casos": 24,
    "tests": [
     "test_atenuar_por_el_suelo_de_ruido_no_es_invertir",
     "test_cada_celda_coincide_con_el_crudo_del_proveedor",
@@ -3045,6 +3046,7 @@
     "test_un_desajuste_contra_el_crudo_se_denuncia",
     "test_un_hueco_publicado_como_medido_hace_FALLAR_la_auditoria",
     "test_una_celda_ausente_no_se_convierte_en_cero",
+    "test_una_celda_medida_no_desaparece_por_el_suelo_de_ruido",
     "test_una_inversion_inyectada_hace_FALLAR_la_auditoria",
     "test_una_matriz_toda_a_cero_conserva_sus_huecos",
     "test_una_rejilla_negativa_sale_negativa"
@@ -3114,8 +3116,18 @@
     "test_ningun_modulo_de_app_sella_con_datetime_now_ingenuo",
     "test_un_ciclo_nuevo_si_avanza_el_contador"
    ]
+  },
+  "tests/test_v1570_walls_oi_ausente.py": {
+   "casos": 7,
+   "tests": [
+    "test_con_oi_completo_la_media_geometrica_no_cambia",
+    "test_el_strike_de_mayor_exposicion_no_se_pierde_por_un_oi_que_falta",
+    "test_los_ocho_activos_puntuan_con_la_misma_regla",
+    "test_sin_oi_en_toda_la_cadena_se_sigue_puntuando_solo_con_exposicion",
+    "test_un_oi_medido_a_cero_y_un_oi_ausente_no_se_publican_igual"
+   ]
   }
  },
- "total_minimo": 2556,
+ "total_minimo": 2565,
  "version": "1.56.0"
 }

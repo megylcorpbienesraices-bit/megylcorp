@@ -1035,8 +1035,15 @@
            * concentración, y por eso se ve dónde está.
            */
           const a = (f.intensity(v) - noiseFloor) / (1 - noiseFloor);
-          px[i + 3] = a <= 0 ? 0
-            : Math.round(255 * HEAT_ALPHA_MAX * Math.min(1, Math.pow(a, gammaCurve)));
+          const srcY = f.h - 1 - y;
+          const measured = f.measured(x, srcY);
+          /* Mismo contrato que TRACE: una observación real no desaparece por
+           * caer bajo el suelo de concentración. Los huecos interpolados siguen
+           * sin hacerse pasar por observaciones reales. */
+          const faintMeasured = measured && Math.abs(v) > 0 ? 0.075 : 0;
+          const alpha = a <= 0 ? faintMeasured
+            : Math.max(faintMeasured, HEAT_ALPHA_MAX * Math.min(1, Math.pow(a, gammaCurve)));
+          px[i + 3] = Math.round(255 * alpha);
         }
       }
       fieldCtx.putImageData(fieldImage, 0, 0);

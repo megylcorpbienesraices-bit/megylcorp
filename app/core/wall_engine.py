@@ -238,23 +238,51 @@ def build_candidates(symbol: str, exposure_rows: Sequence[Dict[str, Any]],
     exp_norm = _normalize([p["exposure"] for p in picked])
     oi_values = [p["oi"] for p in picked if p["oi"] is not None]
     oi_available = len(oi_values) >= max(2, len(picked) // 4)
-    oi_norm = (_normalize([p["oi"] or 0.0 for p in picked]) if oi_available
-               else [None] * len(picked))
 
+    # v1.57.0 · UN OI QUE FALTA NO ES UN OI DE CERO.
+    #
+    # La regla de arriba —«no se multiplica por cero: eso sería afirmar que no hay
+    # libro, no que no se sabe»— estaba escrita, y sólo se aplicaba al activo
+    # ENTERO. Por strike no: la normalización recibía `p["oi"] or 0.0`, así que un
+    # strike sin OI publicado entraba como cero medido, salía con `oi_norm = 0` y
+    # su score se anulaba —media geométrica— por muy grande que fuera su
+    # exposición.
+    #
+    # Medido: en una cadena donde el strike de MAYOR exposición de calls es el
+    # único sin OI, el muro se lo lleva el segundo. El dato que faltaba no era el
+    # del muro; era el del proveedor. Y ocurría en los dos lados.
+    #
+    # Ahora el strike sin OI se puntúa con la evidencia que SÍ tiene —exposición
+    # sola, el mismo tratamiento que recibe la cadena entera cuando el proveedor
+    # no publica OI para ese activo— y se marca `oi_missing` para que el Auditor
+    # lo vea en vez de tener que deducirlo de un cero.
+    oi_norm = (_normalize([p["oi"] if p["oi"] is not None else 0.0 for p in picked])
+               if oi_available else [None] * len(picked))
+
+    sin_oi = 0
     for p, e, o in zip(picked, exp_norm, oi_norm):
+        falta_oi = p["oi"] is None
+        p["oi_missing"] = falta_oi
         p["exposure_norm"] = round(e, 6)
-        p["oi_norm"] = (None if o is None else round(o, 6))
-        if o is None:
+        p["oi_norm"] = (None if (o is None or falta_oi) else round(o, 6))
+        if o is None or falta_oi:
             # Sin OI se puntúa sólo con exposición y se declara. No se multiplica
             # por cero: eso sería afirmar que no hay libro, no que no se sabe.
             p["score"] = round(100.0 * e, 4)
+            p["score_method"] = "exposure-only-oi-missing" if falta_oi else "exposure-only"
+            sin_oi += falta_oi
         else:
             p["score"] = round(100.0 * (e ** (1.0 - OI_WEIGHT)) * (o ** OI_WEIGHT), 4)
+            p["score_method"] = "geometric-exposure-x-open-interest"
         p["within_range"] = abs(p["distance_pct"]) <= MAX_DISTANCE_PCT
 
     picked.sort(key=lambda p: -p["score"])
     return {"ready": True, "side": side, "symbol": sym, "rows": picked,
             "oi_available": oi_available,
+            # Cuántos strikes se puntuaron sin OI porque el proveedor no lo
+            # publicó para ellos. Cero es lo normal; que no lo sea no invalida el
+            # muro, pero hay que poder verlo sin abrir el código.
+            "oi_missing_strikes": sin_oi,
             "method": ("geometric-exposure-x-open-interest" if oi_available
                        else "exposure-only-no-open-interest"),
             "spot": px}

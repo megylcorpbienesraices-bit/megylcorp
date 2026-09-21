@@ -81,9 +81,10 @@ def test_las_tres_pantallas_llaman_a_la_misma_funcion():
 def test_compra_es_flecha_verde_hacia_arriba():
     cuerpo = CORE[CORE.index("function flowArrow("):CORE.index("function flowAmount(")]
     assert "up ? token('--pos'" in cuerpo
-    # El VÉRTICE va en el extremo y `t = -1` cuando es compra: hacia arriba.
-    assert "const t = up ? -1 : 1;" in cuerpo
-    assert "ctx.moveTo(x, y + t * 13);" in cuerpo
+    # La flecha completa usa `dir = -1` para compra: asta y vértice avanzan hacia arriba.
+    assert "const dir = up ? -1 : 1;" in cuerpo
+    assert "ctx.lineTo(x, y + dir * 16);" in cuerpo
+    assert "ctx.moveTo(x, y + dir * 22);" in cuerpo
 
 
 def test_venta_es_flecha_roja_hacia_abajo():
@@ -105,6 +106,12 @@ def test_el_dorado_marca_concentracion_no_direccion():
     assert "--gold" in halo
     flecha = CORE[CORE.index("function flowArrow("):CORE.index("function flowAmount(")]
     assert "--gold" not in flecha
+
+
+def test_la_marca_escribe_buy_sell_unknown_ademas_del_color():
+    cuerpo = CORE[CORE.index("function flowMark("):CORE.index("/* --------------------------------------------------------------- export */")]
+    assert "'BUY'" in cuerpo and "'SELL'" in cuerpo and "'UNKNOWN'" in cuerpo
+    assert "sideText" in cuerpo
 
 
 def test_el_lado_sale_del_agresor_y_de_nada_mas():

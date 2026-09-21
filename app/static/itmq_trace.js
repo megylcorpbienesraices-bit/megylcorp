@@ -387,9 +387,17 @@
         const o = (yi * W + xi) * 4;
         const rank = f ? f.intensity(v) : Math.min(1, Math.abs(v));
         const a = (rank - NOISE) / (1 - NOISE);
+        const measured = f ? f.measured(xi, si) : ((upright[si] || [])[xi] !== null && (upright[si] || [])[xi] !== undefined);
         img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2];
-        img.data[o + 3] = a <= 0 ? 0
-          : Math.round(255 * ALPHA_MAX * Math.min(1, Math.pow(a, GAMMA)));
+        /* Una celda REAL y no cero no debe desaparecer sólo porque esté por
+         * debajo del percentil de concentración. Eso era una de las fuentes de
+         * las franjas negras: el dato existía, pero el renderer lo volvía alfa 0.
+         * El suelo tenue NO convierte un hueco en medición: `measured()` viene
+         * de la máscara RAW anterior a la interpolación. */
+        const faintMeasured = measured && Math.abs(v) > 0 ? 0.075 : 0;
+        const alpha = a <= 0 ? faintMeasured
+          : Math.max(faintMeasured, ALPHA_MAX * Math.min(1, Math.pow(a, GAMMA)));
+        img.data[o + 3] = Math.round(255 * alpha);
       }
     }
     ictx.putImageData(img, 0, 0);
@@ -960,8 +968,9 @@
    * FLUJO DE ÓRDENES. Eran equivalentes el día que se escribieron, y ese es el
    * problema: dos copias equivalentes se separan en cuanto alguien corrige una,
    * y una marca que significa COMPRA en una pantalla y otra cosa en la de al
-   * lado es peor que no dibujarla. Ahora hay UNA, en `itmq_core`. */
-  /* v1.57.0 · De los cinco alias solo `flowSide` se sigue usando (abajo, para
+   * lado es peor que no dibujarla. Ahora hay UNA, en `itmq_core`.
+   *
+   * v1.57.0 · De los cinco alias solo `flowSide` se sigue usando (abajo, para
    * decidir el lado de la etiqueta). Los otros cuatro apuntaban a `Q.*` y no
    * los llamaba nadie desde que las marcas se dibujan con `Q.flowMark`. */
   const flowSide = Q.flowSide;

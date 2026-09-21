@@ -695,33 +695,38 @@
   function flowArrow(ctx, x, y, up) {
     /* `up === null` significa que NO se conoce el lado agresor.
      *
-     * Antes no existía ese caso: siempre se dibujaba verde o roja, así que un
-     * evento sin lado salía pintado como compra o como venta según un valor por
-     * defecto. Un lado desconocido se dibuja como ROMBO neutro: quien mire el
-     * gráfico ve que hubo una concentración y que su dirección no está
-     * confirmada, en vez de leer una dirección que nadie midió. */
+     * La marca tiene que leerse en una fracción de segundo. Una cuña de pocos
+     * píxeles se confundía con una rayita del gráfico; por eso BUY/SELL llevan
+     * ahora flecha completa (asta + punta) y UNKNOWN conserva un rombo neutro.
+     * La geometría NO decide el lado: sólo representa `aggressor`. */
     if (up === null || up === undefined) {
       const mute = token('--text-dim', '#8494ad');
       ctx.save();
       ctx.fillStyle = mute;
       ctx.beginPath();
-      ctx.moveTo(x, y - 11); ctx.lineTo(x + 6, y - 5);
-      ctx.lineTo(x, y + 1); ctx.lineTo(x - 6, y - 5);
+      ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y);
+      ctx.lineTo(x, y + 7); ctx.lineTo(x - 7, y);
       ctx.closePath(); ctx.fill();
       ctx.restore();
       return mute;
     }
     const col = up ? token('--pos', '#22c55e') : token('--neg', '#ef4444');
-    const t = up ? -1 : 1;
+    const dir = up ? -1 : 1;
     ctx.save();
+    ctx.strokeStyle = col;
     ctx.fillStyle = col;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    // Asta claramente visible: parte cerca del halo y avanza en el sentido real.
     ctx.beginPath();
-    // El VÉRTICE va en el extremo: hacia ARRIBA en compra, hacia ABAJO en
-    // venta. Ponerlo del lado de la base dibuja la flecha invertida, que es
-    // peor que no dibujarla: dice justo lo contrario.
-    ctx.moveTo(x, y + t * 13);
-    ctx.lineTo(x - 5.5, y + t * 6);
-    ctx.lineTo(x + 5.5, y + t * 6);
+    ctx.moveTo(x, y - dir * 1);
+    ctx.lineTo(x, y + dir * 16);
+    ctx.stroke();
+    // Punta: el vértice está en el extremo de la dirección.
+    ctx.beginPath();
+    ctx.moveTo(x, y + dir * 22);
+    ctx.lineTo(x - 7, y + dir * 13);
+    ctx.lineTo(x + 7, y + dir * 13);
     ctx.closePath(); ctx.fill();
     ctx.restore();
     return col;
@@ -759,8 +764,15 @@
     const above = up !== false;      // sin lado, la marca va por encima
     const r = flowHalo(ctx, x, y, flowStrength(ev, peak));
     const col = flowArrow(ctx, x, above ? y - r : y + r, up);
-    const label = o.label === undefined ? flowAmountText(ev) : o.label;
-    if (label) flowAmount(ctx, x, above ? y - r - 22 : y + r + 22, label, col);
+    let label = o.label === undefined ? flowAmountText(ev) : o.label;
+    // La cifra sola no dice dirección. Añadir BUY/SELL/UNKNOWN hace que la marca
+    // sea inequívoca incluso en una captura estática o para quien no distinga
+    // colores; el lado sigue saliendo EXCLUSIVAMENTE de `aggressor`.
+    if (o.label === undefined) {
+      const sideText = up === true ? 'BUY' : up === false ? 'SELL' : 'UNKNOWN';
+      label = label ? `${sideText} · ${label}` : sideText;
+    }
+    if (label) flowAmount(ctx, x, above ? y - r - 31 : y + r + 31, label, col);
     return { r, up, above, col, dy: above ? -(r + 22) : (r + 22) };
   }
 

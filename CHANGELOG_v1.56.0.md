@@ -176,3 +176,14 @@ python scripts/verify_live_quantdata.py --cierre
 
 El estado por módulo, con los cinco niveles y sin inflar ninguno, está en
 `ESTADO_v1.56.0.md`.
+
+---
+
+## REVISIÓN ADICIONAL SOBRE `df2ca9d`
+
+- Eliminados alias muertos del frontend (`flowArrow`, `flowAmount`, `markerStrength`, `markerAmount`, `evStrength`, `LEVEL_STYLE`) que quedaron tras centralizar QFLOW.
+- `TRACE`, `FLUJO` y `NET DRIFT` siguen usando una sola autoridad visual: `ITMQ.flowMark`.
+- La marca QFLOW ahora escribe también `BUY`, `SELL` o `UNKNOWN` junto al importe y usa una flecha completa (asta + punta), para que la dirección no dependa sólo del color ni de una cuña diminuta.
+- El Interval Map conserva la diferencia entre celda RAW medida y hueco. Una observación real no nula que cae bajo el suelo de concentración queda tenue en vez de desaparecer a alfa 0; un `MISSING` no se promociona a observación.
+- Se mantuvo el contrato matemático de Monte Carlo sin cambiar de modelo; sus pruebas contra solución cerrada continúan pasando en la suite focalizada.
+- El manifiesto e inventario se resincronizaron a 2.558 casos / 171 ficheros tras añadir regresiones para las nuevas garantías visuales.

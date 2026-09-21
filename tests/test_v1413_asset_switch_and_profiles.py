@@ -97,6 +97,7 @@ def test_level_styles_have_a_single_definition():
     # guardar la forma en vez del fondo: lo que importa es que TRACE PIDA el
     # estilo a la autoridad compartida y no tenga tabla propia.
     assert "Q.levelStyle(lv.kind)" in trace
+    assert "const LEVEL_STYLE = Q.LEVELS;" not in trace   # ni el alias muerto
     assert "flip: { color:" not in trace       # ya no hay copia local
     assert "const LEVELS = {" not in trace     # ni una tabla local con otro nombre
 

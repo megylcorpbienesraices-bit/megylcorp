@@ -236,6 +236,14 @@ def test_el_campo_continuo_lleva_isolineas():
     assert "contours(" in BARS or "contours(" in PANELS
 
 
+def test_una_celda_medida_no_desaparece_por_el_suelo_de_ruido():
+    """Zona negra sólo por alpha=0 era visualmente indistinguible de MISSING."""
+    assert "f.measured(xi, si)" in TRACE
+    assert "faintMeasured" in TRACE
+    assert "f.measured(x, srcY)" in PANELS
+    assert "faintMeasured" in PANELS
+
+
 # ── 20 · Normalización sobre lo visible ──────────────────────────────────
 
 def test_el_trace_normaliza_sobre_la_ventana_visible():

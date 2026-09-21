@@ -1204,11 +1204,39 @@ def test_trace_and_the_section_share_one_field_treatment():
 
 def test_the_field_never_reaches_full_opacity():
     """Un campo opaco tapa las velas y las isolíneas: el mapa pasa a competir con
-    el precio en vez de acompañarlo."""
-    trace = _read("app/static/itmq_trace.js")
-    assert "255 * ALPHA_MAX" in trace
-    panels = _read("app/static/itmq_panels.js")
-    assert "255 * HEAT_ALPHA_MAX" in panels
+    el precio en vez de acompañarlo.
+
+    v1.57.0 · Esto exigía la CADENA LITERAL `255 * ALPHA_MAX`. Al introducir el
+    suelo tenue para la celda medida, el alfa pasó a calcularse aparte y
+    multiplicarse al final, así que el guardia se rompió sin que el techo se
+    hubiera movido ni un píxel: protegía la forma de la expresión, no el techo.
+
+    Ahora se comprueba lo que de verdad importa —que el alfa esté ACOTADO por la
+    constante— y se verifica la cota evaluando la aritmética real del renderer
+    sobre todo el rango, en vez de leerla.
+    """
+    import re
+    for fichero, techo, suelo in (("app/static/itmq_trace.js", "ALPHA_MAX", "NOISE"),
+                                  ("app/static/itmq_panels.js", "HEAT_ALPHA_MAX", "HEAT_NOISE")):
+        src = _read(fichero)
+        # El alfa se multiplica por 255 una sola vez, y nunca supera el techo.
+        assert "255 * alpha" in src, fichero
+        assert f"Math.max(faintMeasured, {techo}" in src, fichero
+        assert re.search(rf"{techo}\s*=\s*0\.70", src), fichero
+
+    # La cota, evaluada: ningún rango de entrada puede pasar de ALPHA_MAX.
+    ALPHA_MAX, NOISE, GAMMA, FAINT = 0.70, 0.62, 1.35, 0.075
+    assert FAINT < ALPHA_MAX, "el suelo tenue no puede superar al techo"
+    peor = 0.0
+    for i in range(0, 1001):
+        rank = i / 1000.0
+        a = (rank - NOISE) / (1 - NOISE)
+        for medida in (False, True):
+            suelo = FAINT if medida else 0.0
+            alfa = suelo if a <= 0 else max(suelo, ALPHA_MAX * min(1.0, a ** GAMMA))
+            peor = max(peor, alfa)
+    assert peor <= ALPHA_MAX, f"el campo llega a alfa {peor}, por encima de {ALPHA_MAX}"
+    assert round(255 * peor) < 255, "el campo llega a opacidad total"
 
 
 def test_the_section_interval_map_is_a_dot_grid():
