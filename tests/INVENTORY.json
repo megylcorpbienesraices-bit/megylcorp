@@ -3118,9 +3118,14 @@
    ]
   },
   "tests/test_v1570_walls_oi_ausente.py": {
-   "casos": 7,
+   "casos": 13,
    "tests": [
+    "test_activo_sin_oi_y_hueco_puntual_no_se_diagnostican_igual",
+    "test_con_oi_completo_el_metodo_publicado_es_la_media_geometrica",
     "test_con_oi_completo_la_media_geometrica_no_cambia",
+    "test_el_auditor_deja_ver_el_hueco_sin_deducirlo_de_un_nulo",
+    "test_el_muro_nunca_se_publica_como_dato_del_proveedor",
+    "test_el_muro_publica_como_se_puntuo_SU_strike_no_solo_la_cadena",
     "test_el_strike_de_mayor_exposicion_no_se_pierde_por_un_oi_que_falta",
     "test_los_ocho_activos_puntuan_con_la_misma_regla",
     "test_sin_oi_en_toda_la_cadena_se_sigue_puntuando_solo_con_exposicion",
@@ -3128,6 +3133,6 @@
    ]
   }
  },
- "total_minimo": 2565,
+ "total_minimo": 2571,
  "version": "1.56.0"
 }

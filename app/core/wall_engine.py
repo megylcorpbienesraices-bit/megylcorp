@@ -261,7 +261,16 @@ def build_candidates(symbol: str, exposure_rows: Sequence[Dict[str, Any]],
 
     sin_oi = 0
     for p, e, o in zip(picked, exp_norm, oi_norm):
-        falta_oi = p["oi"] is None
+        # DOS casos distintos, y no se pueden llamar igual:
+        #
+        #   el proveedor no publica OI para este ACTIVO   → oi_available False
+        #   el proveedor publica OI pero no el de ESTE strike → hueco puntual
+        #
+        # El primero describe la cobertura del proveedor; el segundo, un agujero
+        # dentro de una cadena que por lo demás llegó. Mezclarlos haría que un
+        # activo entero sin interés abierto se leyera como si le faltara un dato
+        # suelto, que es un diagnóstico distinto.
+        falta_oi = oi_available and p["oi"] is None
         p["oi_missing"] = falta_oi
         p["exposure_norm"] = round(e, 6)
         p["oi_norm"] = (None if (o is None or falta_oi) else round(o, 6))
@@ -269,7 +278,8 @@ def build_candidates(symbol: str, exposure_rows: Sequence[Dict[str, Any]],
             # Sin OI se puntúa sólo con exposición y se declara. No se multiplica
             # por cero: eso sería afirmar que no hay libro, no que no se sabe.
             p["score"] = round(100.0 * e, 4)
-            p["score_method"] = "exposure-only-oi-missing" if falta_oi else "exposure-only"
+            p["score_method"] = ("exposure-only-oi-missing" if falta_oi
+                                 else "exposure-only-no-open-interest")
             sin_oi += falta_oi
         else:
             p["score"] = round(100.0 * (e ** (1.0 - OI_WEIGHT)) * (o ** OI_WEIGHT), 4)
@@ -392,7 +402,20 @@ def resolve_walls(symbol: str, *, exposure_rows: Sequence[Dict[str, Any]],
             "ready": True, "side": side, "strike": chosen["strike"],
             "score": chosen["score"], "exposure": chosen.get("exposure"),
             "oi": chosen.get("oi"), "distance_pct": chosen.get("distance_pct"),
-            "method": cand["method"], "oi_available": cand.get("oi_available", False),
+            # v1.57.0 · `method` describía la CADENA; para el strike elegido podía
+            # ser mentira. Un muro cuyo strike no tenía OI se publicaba como
+            # «media geométrica exposición × interés abierto» con `oi: None`
+            # debajo: el auditor declaraba una fórmula que no es la que se usó.
+            #
+            # En una magnitud DERIVED —la conclusión la firmamos nosotros, el
+            # proveedor no emite muros— que la derivación publicada no sea la
+            # real es peor que el número equivocado: quita la única forma de
+            # discutirlo.
+            "method": chosen.get("score_method") or cand["method"],
+            "chain_method": cand["method"],
+            "oi_available": cand.get("oi_available", False),
+            "oi_missing": bool(chosen.get("oi_missing")),
+            "oi_missing_strikes": cand.get("oi_missing_strikes", 0),
             "source_mode": DERIVED, "provider": DL.ITM_QUANT,
             "fallback_used": False,
             "change_reason": reason,
@@ -562,6 +585,12 @@ def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> D
             "open_interest": muro.get("oi"),
             "distance_pct": muro.get("distance_pct"),
             "method": muro.get("method"),
+            # Cómo se puntuó la cadena frente a cómo se puntuó ESTE strike, y
+            # cuántos strikes del lado no traían OI del proveedor. Sin esto el
+            # hueco sólo se podía deducir de un `open_interest: null`.
+            "chain_method": muro.get("chain_method"),
+            "oi_missing": muro.get("oi_missing"),
+            "oi_missing_strikes": muro.get("oi_missing_strikes"),
             "oi_available": muro.get("oi_available"),
             "source_mode": muro.get("source_mode"),
             "fallback_used": muro.get("fallback_used"),

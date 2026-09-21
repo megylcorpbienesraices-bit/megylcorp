@@ -358,3 +358,54 @@ interpolación, así que un hueco interpolado **no** se hace pasar por observaci
 
 Quedaba además un alias muerto sin quitar —`flowSide` en `itmq_orderflow.js`—.
 Eliminado: ESLint queda en 0 errores y 0 avisos.
+
+
+---
+
+## Continuación · la corrección de walls estaba a medio cablear
+
+Al confirmar que Call Wall y Put Wall son **DERIVED · ITM QUANT** —el proveedor
+entrega exposición e interés abierto por strike, y la conclusión la firma el
+motor— se revisó si la corrección anterior llegaba de verdad a donde tenía que
+llegar. No llegaba, y el segundo fallo era el grave.
+
+**1 · El contador no salía del sitio donde se calculaba.**
+`oi_missing` y `oi_missing_strikes` se computaban en `build_candidates` y morían
+ahí: ni `resolve_walls` ni `wall_audit` los publicaban. El «vigile el
+`oi_missing_strikes` de los ocho activos» que se dejó escrito señalaba a un campo
+que no existía en la salida.
+
+**2 · El auditor declaraba una fórmula que no era la que se usó.**
+El muro publicaba `method` de la CADENA. Un muro cuyo strike no tenía OI salía
+como `geometric-exposure-x-open-interest` con `oi: None` justo debajo.
+
+En una magnitud DERIVED eso es peor que un número equivocado. El único motivo por
+el que un nivel calculado por nosotros se puede discutir es que diga con qué
+fórmula salió; si dice una que no es, deja de ser auditable aunque acierte.
+
+Ahora el muro publica `method` (cómo se puntuó **su** strike), `chain_method`
+(cómo se puntuó la cadena), `oi_missing` y `oi_missing_strikes`, y los cuatro
+llegan al auditor.
+
+### Y un error introducido al corregir, cazado por las pruebas del propio proyecto
+
+La primera versión de esta corrección llamaba igual a dos cosas distintas:
+
+| situación | qué describe | método |
+|---|---|---|
+| el proveedor no publica OI para el **activo** | su cobertura | `exposure-only-no-open-interest` |
+| publica OI y falta el de **un strike** | un agujero en una cadena que sí llegó | `exposure-only-oi-missing` |
+
+Se habían fundido en la segunda etiqueta. Un activo entero sin interés abierto se
+habría leído como si le faltara un dato suelto, que es un diagnóstico distinto y
+lleva a buscar donde no es.
+
+Lo cazaron dos pruebas que **ya existían** —`test_missing_open_interest_does_not
+_zero_a_strike` y `test_sin_interes_abierto_no_se_multiplica_por_cero`— al correr
+la suite completa. Es el argumento entero de esta auditoría dado la vuelta: la
+suite no sirve para declarar que algo está bien, pero sí para impedir que una
+corrección apresurada rompa lo que ya estaba bien. Por eso se corre entera antes
+de cada entrega, y por eso una copia que no la termina no está verificada.
+
+`tests/test_v1570_walls_oi_ausente.py` · 13 casos. Suite completa: **2.569 pasan,
+2 se saltan**. Inventario y trazabilidad a **2.571 casos / 172 ficheros**.
