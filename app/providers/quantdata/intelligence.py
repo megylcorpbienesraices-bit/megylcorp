@@ -535,9 +535,31 @@ class QuantDataIntelligence:
             _plazo = _rt.timeout() if _rt.calibrated() else (
                 self.settings.request_timeout_seconds + 1.0)
             _t0 = time.monotonic()
+
+            # v1.57.6 · LO QUE ENTRA EN EL HUB ES SIEMPRE EL PAYLOAD CRUDO.
+            #
+            # El hub funde las peticiones duplicadas de los dos carriles por
+            # `(dataset, símbolo)`. Tres claves coinciden palabra por palabra
+            # entre carriles —`net_flow`, `net_drift` e `iv_rank`—, y cada carril
+            # metía un tipo distinto en la misma ranura: el del motor guardaba el
+            # `dict` del payload y éste guardaba el objeto `QuantDataResponse`.
+            #
+            # Quien llegaba segundo recibía el objeto del otro. De ahí el
+            # `AttributeError: 'dict' object has no attribute 'payload'` en
+            # net_flow y net_drift, que además se volvió sistemático al hidratar
+            # los dos carriles a la vez en el arranque.
+            #
+            # Se arregla en el origen, no envolviendo la lectura: los dos carriles
+            # meten el MISMO tipo, así que la fusión de peticiones —que ahorra
+            # cuota de verdad— sigue funcionando y ya no puede mentir sobre el
+            # tipo de lo que devuelve.
+            async def _pedir_payload() -> Dict[str, Any]:
+                respuesta = await _client.post(path, body)
+                return respuesta.payload
+
             gate = await HUB_RUNTIME.fetch(
                 tool.key, ticker,
-                lambda: _client.post(path, body),
+                _pedir_payload,
                 timeout_s=_plazo,
                 accept_stale=False)
             if not gate.get("ready"):
@@ -554,7 +576,20 @@ class QuantDataIntelligence:
                 return "STOP", detail
             # Latencia REAL de esta llamada: es la que calibra el plazo futuro.
             _rt.record_success(time.monotonic() - _t0)
-            response = gate["payload"]
+            payload = gate["payload"]
+            if not isinstance(payload, dict):
+                # Cinturón: si algo vuelve a meter otro tipo en la ranura, se dice
+                # con el tipo exacto en vez de reventar con un AttributeError a
+                # cincuenta líneas de distancia.
+                detail = (f"el hub devolvió {type(payload).__name__} en vez del "
+                          f"payload del proveedor para {tool.key}")
+                tool.note_attempt(path, detail)
+                tool.provider_status = STATUS_TRANSIENT
+                tool.mark_transient(detail)
+                _rt.record_failure(detail, status=STATUS_TRANSIENT)
+                self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
+                self._fetched_at[tool.key] = time.time()
+                return "STOP", detail
         except QuantDataError as exc:
             msg = str(exc)
             status = classify_provider_failure(exc)
@@ -634,7 +669,7 @@ class QuantDataIntelligence:
         tool.last_success = time.time()
         self._fetched_at[tool.key] = tool.last_success
         try:
-            normalized = tool.normalize(response.payload)
+            normalized = tool.normalize(payload)
         except Exception as exc:
             normalized = {"ready": False, "error": f"{type(exc).__name__}: {exc}"[:160]}
             _obs_note(f"quantdata_intelligence:normalize:{tool.key}", exc, severity="DEGRADED")

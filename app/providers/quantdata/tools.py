@@ -48,6 +48,19 @@ ROUTE_INVALID = "ROUTE_INVALID"
 
 # Cadencias por familia. El flujo cambia segundo a segundo; el interés abierto
 # es estructural y se publica al cierre: pedirlo cada 15s sería quemar cuota.
+def es_payload(p: Any) -> bool:
+    """¿Esto es un payload del proveedor, o cualquier otra cosa que venía llena?
+
+    v1.57.6 · `bool(p)` daba `True` para CUALQUIER objeto no vacío, así que un
+    `QuantDataResponse` colado por la ranura compartida del hub se publicaba como
+    `ready: True` con el objeto entero en `raw`. La herramienta parecía viva y lo
+    que servía no era del proveedor.
+
+    Un payload es un diccionario con algo dentro. Nada más cuenta.
+    """
+    return isinstance(p, dict) and bool(p)
+
+
 CADENCE = {
     "FAST": 15.0,      # flujo, exposición, order flow
     "MEDIUM": 60.0,    # estadísticas, dark pool, prints
@@ -1649,7 +1662,7 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             "max_pain", "Open Interest", "Max Pain",
             ("/v1/options/tool/max-pain",),
             lambda t: _tf(t),
-            lambda p: {"ready": bool(p), "value": _f(_pick(p, "maxPain", "value", "strike")), "raw": p}, "SLOW"),
+            lambda p: {"ready": es_payload(p), "value": _f(_pick(p, "maxPain", "value", "strike")), "raw": p}, "SLOW"),
         QuantDataTool(
             "oi_by_strike", "Open Interest", "OI por strike",
             ("/v1/options/tool/open-interest-by-strike",),
@@ -1682,7 +1695,7 @@ def build_catalog() -> Dict[str, QuantDataTool]:
             "iv_rank", "Volatility Analysis", "IV Rank",
             ("/v1/options/tool/iv-rank",),
             lambda t: {"filter": {"ticker": t}, "lookBackPeriod": 30, "maturity": 30},
-            lambda p: {"ready": bool(p), "raw": p}, "SLOW"),
+            lambda p: {"ready": es_payload(p), "raw": p}, "SLOW"),
         QuantDataTool(
             "volatility_skew", "Volatility Analysis", "Skew de volatilidad",
             ("/v1/options/tool/volatility-skew",),

@@ -3466,8 +3466,32 @@
     "test_la_terminal_actual_NO_depende_de_legacy",
     "test_legacy_conserva_TODOS_sus_estaticos"
    ]
+  },
+  "tests/test_v1576_colision_de_carriles.py": {
+   "casos": 23,
+   "tests": [
+    "test_el_backend_sigue_entregando_el_campo",
+    "test_el_carril_de_paginas_mete_el_PAYLOAD_no_la_respuesta",
+    "test_el_carril_del_motor_sigue_metiendo_el_payload",
+    "test_el_cinturon_va_ANTES_de_normalizar",
+    "test_el_hub_funde_por_dataset_y_simbolo",
+    "test_el_objeto_de_respuesta_YA_no_se_le_pasa_al_normalizador",
+    "test_el_unico_punto_payload_que_queda_es_el_de_la_respuesta_real",
+    "test_hay_claves_que_COINCIDEN_entre_los_dos_carriles",
+    "test_la_evidencia_no_se_duplica_con_el_error_crudo",
+    "test_la_fila_enseña_el_CAMPO_exacto_que_el_proveedor_rechaza",
+    "test_la_fila_enseña_el_veredicto_clasificado",
+    "test_los_tres_trozos_nuevos_se_componen_con_esc",
+    "test_ninguna_herramienta_declara_ready_por_simple_verdad",
+    "test_normalizar_el_payload_del_MOTOR_funciona",
+    "test_ready_exige_un_payload_de_verdad",
+    "test_todo_el_TEXTO_del_servidor_va_escapado",
+    "test_un_400_y_un_404_NO_se_leen_igual",
+    "test_un_tipo_inesperado_se_denuncia_con_su_nombre",
+    "test_ya_no_se_lee_punto_payload_sobre_lo_que_da_el_hub"
+   ]
   }
  },
- "total_minimo": 2902,
+ "total_minimo": 2925,
  "version": "1.56.0"
 }

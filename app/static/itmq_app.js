@@ -1231,9 +1231,29 @@
     }
     const last = failed[failed.length - 1] || tries[tries.length - 1];
     const msg = String(last.error || 'sin detalle').slice(0, 70);
+    // v1.57.6 · EL VEREDICTO YA CLASIFICADO, Y EL CAMPO EXACTO DEL RECHAZO.
+    //
+    // El backend distingue desde v1.57.0 entre «el endpoint no existe», «no
+    // está autorizado», «existe y rechaza el cuerpo» y «existe y falla», y en el
+    // caso del 400 guarda QUÉ campo señaló el proveedor. Nada de eso llegaba a
+    // la pantalla: la fila enseñaba el error crudo cortado a setenta caracteres,
+    // así que «Quant Data HTTP 400: Request validation failed» se leía igual que
+    // un 404 y el único dato accionable —el campo— se quedaba en el JSON.
+    const dg = t.diagnosis || {};
+    const campos = (dg.fields || []).length
+      ? `<br><span class="neg">campo rechazado: ${esc((dg.fields || []).join(' · '))}</span>`
+      : '';
+    const detalle = dg.evidence && dg.evidence !== msg
+      ? `<br><span class="dim" title="${esc(String(dg.evidence))}">${esc(String(dg.evidence).slice(0, 110))}</span>`
+      : '';
+    const veredicto = dg.verdict && dg.verdict !== 'LIVE_OK'
+      ? `<br><span class="warn">${esc(dg.verdict)}</span>`
+        + (dg.action ? ` <span class="dim">${esc(dg.action)}</span>` : '')
+      : '';
     return `<span class="neg" title="${esc((t.candidates || []).join(' · '))}">`
       + `${esc(String(last.path || '').split('/').pop())} → ${esc(msg)}</span>`
-      + `<br><span class="dim">${failed.length}/${tries.length} rutas probadas</span>`;
+      + `<br><span class="dim">${failed.length}/${tries.length} rutas probadas</span>`
+      + veredicto + campos + detalle;
   }
 
 

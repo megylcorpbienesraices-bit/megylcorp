@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2902 casos / 185 ficheros**.
+sentinela en vez de describirlo. Inventario: **2925 casos / 186 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,7 +272,7 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2902 casos / 185 ficheros**.
+25 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.
 
 ## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
 
@@ -324,7 +324,7 @@ Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
 Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
 contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
 una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
-ráfaga. Inventario: **2902 casos / 185 ficheros**.
+ráfaga. Inventario: **2925 casos / 186 ficheros**.
 
 ## REVISIÓN SOBRE `d6b8611` · Al abrir el programa no había ninguna ráfaga
 
@@ -372,7 +372,7 @@ Se añade `LIMPIAR.bat`, que borra **sólo** lo que se regenera solo —`__pycac
 `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`— y tiene regresiones que
 le prohíben tocar `.venv`, `app\storage`, `.env`, logs o datos de mercado.
 
-21 regresiones nuevas. Inventario: **2902 casos / 185 ficheros**.
+21 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.
 
 ## REVISIÓN SOBRE `45fc6ad` · La regresión que fija el arranque en frío
 
@@ -431,4 +431,64 @@ Dos columnas nuevas en el informe, medidas contra la terminal viva:
   1.920 s no puede repetirse en silencio.
 
 Un activo que falle sigue sin detener a los demás. 24 regresiones nuevas.
-Inventario: **2902 casos / 185 ficheros**.
+Inventario: **2925 casos / 186 ficheros**.
+
+## REVISIÓN SOBRE `76521d9` · La colisión de carriles en la ranura del hub
+
+La consola del arranque real:
+
+```
+WARNING itm.quantdata_intelligence  degradado en
+    quantdata_intelligence:normalize:net_flow [DEGRADED]:
+    AttributeError: 'dict' object has no attribute 'payload'
+WARNING itm.quantdata_intelligence  degradado en
+    quantdata_intelligence:normalize:net_drift [DEGRADED]: (idéntico)
+```
+
+El hub funde las peticiones duplicadas de los dos carriles por
+`(dataset, símbolo)`, que es lo correcto y ahorra cuota de verdad. El problema
+era **qué** metía cada uno en esa ranura compartida:
+
+```
+carril del motor   →  self._post(...)     devuelve el DICT del payload
+carril de páginas  →  _client.post(...)   devolvía el OBJETO QuantDataResponse
+```
+
+Quien llegaba segundo recibía el objeto del otro. Sólo puede ocurrir donde el
+nombre coincide palabra por palabra, y coincide en exactamente tres:
+`net_flow`, `net_drift` e `iv_rank`. Los demás van renombrados
+(`gex_by_strike` → `gamma`) y por eso nunca fallaron. **Se volvió sistemático con
+la ráfaga de arranque**: antes los dos carriles rara vez pedían lo mismo a la
+vez; ahora arrancan juntos.
+
+Arreglado en el origen, no envolviendo la lectura: los dos carriles meten el
+**mismo tipo**, así que la fusión sigue funcionando y ya no puede mentir sobre
+lo que devuelve. Más un cinturón que, si algo vuelve a meter otro tipo, lo dice
+**con el nombre del tipo** en vez de reventar cincuenta líneas más allá.
+
+Y un defecto latente que destapó: `"ready": bool(p)` daba `True` para
+**cualquier** objeto no vacío, así que una respuesta colada por la ranura se
+publicaba como `ready: True` con el objeto entero en `raw` —la herramienta
+parecía viva y lo que servía no era del proveedor—. Ahora `es_payload()` exige
+un diccionario con algo dentro. Ninguna herramienta puede declararse viva porque
+«venía llena».
+
+### El 400 enseña el campo, no sólo que hubo un 400
+
+```
+WARNING itm.data_hub   degradado en data_hub:max_pain [DEGRADED]:
+    QuantDataError: Quant Data HTTP 400: Request validation failed
+WARNING itm.quantdata  degradado en quantdata:max_pain:unrepairable
+```
+
+El backend guarda **qué campo** señaló el proveedor desde v1.45.0 y el veredicto
+clasificado desde v1.57.0. Nada de eso llegaba a la pantalla: la fila enseñaba el
+error crudo cortado a setenta caracteres, donde un 400 se lee igual que un 404 y
+el único dato accionable se quedaba en el JSON. Ahora la fila lleva el veredicto,
+su remedio, el **campo rechazado** y la evidencia completa en el título.
+
+Esto no adivina el cuerpo correcto de `max_pain` ni inventa una ruta para
+`trade_side_statistics` (404 en `/v1/options/tool/trade-side-statistics`): las
+dos necesitan lo que conteste el proveedor, y ahora se ve.
+
+23 regresiones nuevas. Inventario: **2925 casos / 186 ficheros**.

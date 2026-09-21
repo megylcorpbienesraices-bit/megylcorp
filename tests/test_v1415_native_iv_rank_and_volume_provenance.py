@@ -399,7 +399,10 @@ def test_coverage_publishes_the_attempts_and_the_candidates():
     # v1.44.0 · Cuatro caminos que hay que dejar registrados, no tres: el canal
     # aislado del Data Hub añadió uno (timeout o cortocircuito del canal), que es
     # una forma de fallo distinta de un 404 de ruta y de una excepción de red.
-    assert src.count("tool.note_attempt(") == 4  # ruta, canal, excepción y éxito
+    # v1.57.6 · Cinco: la ranura compartida del hub añadió el quinto —que el hub
+    # devuelva algo que no es el payload del proveedor—, y ése también tiene que
+    # quedar registrado como intento, no reventar en el normalizador.
+    assert src.count("tool.note_attempt(") == 5  # ruta, canal, tipo, excepción y éxito
 
 
 def test_the_screen_turns_an_unavailable_tool_into_something_actionable():
