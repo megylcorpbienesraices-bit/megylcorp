@@ -70,6 +70,25 @@ se contrasta contra fórmulas cerradas y no depende de ningún proveedor.
 
 ---
 
+## Repaso punto por punto · lo que encontré al revisar
+
+Revisé los 55 puntos contra el código y encontré **cuatro huecos** que había
+dado por cerrados sin estarlo. Los tres primeros ya están corregidos:
+
+| # | Hueco | Estado |
+|---|---|---|
+| 21, 22 | El selector de EXPOSICIÓN sólo ofrecía GEX/DEX/VEX/CHEX. **OI y VOLUMEN faltaban**, aunque el backend ya los publicaba por strike en los dos ejes: el perfil 2D y el relieve 3D leen el mismo `expRows`, así que se quedaban sin dos de las seis magnitudes | ✅ corregido |
+| 27 | El KPI decía **`VWAP SESIÓN`** y enseñaba el VWAP **oscuro** —Σ(precio × acciones) / Σ(acciones) sobre prints `DARK_POOL`—. Son dos medidas distintas y el rótulo afirmaba la equivocada | ✅ corregido |
+| 27 | `OFF-EXCHANGE CONFIRMADOS` es la **suma de `tradeCount`** de Dark Flow (agregado por intervalo) y `PRINT MAYOR OFF-EX` sale de Equity Prints **individuales**. Llamar «prints confirmados» a los dos invitaba a compararlos | ✅ corregido |
+| 6 | «Eliminar todas las lecturas directas a caches legacy». El FlowViewModel **manda** —tarjetas y barras salen de él— pero dejé la cinta local (`S.prints`) como **respaldo** si el modelo no viaja, y los prints individuales del intervalo siguen viniendo del trace | ⚠️ **parcial, a propósito** |
+
+Sobre el cuarto: quitar el respaldo dejaría la sección muda ante un backend
+antiguo o un bundle sin `flujo_ordenes`. Preferí que la ruta canónica mande y
+que el respaldo exista, declarado y con su propia prueba, antes que una sección
+que se apaga. **Si prefiere la ruta única sin red, lo quito y lo digo aquí.**
+
+---
+
 ## Lo que queda abierto, sin adornos
 
 ### 1 · Lo que exige su API (criterios 3, 5, 17)

@@ -6,8 +6,8 @@ Release: `ITM_QUANT_v1.56.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
 ## Suite
 
-- Inventario nominal: **2517 casos / 169 ficheros**
-- Particiones: 21 · `plan_sha256`: `5ceb363e55ace356633c4dbe5379d90cbb9bc28af3797c6656e986a794be63c5`
+- Inventario nominal: **2522 casos / 169 ficheros**
+- Particiones: 21 · `plan_sha256`: `889e27e50df477aafdf96e404a339811f9a718131daab000578625e1ee7ec45d`
 - Resultado: **PASS**
 
 ---

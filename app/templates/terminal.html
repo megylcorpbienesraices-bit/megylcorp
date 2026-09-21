@@ -362,9 +362,15 @@
     </div>
     <div class="toolbar">
       <div class="group"><span class="label">GRIEGA</span>
+        <!-- v1.56.1 · OI y VOLUMEN faltaban aquí. El backend ya los publicaba por
+             strike, así que el perfil 2D y el relieve 3D —que leen EL MISMO
+             `expRows`— se quedaban sin dos de las seis magnitudes que la
+             especificación pide con una barra por strike. -->
         <select class="ctl" id="expMetric">
           <option value="GEX">GEX · Gamma</option><option value="DEX">DEX · Delta</option>
           <option value="VEX">VEX · Vanna</option><option value="CHEX">CHEX · Charm</option>
+          <option value="OI">OI · interés abierto</option>
+          <option value="VOLUME">VOLUMEN · contratos</option>
         </select>
       </div>
       <div class="seg" id="expAxis">
@@ -525,13 +531,21 @@
          primaria es Quant Data (dark-flow / dark-pool-levels / equity-prints); la
          clasificación por venue se conserva como auditoría, no como única vía. -->
     <div class="grid c4">
-      <div class="kpi"><span>OFF-EXCHANGE CONFIRMADOS</span><b id="dpCount">—</b><small>impresiones fuera de bolsa</small></div>
+      <!-- v1.56.1 · Este contador es la SUMA de `tradeCount` de Dark Flow: son
+           operaciones agregadas por intervalo. «PRINT MAYOR OFF-EX», tres
+           tarjetas más allá, sale de Equity Prints INDIVIDUALES. Llamar a los
+           dos «prints confirmados» invitaba a compararlos, y no son lo mismo. -->
+      <div class="kpi"><span>OPERACIONES OSCURAS (AGREGADO)</span><b id="dpCount">—</b><small>Σ tradeCount de dark-flow</small></div>
       <div class="kpi"><span>NOTIONAL OFF-EXCHANGE</span><b id="dpNotional">—</b><small>valor confirmado</small></div>
       <div class="kpi accent"><span>% FUERA DE BOLSA</span><b id="dpShare">—</b><small id="dpShareDetail">proporción del volumen ejecutado en oscuro</small></div>
       <div class="kpi"><span>VOLUMEN OSCURO</span><b id="dpDarkVolume">—</b><small id="dpDarkVolumeDetail">Quant Data · dark-flow</small></div>
       <div class="kpi"><span>NIVEL DOMINANTE</span><b id="dpLevel">—</b><small id="dpLevelDetail">—</small></div>
-      <div class="kpi"><span>VWAP SESIÓN</span><b id="dpVwap">—</b><small id="dpVwapDetail">—</small></div>
-      <div class="kpi"><span>PRINT MAYOR OFF-EX</span><b id="dpBiggest">—</b><small id="dpBiggestDetail">—</small></div>
+      <!-- v1.56.1 · Decía «VWAP SESIÓN» y lo que enseña es el VWAP DARK POOL:
+           Σ(precio × acciones) / Σ(acciones) sobre prints clasificados
+           DARK_POOL. Son dos medidas distintas y el rótulo afirmaba la
+           equivocada; cuando cae al VWAP de las velas, el detalle lo dice. -->
+      <div class="kpi"><span>VWAP DARK POOL</span><b id="dpVwap">—</b><small id="dpVwapDetail">—</small></div>
+      <div class="kpi"><span>PRINT MAYOR (INDIVIDUAL)</span><b id="dpBiggest">—</b><small id="dpBiggestDetail">—</small></div>
       <div class="kpi"><span>AUDITORÍA ESTRUCTURA / CINTA</span><b id="dpAudit">—</b><small id="dpAuditDetail">dos medidas independientes de la misma sesión</small></div>
     </div>
     <article class="card">

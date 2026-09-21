@@ -2992,12 +2992,15 @@
    ]
   },
   "tests/test_v1560_gate7_trace_space.py": {
-   "casos": 19,
+   "casos": 24,
    "tests": [
     "test_el_area_central_tiene_suelo_en_pixeles",
     "test_el_grafico_no_cede_alto_a_lo_de_abajo",
     "test_el_muro_lejano_lleva_flecha_precio_y_distancia",
     "test_el_plan_sustituye_a_target_y_risk_no_convive",
+    "test_el_relieve_lee_la_misma_metrica_que_las_barras",
+    "test_el_selector_de_exposicion_ofrece_las_seis_magnitudes",
+    "test_el_vwap_oscuro_no_se_rotula_como_vwap_de_sesion",
     "test_hay_una_sola_funcion_de_escala_de_precio",
     "test_la_alineacion_se_mide_en_marcha_y_se_publica",
     "test_la_escala_no_se_construye_con_los_niveles",
@@ -3006,8 +3009,10 @@
     "test_la_ventana_se_acota_alrededor_del_precio",
     "test_las_columnas_laterales_dejan_sitio_a_las_cifras_del_eje",
     "test_las_cuatro_lineas_del_plan_existen_y_no_se_duplican",
+    "test_las_seis_magnitudes_existen_en_los_dos_ejes",
     "test_las_tres_cabeceras_miden_exactamente_lo_mismo",
     "test_las_tres_columnas_comparten_fila_de_rejilla",
+    "test_los_agregados_no_se_confunden_con_los_prints_individuales",
     "test_los_tres_lienzos_usan_el_mismo_padding",
     "test_todo_kind_que_el_renderer_dibuja_tiene_procedencia",
     "test_trace_no_recalcula_la_direccion",
@@ -3067,6 +3072,6 @@
    ]
   }
  },
- "total_minimo": 2517,
+ "total_minimo": 2522,
  "version": "1.56.0"
 }

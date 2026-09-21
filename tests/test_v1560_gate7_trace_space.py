@@ -175,3 +175,54 @@ def test_la_identidad_no_se_deduce_del_color():
     # Y cada uno declara una procedencia distinta en el registro.
     funciones = {LEVEL_ORIGIN[k]["function"] for k in rojos if k in LEVEL_ORIGIN}
     assert len(funciones) >= 2, funciones
+
+
+# ── 21 y 22 · las SEIS magnitudes, una barra por strike y relieve 3D ─────
+
+def test_el_selector_de_exposicion_ofrece_las_seis_magnitudes():
+    """v1.56.1 · OI y VOLUMEN faltaban. El backend ya los publicaba por strike,
+    así que el perfil 2D y el relieve 3D —que leen EL MISMO `expRows`— se
+    quedaban sin dos de las seis magnitudes que la especificación pide."""
+    html = Path("app/templates/terminal.html").read_text(encoding="utf-8")
+    bloque = html[html.index('id="expMetric"'):]
+    bloque = bloque[:bloque.index("</select>")]
+    for metrica in ("GEX", "DEX", "VEX", "CHEX", "OI", "VOLUME"):
+        assert f'value="{metrica}"' in bloque, metrica
+
+
+def test_las_seis_magnitudes_existen_en_los_dos_ejes():
+    """Por strike y por vencimiento: si una faltara, el panel saldría vacío al
+    cambiar de eje y parecería una avería."""
+    src = Path("app/terminal_api.py").read_text(encoding="utf-8")
+    por_exp = src[src.index('by_exp.append({'):]
+    por_exp = por_exp[:por_exp.index("})")]
+    for campo in ("gex", "dex", "vex", "chex", "oi", "volume"):
+        assert f'"{campo}"' in por_exp, campo
+
+
+def test_el_relieve_lee_la_misma_metrica_que_las_barras():
+    """Dos vistas de un dato, nunca dos datos."""
+    js = Path("app/static/itmq_app.js").read_text(encoding="utf-8")
+    cuerpo = js[js.index("const expRows = axis === 'strike'"):js.index("applyExpView();")]
+    assert "main.set(expRows);" in cuerpo
+    assert "expRelief.set(expRows);" in cuerpo
+
+
+# ── 27 · los KPI de Dark Pool dicen qué miden ───────────────────────────
+
+def test_el_vwap_oscuro_no_se_rotula_como_vwap_de_sesion():
+    """Decía «VWAP SESIÓN» y enseñaba Σ(precio × acciones) / Σ(acciones) sobre
+    prints DARK_POOL. Son dos medidas distintas."""
+    html = Path("app/templates/terminal.html").read_text(encoding="utf-8")
+    assert "<span>VWAP DARK POOL</span>" in html
+    # El rótulo visible, no el comentario que explica por qué cambió.
+    assert "<span>VWAP SESIÓN</span>" not in html
+
+
+def test_los_agregados_no_se_confunden_con_los_prints_individuales():
+    """Uno es Σ tradeCount de dark-flow; el otro, una operación de Equity
+    Prints. Llamar «prints confirmados» a los dos invitaba a compararlos."""
+    html = Path("app/templates/terminal.html").read_text(encoding="utf-8")
+    assert "OPERACIONES OSCURAS (AGREGADO)" in html
+    assert "PRINT MAYOR (INDIVIDUAL)" in html
+    assert "Σ tradeCount de dark-flow" in html
