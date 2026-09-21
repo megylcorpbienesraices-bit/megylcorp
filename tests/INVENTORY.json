@@ -3117,6 +3117,22 @@
     "test_un_ciclo_nuevo_si_avanza_el_contador"
    ]
   },
+  "tests/test_v1570_cadena_no_hidratada.py": {
+   "casos": 13,
+   "tests": [
+    "test_el_precio_de_la_cadena_manda_sobre_el_de_la_cinta",
+    "test_el_refresco_registra_de_donde_salio_el_precio_de_la_cadena",
+    "test_el_respaldo_de_precio_llama_a_un_metodo_QUE_EXISTE",
+    "test_la_causa_raiz_viaja_al_frontend_y_se_pinta_antes_de_la_tabla",
+    "test_la_cinta_da_el_ultimo_precio_observado",
+    "test_seis_paneles_vacios_por_la_cadena_se_declaran_como_UN_fallo",
+    "test_sin_precio_en_ninguna_parte_el_fallo_tiene_nombre_y_causa",
+    "test_sin_velas_el_diagnostico_no_afirma_que_el_precio_llega",
+    "test_un_precio_imposible_no_se_acepta_como_bueno",
+    "test_un_solo_panel_vacio_no_se_vende_como_causa_raiz",
+    "test_una_cadena_sin_precio_ya_no_tumba_el_refresco"
+   ]
+  },
   "tests/test_v1570_walls_oi_ausente.py": {
    "casos": 13,
    "tests": [
@@ -3133,6 +3149,6 @@
    ]
   }
  },
- "total_minimo": 2571,
+ "total_minimo": 2584,
  "version": "1.56.0"
 }

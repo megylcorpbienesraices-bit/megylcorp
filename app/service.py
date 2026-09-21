@@ -1489,6 +1489,93 @@ def _freeze_map_payload(result: Dict[str, Any], targets: Dict[str, Any], vol: Di
 
 
 
+def _fabric_last_price(symbol: str) -> float | None:
+    """Último precio observado de la cinta, o `None`.
+
+    v1.57.0 · `PRICE_TICK_FABRIC.snapshot(...)` NO EXISTE.
+
+    Se llamaba así en `nextgen_trace_price_only`, dentro de un `try/except` que
+    se tragaba el `AttributeError`. O sea: justo en el camino degradado —al que
+    cae la terminal cuando la cadena no hidrata— el respaldo de precio no podía
+    funcionar nunca, y nadie se enteraba porque el error moría en el `except`.
+
+    El método real de la cinta es `dataframe()`.
+    """
+    try:
+        df = PRICE_TICK_FABRIC.dataframe(symbol)
+    except Exception as exc:
+        _obs_note("service:fabric_last_price", exc, severity="DEGRADED")
+        return None
+    if df is None or getattr(df, "empty", True) or "price" not in df.columns:
+        return None
+    serie = pd.to_numeric(df["price"], errors="coerce").dropna()
+    if not len(serie):
+        return None
+    valor = float(serie.iloc[-1])
+    return valor if (valor == valor and valor > 0) else None
+
+
+class ChainSpotUnavailable(RuntimeError):
+    """La cadena llegó sin un precio del subyacente utilizable.
+
+    Existe para que este fallo tenga NOMBRE. Antes reventaba como
+    `IndexError: single positional indexer is out-of-bounds` desde lo hondo de
+    pandas, y ese texto era todo lo que quedaba en `last_error` y en el Auditor.
+    """
+
+
+def _resolve_chain_spot(snapshot: pd.DataFrame, symbol: str) -> tuple[float, str]:
+    """Precio del subyacente para procesar la cadena, con procedencia declarada.
+
+    v1.57.0 · UN `.iloc[-1]` SIN RED TUMBABA LA TERMINAL ENTERA.
+
+    Esto era una línea:
+
+        spot0 = float(numeric_column(snapshot,"underlying_price",...).dropna().iloc[-1])
+
+    Si la cadena llegaba sin `underlying_price`, con la columna entera a NaN o
+    directamente vacía, `.iloc[-1]` lanza `IndexError`. Y esa línea está dentro
+    del `try` grande del refresco, así que el refresco ABORTABA: `gamma_delta`
+    se quedaba en `{}`, `nextgen_trace` se iba por `nextgen_trace_price_only` y
+    la terminal publicaba velas y nada más.
+
+    El resultado en pantalla, en TODOS los activos porque el fallo no depende
+    del ticker: heatmap del TRACE vacío, perfiles por strike vacíos, niveles
+    vacíos, cero prints de opciones —y por tanto ningún agresor, ningún
+    BUY/SELL—, skew vacío y exposición por vencimiento vacía. Diez paneles
+    diciendo SIN DATOS por una sola línea.
+
+    Lo más absurdo: el precio NO falta. La terminal lo está enseñando arriba y
+    dibuja cientos de velas con él. Lo que faltaba era ir a buscarlo donde sí
+    estaba cuando la cadena no lo trae.
+
+    El orden es el de siempre: primero el dato del proveedor dentro de la propia
+    cadena; sólo si no está, la cinta de precio observada. La procedencia se
+    devuelve para que no se confunda un precio de la cadena con uno prestado.
+    """
+    serie = numeric_column(snapshot, "underlying_price", float("nan")).dropna() \
+        if snapshot is not None and not snapshot.empty else pd.Series(dtype="float64")
+    if len(serie):
+        valor = float(serie.iloc[-1])
+        if valor == valor and valor > 0:
+            return valor, "CHAIN_UNDERLYING_PRICE"
+
+    # La cadena no lo trae. La cinta observada sí, y es el mismo instrumento.
+    precio = _fabric_last_price(symbol)
+    if precio is not None:
+        return precio, "PRICE_TICK_FABRIC_FALLBACK"
+
+    filas = 0 if snapshot is None else len(snapshot)
+    columna = (snapshot is not None and "underlying_price" in getattr(snapshot, "columns", []))
+    raise ChainSpotUnavailable(
+        f"{symbol}: la cadena llegó con {filas} contrato(s) pero sin precio del "
+        f"subyacente utilizable ("
+        f"{'columna underlying_price presente pero sin valores' if columna else 'sin columna underlying_price'}"
+        f"), y la cinta de precio observada tampoco tiene precio para este "
+        f"activo. Sin precio no se puede centrar la cadena ni calcular exposición."
+    )
+
+
 def _snapshot_atm_iv_pct(snapshot: pd.DataFrame) -> float | None:
     if snapshot is None or snapshot.empty or "underlying_price" not in snapshot.columns:
         return None
@@ -1937,7 +2024,8 @@ class PlatformState:
                     _progress("CHAIN_READY",44,f"Cadena propia recibida · {len(snapshot)} contratos")
                     iv_pct=_snapshot_atm_iv_pct(snapshot)
                     hinfo=effective_horizon_days(snapshot,self.expiry_window)
-                    spot0=float(numeric_column(snapshot,"underlying_price",float("nan")).dropna().iloc[-1])
+                    spot0, spot0_source = _resolve_chain_spot(snapshot, self.symbol)
+                    meta["chain_spot_source"] = spot0_source
                     win_info=chain_window_for(self.symbol,spot0,iv_pct,hinfo.get("days") if hinfo.get("ready") else None)
                     target_window=float(win_info.get("window",initial_window))
                     meta["initial_window"]=float(initial_window)
@@ -4014,10 +4102,7 @@ class PlatformState:
             if candles: spot=float(candles[-1].get("c"))
         except Exception: spot=None
         if spot is None:
-            try:
-                snap=PRICE_TICK_FABRIC.snapshot(symbol) or {}
-                spot=float(snap.get("price")) if snap.get("price") is not None else None
-            except Exception: spot=None
+            spot=_fabric_last_price(symbol)
         ready=bool(candles or spot is not None)
         payload={
             "ready":ready,"degraded":True,"quant_ready":False,"reason":str(reason or "QUANT_WARMING"),

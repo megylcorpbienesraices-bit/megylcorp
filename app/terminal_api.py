@@ -1629,6 +1629,55 @@ def _dark_pool_rows(row, intel: Dict[str, Any] | None) -> List[Dict[str, Any]]:
     return out
 
 
+#: Paneles que NO pueden tener dato si la cadena de opciones no hidrató. No es
+#: una lista de coincidencias: es la dependencia real: todos se construyen sobre
+#: el mismo snapshot de la cadena.
+_DEPENDEN_DE_LA_CADENA = (
+    "TRACE · perfiles por strike",
+    "TRACE · heatmap",
+    "TRACE · niveles",
+    "FLUJO · prints de opciones",
+    "VOLATILIDAD · skew",
+    "EXPOSICIÓN · por vencimiento",
+)
+
+
+def _causa_raiz(checks: List[Dict[str, Any]], state: Dict[str, Any]) -> Dict[str, Any]:
+    """Un solo veredicto: qué eslabón se rompió, y qué cuelga de él.
+
+    Diez paneles vacíos por una cadena que no llegó son UN fallo, no diez. Y el
+    error que quedaba registrado era el de más abajo del todo —un `IndexError`
+    de pandas—, que no nombra ni el activo ni el dato que falta.
+    """
+    caidos = {c["panel"] for c in checks if not c.get("ok")}
+    de_la_cadena = [p for p in _DEPENDEN_DE_LA_CADENA if p in caidos]
+    hay_precio = any(c.get("ok") for c in checks if c["panel"] == "TRACE · velas")
+    error = str(state.get("last_error") or "")
+
+    if len(de_la_cadena) < 2:
+        return {"detected": False, "panels": de_la_cadena,
+                "detail": "no hay un fallo común: cada panel vacío tiene su propio motivo"}
+
+    detalle = (f"{len(de_la_cadena)} paneles vacíos cuelgan del MISMO eslabón: la cadena "
+               f"de opciones no hidrató en este ciclo. No son {len(de_la_cadena)} fallos.")
+    if hay_precio:
+        detalle += (" El precio observado SÍ llega —las velas se están dibujando—, así que "
+                    "el corte está entre el proveedor de cadena y el motor, no en la red.")
+    return {
+        "detected": True,
+        "link": "ITM_QUANT_CHAIN",
+        "panels": de_la_cadena,
+        "price_available": hay_precio,
+        "engine_error": error[:300] or None,
+        "detail": detalle,
+        "what_to_check": [
+            "AUDITOR · FUENTES: IMPLIED_VOLATILITY y OPEN_INTEREST de Quant Data",
+            "si el error del motor nombra ChainSpotUnavailable, la cadena llegó sin precio",
+            "cobertura de la cadena para el vencimiento seleccionado",
+        ],
+    }
+
+
 def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
                       coverage: Dict[str, Any] | None = None,
                       parity: Dict[str, Any] | None = None,
@@ -1717,6 +1766,14 @@ def build_diagnostics(*, state: Dict[str, Any], trace: Dict[str, Any],
         "publication_allowed": blocked.get("publicar_permitido"),
         "checks": checks,
         "failing": [c["panel"] for c in checks if not c["ok"]],
+        # v1.57.0 · LA CAUSA, NO DIEZ SÍNTOMAS.
+        #
+        # Con la cadena caída, esta tabla mostraba diez paneles en SIN DATOS con
+        # diez motivos distintos —CADENA_NO_HIDRATADA, SIN_HISTORIA_ESTRUCTURAL,
+        # SCANNER_NO_PUBLICO_NIVELES, NO_UNIVERSE, SIN_CADENA…— y ninguno era la
+        # causa: los diez colgaban del mismo eslabón. Quien leyera el Auditor se
+        # llevaba diez investigaciones en vez de una.
+        "root_cause": _causa_raiz(checks, state),
         "quantdata": {
             "configured": cov.get("configured"),
             "live_tools": cov.get("live_tools"),

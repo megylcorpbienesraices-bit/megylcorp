@@ -1866,6 +1866,8 @@
         : '<span class="dim">—</span>',
     ], 'Sin respuesta de flujo oscuro en este ciclo', true);
 
+    renderRootCause((state.diagnostics || {}).root_cause);
+
     fillTable('tblDiag', (state.diagnostics || {}).checks || [], c => [
       c.panel,
       c.ok ? '<span class="pos">CON DATOS</span>' : '<span class="neg">SIN DATOS</span>',
@@ -1874,6 +1876,33 @@
       esc(c.reason || '—'),
     ], 'Diagnóstico no disponible', true);
   }
+
+  /**
+   * La CAUSA, encima de la tabla de síntomas.
+   *
+   * v1.57.0 · Con la cadena caída, el Auditor enseñaba diez paneles en SIN
+   * DATOS con diez motivos distintos y ninguno era la causa: los diez colgaban
+   * del mismo eslabón. Quien lo leía se llevaba diez investigaciones en vez de
+   * una. Esto dice cuál es el eslabón, qué cuelga de él y qué mirar.
+   */
+  function renderRootCause(rc) {
+    const box = document.getElementById('diagRootCause');
+    if (!box) return;
+    if (!rc || !rc.detected) { box.hidden = true; box.innerHTML = ''; return; }
+    const paneles = (rc.panels || []).map(p => `<li>${esc(p)}</li>`).join('');
+    const mirar = (rc.what_to_check || []).map(p => `<li>${esc(p)}</li>`).join('');
+    box.innerHTML =
+      `<div class="rc-title">CAUSA RAÍZ · ${esc(rc.link || 'ESLABÓN DESCONOCIDO')}</div>`
+      + `<div class="rc-detail">${esc(rc.detail || '')}</div>`
+      + (paneles ? `<ul class="rc-list">${paneles}</ul>` : '')
+      + (rc.engine_error
+          ? `<div class="rc-detail" style="margin-top:6px">Error del motor: `
+            + `<code>${esc(rc.engine_error)}</code></div>` : '')
+      + (mirar ? `<div class="rc-detail" style="margin-top:6px">Qué mirar:</div>`
+                 + `<ul class="rc-list">${mirar}</ul>` : '');
+    box.hidden = false;
+  }
+
 
   /* --------------------------------------------------------- helpers UI */
 

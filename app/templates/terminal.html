@@ -792,7 +792,11 @@
 
     <article class="card">
       <header><h2>DIAGNÓSTICO DE PANELES · POR QUÉ HAY O NO HAY DATOS</h2></header>
-      <div class="body"><div class="table-wrap"><table class="data" id="tblDiag">
+      <div class="body">
+        <!-- v1.57.0 · La CAUSA va arriba, antes de la tabla de síntomas. Diez
+             paneles vacíos por una cadena que no llegó son UN fallo, no diez. -->
+        <div id="diagRootCause" class="rootcause" hidden></div>
+        <div class="table-wrap"><table class="data" id="tblDiag">
         <thead><tr><th>PANEL</th><th>ESTADO</th><th>FILAS</th><th>ORIGEN</th><th>MOTIVO</th></tr></thead><tbody></tbody>
       </table></div></div>
     </article>

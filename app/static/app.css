@@ -1160,3 +1160,15 @@ body.internal-mode [data-internal-only]:not([hidden]){visibility:visible}
 #section-flow .market-terminal-pane-header span{color:var(--ink-2)}
 /* v1.40.8 · stale-feed state never blocks or blurs the visible page. Analyst overlays remain removed. */
 body.publication-blocked .page-section.active{filter:none!important;opacity:1!important;pointer-events:auto!important;user-select:auto!important}
+
+
+/* v1.57.0 · CAUSA RAÍZ del Auditor. Va antes de la tabla de síntomas porque
+   diez paneles vacíos por un mismo eslabón son un fallo, no diez. Usa los
+   tokens del sistema: ni hex sueltos ni tamaños fuera de la escala. */
+.rootcause{border:1px solid var(--neg-border);border-left-width:3px;border-radius:var(--r3);
+  padding:10px 12px;margin:0 0 12px;background:var(--neg-bg);line-height:1.5}
+.rootcause .rc-title{font-weight:var(--w-decide);letter-spacing:.06em;color:var(--neg-300);
+  font-size:var(--t1);text-transform:uppercase;margin-bottom:4px}
+.rootcause .rc-detail{font-size:var(--t2);color:var(--ink-2)}
+.rootcause .rc-list{margin:6px 0 0;padding-left:18px;font-size:var(--t1);color:var(--ink-3)}
+.rootcause code{font-size:var(--t1);color:var(--ink-3)}
