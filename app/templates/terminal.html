@@ -343,6 +343,11 @@
     <!-- v1.57.0 · El PULSO de la sesión: cuánto nocional entra por minuto. El
          carril TOTAL de arriba encuentra EL minuto grande; éste dice si la
          sesión se acelera o se apaga, que con barras no se distingue. -->
+    <!-- DELTA / MIN · presión delta del DEALER por minuto, desde la CINTA.
+         Autoridad propia: no se calcula desde Net Drift ni lo sustituye. Net
+         Drift mide dinero acumulado; esto mide exposición direccional por
+         minuto. Comparten el reloj y nada más. -->
+    <div class="flow-lane" id="ofDeltaMin"></div>
     <div class="flow-lane" id="ofDriftNotional"></div>
     <div class="flow-lane" id="ofDriftVolume"></div>
     <div class="drift-trades">

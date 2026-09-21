@@ -78,6 +78,7 @@
     // NET DRIFT oficial de Quant Data. Estado propio y separado de `qflow`,
     // `buckets` y de cualquier magnitud de exposición: no comparte serie ni escala.
     drift: null,
+    deltaMin: null,
     // FlowViewModel: politica UNICA de frescura por carril. Cuando viaja, las
     // tarjetas leen de el; si no, se recalculan de la cinta local como antes.
     flowView: null,
@@ -1593,6 +1594,86 @@
     return false;
   }
 
+  /**
+   * DELTA / MIN · presión delta del DEALER por minuto.
+   *
+   * Barra positiva = el dealer queda LARGO de delta y tiene que VENDER
+   * subyacente para cubrirse. Negativa = queda CORTO y tiene que COMPRAR.
+   *
+   * El eje va en DÓLARES —delta-acciones × spot—, que es la magnitud con la
+   * que se compara contra cualquier otra cifra de la pantalla. Las
+   * delta-acciones, la cobertura y el método viajan en el modelo y se leen en
+   * el Auditor: aquí el gráfico va limpio.
+   *
+   * Un minuto sin operaciones NO se dibuja. No es un minuto de cero presión.
+   */
+  function drawDeltaMin(ctx, env) {
+    const box = driftBox(env);
+    box.y = 12; box.h = env.h - 26;
+    if (box.w <= 8 || box.h <= 8) return false;
+
+    const d = S.deltaMin;
+    const win = window_();
+    if (!d || !d.ready || !Array.isArray(d.series) || !d.series.length || !win) {
+      empty(ctx, env, (d && d.detail) ? String(d.detail).toUpperCase() : 'SIN PRESIÓN DELTA MEDIBLE');
+      return false;
+    }
+    const sx = Q.scale(win.t0, win.t1, box.x, box.x + box.w);
+
+    const vis = [];
+    for (const p of d.series) {
+      const t = Q.isNum(Q.num(p.timestamp_ms, NaN)) ? Q.num(p.timestamp_ms) : Q.parseTime(p.t);
+      if (!Q.isNum(t) || t < win.t0 - S.bucketMs || t > win.t1) continue;
+      // Sin dólares para ese minuto no se dibuja la barra: convertir con el
+      // spot de otro instante sería inventar el precio.
+      const v = Q.num(p.dealer_delta_dollars, NaN);
+      if (!Q.isNum(v)) continue;
+      vis.push({ t, v });
+    }
+    if (!vis.length) { empty(ctx, env, 'SIN PRESIÓN DELTA EN LA VENTANA'); return false; }
+
+    let mag = 0;
+    for (const r of vis) mag = Math.max(mag, Math.abs(r.v));
+    if (!(mag > 0)) { empty(ctx, env, 'SIN PRESIÓN DELTA EN LA VENTANA'); return false; }
+    // Eje simétrico: comprar y vender presión tienen que medirse con la misma
+    // vara o una de las dos parecería mayor de lo que es.
+    const sy = Q.scale(-mag * 1.15, mag * 1.15, box.y + box.h, box.y);
+    const zero = Math.round(sy(0)) + 0.5;
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y - 6, box.w, box.h + 12); ctx.clip();
+
+    const bins = AB.timeBins(vis, win.t0, win.t1 + S.bucketMs, S.bucketMs, box.w);
+    const bw = bins.thickness;
+    const posC = Q.token('--pos-600', '#22c55e');
+    const negC = Q.token('--neg-600', '#ef4444');
+    for (const r of bins.rows) {
+      const agg = AB.reduceBin(r, p => Q.num(p.v, 0));
+      if (!Q.isNum(agg.sum) || agg.sum === 0) continue;
+      const x0 = sx(r.t), x1 = sx(r.tEnd);
+      const x = x0 + (x1 - x0) / 2;
+      const y = sy(agg.sum);
+      const h = laneExtent(Math.abs(y - zero), agg.sum, box.h);
+      ctx.fillStyle = agg.sum > 0 ? posC : negC;
+      ctx.fillRect(Math.round(x - bw / 2), Math.round(agg.sum > 0 ? zero - h : zero),
+                   Math.max(1, Math.round(bw)), Math.max(1, Math.round(h)));
+    }
+
+    ctx.strokeStyle = Q.alpha(Q.token('--grid', '#243044'), 0.9); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(box.x, zero); ctx.lineTo(box.x + box.w, zero); ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.85);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('DELTA / MIN', box.x + 4, box.y - 10);
+    ctx.textAlign = 'right';
+    ctx.fillText(`±${Q.money(mag, 1)}`, box.x + box.w - 4, box.y - 10);
+    ctx.restore();
+    return false;
+  }
+
   function pickDriftAt(clientX, panel) {
     const rows = driftRows();
     if (!rows.length) return;
@@ -1724,6 +1805,8 @@
       ? new Q.Panel(ids.driftTotal, drawDriftTotal, driftOpts('flow:drifttotal')) : null;
     S.panels.driftNotional = ids.driftNotional
       ? new Q.Panel(ids.driftNotional, drawDriftNotional, driftOpts('flow:driftnotional')) : null;
+    S.panels.deltaMin = ids.deltaMin
+      ? new Q.Panel(ids.deltaMin, drawDeltaMin, driftOpts('flow:deltamin')) : null;
     for (const k in S.panels) if (!S.panels[k]) delete S.panels[k];
     S.link.on(invalidateAll);
     renderDriftPick();
@@ -1737,6 +1820,12 @@
    * `POST /v1/options/tool/net-drift`. Este módulo no lo recalcula, no lo mezcla
    * con QFLOW y no lo sustituye por Net Flow si falta.
    */
+  /** DELTA / MIN del bundle. Autoridad propia: no se mezcla con Net Drift. */
+  function applyDeltaMin(d) {
+    S.deltaMin = (d && typeof d === 'object') ? d : null;
+    if (S.panels.deltaMin) S.panels.deltaMin.invalidate();
+  }
+
   function applyNetDrift(d) {
     S.drift = (d && typeof d === 'object') ? d : null;
     // Si el instante seleccionado ya no existe en la nueva serie, se suelta: dejar
@@ -1945,6 +2034,6 @@
     for (const p of Object.values(S.panels)) if (p) p.invalidate();
   }
 
-  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, applyFlowView, renderedBarCount, setPanel, setGoldRule,
+  global.ITMQFlow = { mount, applyTrace, applyQflow, applyNetDrift, applyDeltaMin, applyFlowView, renderedBarCount, setPanel, setGoldRule,
     setMinPremium, setMode, setFollow, state: S };
 })(window);

@@ -1343,8 +1343,18 @@ def _flujo_ordenes(state: Dict[str, Any], intel: Dict[str, Any],
     tape["provider_count"] = int(unconsolidated.get("count") or 0) or int(consolidated.get("count") or 0)
     view_model = _flow_view_model(symbol, state, tape, net_flow_rows, qflow, drift)
 
+    # DELTA / MIN · presión delta del DEALER, operación a operación.
+    #
+    # Se calcula desde la CINTA, no desde Net Drift. Net Drift mide dinero
+    # acumulado; esto mide exposición direccional por minuto. Mezclarlas daría
+    # un número que no significa nada, así que comparten el reloj y nada más.
+    delta_min = _delta_min_block(symbol, tape_rows, state)
+
     return {
         "symbol": symbol,
+        # DELTA / MIN. La pantalla principal enseña los dólares; las acciones,
+        # la cobertura y el método viajan aquí para el Auditor.
+        "delta_min": delta_min,
         # El modelo que la seccion CONSUME. Las tarjetas leen de aqui su valor,
         # su estado y su edad; no vuelven a deducirlos por su cuenta.
         "view_model": view_model,
@@ -1549,6 +1559,26 @@ def _aggressor_audit(state: Dict[str, Any], intel: Dict[str, Any]) -> Dict[str, 
         "chain": diag.get("chain"),
         "authority": "ITMQ_AGGRESSOR_TRADE_SIDE_CODE_FIRST",
     }
+
+
+def _delta_min_block(symbol: str, tape_rows: List[Dict[str, Any]],
+                     state: Dict[str, Any]) -> Dict[str, Any]:
+    """Presión delta del dealer por minuto, desde la cinta de opciones.
+
+    El spot de respaldo sale del estado vivo y sólo se usa para las operaciones
+    que no traen el suyo. El del print manda siempre: es el del instante exacto
+    del cruce, y en 0DTE eso no es un detalle.
+    """
+    from .core import delta_flow as DFLOW
+    try:
+        spot = _f((state or {}).get("spot") or (state or {}).get("underlying_price"))
+        return DFLOW.build_delta_flow(tape_rows or [], symbol=symbol, spot_fallback=spot)
+    except Exception as exc:
+        _obs_note("terminal_api:delta_min", exc, severity="DEGRADED")
+        return {"symbol": symbol, "ready": False, "series": [],
+                "source_mode": "UNAVAILABLE", "authority": DFLOW.AUTHORITY,
+                "detail": f"no se pudo calcular: {type(exc).__name__}",
+                "coverage": {"total": 0, "counted": 0, "pct": None, "by_reason": {}}}
 
 
 def _flow_view_model(symbol: str, state: Dict[str, Any], tape: Dict[str, Any],
@@ -2669,6 +2699,10 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
                str(dark_pool_section.get("cycle_id") or "")]
     cycle_id = _hashlib.sha256("|".join(_piezas).encode("utf-8")).hexdigest()[:12]
 
+    # La sección de flujo se construye UNA vez y la leen los dos: la pantalla y
+    # el Auditor. Calcularla dos veces daría dos verdades sobre el mismo ciclo.
+    flujo = _flujo_ordenes(state, intel, trace)
+
     auditor = _auditor(state)
     auditor["dark_pool"] = {
         "lanes": dark_pool_section.get("lanes") or [],
@@ -2693,6 +2727,35 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         "authority": "ITMQ_WALL_ENGINE", "note": "el trace no publicó la auditoría"}
     # IDENTIDAD DE LÍNEAS. Mientras `unidentified` no sea cero, hay una línea
     # anónima sobre el gráfico de operativa y eso es un defecto abierto.
+    # DELTA / MIN · lo técnico va AQUÍ, no en el gráfico.
+    #
+    # La pantalla principal enseña dólares y nada más. La cobertura es lo que
+    # impide que el carril mienta por omisión: si el 40 % de los prints no se
+    # pueden clasificar, el gráfico muestra el 60 % del flujo y parece un
+    # mercado tranquilo. Quien audite tiene que ver esa cifra, el desglose de
+    # por qué se cayó cada operación, las delta-acciones y la fórmula exacta.
+    _dm = (flujo or {}).get("delta_min") if isinstance(flujo, dict) else None
+    if isinstance(_dm, dict):
+        _cob = _dm.get("coverage") or {}
+        auditor["delta_min"] = {
+            "ready": bool(_dm.get("ready")),
+            "authority": _dm.get("authority"),
+            "source_mode": _dm.get("source_mode"),
+            "convention": _dm.get("convention"),
+            "method": _dm.get("method"),
+            "inputs": _dm.get("inputs"),
+            "contract_multiplier": _dm.get("contract_multiplier"),
+            "bucket_seconds": _dm.get("bucket_seconds"),
+            "buckets": _dm.get("buckets"),
+            "coverage_pct": _cob.get("pct"),
+            "trades_total": _cob.get("total"),
+            "trades_counted": _cob.get("counted"),
+            "excluded_by_reason": _cob.get("by_reason"),
+            "total_dealer_delta_shares": _dm.get("total_dealer_delta_shares"),
+            "total_dealer_delta_dollars": _dm.get("total_dealer_delta_dollars"),
+            "detail": _dm.get("detail"),
+        }
+
     auditor["level_identity"] = ((trace or {}).get("level_identity_audit")
                                  or {"ok": None, "detail": "el trace no publicó la auditoría"})
     # ÚLTIMO VALOR BUENO · inventario real, no cobertura declarada. Contesta
@@ -2748,7 +2811,7 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
         # La sección de FLUJO DE ÓRDENES que ya existía, con Net Flow, Net Drift,
         # Order Flow consolidado y sin consolidar, QFLOW y su concentración dentro.
         # No es una sección nueva: es la misma, completa.
-        "flujo_ordenes": _flujo_ordenes(state, intel, trace),
+        "flujo_ordenes": flujo,
         "greeks": _greeks(state, intel),
         "inteligencia": _inteligencia(state, trace, intel),
         "capacidades": _capacidades(state, intel),

@@ -3133,6 +3133,43 @@
     "test_una_cadena_sin_precio_ya_no_tumba_el_refresco"
    ]
   },
+  "tests/test_v1570_delta_min.py": {
+   "casos": 37,
+   "tests": [
+    "test_cada_hueco_se_declara_con_su_motivo",
+    "test_call_y_put_con_la_misma_operacion_empujan_en_sentidos_opuestos",
+    "test_calls_y_puts_del_mismo_minuto_se_desglosan_y_se_suman",
+    "test_cinta_realista_cuadra_operacion_a_operacion",
+    "test_cinta_realista_los_dolares_usan_el_spot_de_cada_print",
+    "test_comprar_y_vender_invierten_la_contribucion",
+    "test_declara_convenio_procedencia_y_metodo",
+    "test_el_auditor_publica_cobertura_acciones_y_metodo",
+    "test_el_bloque_sale_del_bundle_calculado_desde_la_cinta",
+    "test_el_bloque_viaja_en_la_seccion_de_flujo_aparte_de_net_drift",
+    "test_el_calculo_cambia_minuto_a_minuto",
+    "test_el_carril_tiene_su_sitio_y_su_entrada_de_datos",
+    "test_el_eje_es_simetrico_para_no_exagerar_un_lado",
+    "test_el_multiplicador_es_cien_acciones_por_contrato",
+    "test_el_orden_de_llegada_no_altera_el_resultado",
+    "test_el_put_no_lleva_signo_adicional",
+    "test_el_spot_de_cada_print_manda_sobre_el_de_respaldo",
+    "test_el_total_en_dolares_solo_existe_si_todos_los_minutos_lo_tienen",
+    "test_el_volumen_simple_no_se_usa_como_sustituto",
+    "test_funciona_igual_en_todos_los_activos",
+    "test_la_cobertura_se_publica_siempre",
+    "test_la_interfaz_ensena_dolares_y_deja_lo_tecnico_al_auditor",
+    "test_la_seccion_de_flujo_se_calcula_una_sola_vez",
+    "test_la_suma_del_flujo_reproduce_el_cambio_del_stock",
+    "test_los_cuatro_cuadrantes_del_signo",
+    "test_los_dolares_son_las_acciones_por_el_spot",
+    "test_no_reimplementa_la_clasificacion_del_agresor",
+    "test_sin_spot_no_se_inventa_la_conversion_pero_las_acciones_siguen",
+    "test_un_mid_market_no_contamina_la_suma",
+    "test_un_minuto_sin_dolares_no_se_dibuja_como_cero",
+    "test_un_minuto_sin_operaciones_no_aparece_como_cero",
+    "test_una_operacion_sin_lado_no_entra_con_signo_inventado"
+   ]
+  },
   "tests/test_v1570_net_drift_y_flujo.py": {
    "casos": 12,
    "tests": [
@@ -3165,6 +3202,6 @@
    ]
   }
  },
- "total_minimo": 2596,
+ "total_minimo": 2633,
  "version": "1.56.0"
 }

@@ -420,6 +420,8 @@
       // NET DRIFT OFICIAL de Quant Data. Va aparte de QFLOW a propósito: son dos
       // magnitudes distintas, de dos endpoints distintos, y no se sustituyen.
       try { Flow.applyNetDrift(d.net_drift); } catch (err) { console.error('[FLOW] applyNetDrift', err); }
+      // DELTA / MIN llega como bloque propio: autoridad separada de Net Drift.
+      try { Flow.applyDeltaMin(d.delta_min); } catch (err) { console.error('[FLOW] applyDeltaMin', err); }
       // v1.55.0 · FlowViewModel: el estado y la edad de CADA carril de FLUJO DE
       // ORDENES. Sin el, un ciclo sin prints vaciaba la seccion entera y las
       // tarjetas decian SIN DATOS al lado de un estado que contaba 405 buckets.
@@ -2219,7 +2221,8 @@
     Flow.mount({ price: el('ofPrice'), aggressor: el('ofAggressor'), net: el('ofNet'),
       volume: el('ofVolume'), total: el('ofTotal'),
       drift: el('ofDrift'), driftTotal: el('ofDriftTotal'),
-      driftVolume: el('ofDriftVolume'), driftNotional: el('ofDriftNotional') });
+      driftVolume: el('ofDriftVolume'), driftNotional: el('ofDriftNotional'),
+      deltaMin: el('ofDeltaMin') });
 
     bindControls();
 

@@ -98,19 +98,19 @@ def test_existe_el_carril_de_nocional_por_minuto():
 
 def test_el_nocional_por_minuto_va_en_linea_no_en_barras():
     """Con barras, una barra aislada y una meseta alta se leen igual."""
-    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function pickDriftAt(")]
+    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function drawDeltaMin(")]
     assert "ctx.lineTo" in cuerpo and "ctx.stroke()" in cuerpo
     assert "fillRect" not in cuerpo, "esto es un pulso, no un histograma"
 
 
 def test_el_nocional_suma_los_dos_lados_en_valor_absoluto():
     """Mide ACTIVIDAD. Restar un lado del otro mediría dirección, que ya está arriba."""
-    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function pickDriftAt(")]
+    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function drawDeltaMin(")]
     assert "Math.abs(Q.isNum(c) ? c : 0) + Math.abs(Q.isNum(pu) ? pu : 0)" in cuerpo
 
 
 def test_un_minuto_sin_dato_no_se_dibuja_como_cero():
-    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function pickDriftAt(")]
+    cuerpo = JS[JS.index("function drawDriftNotional("):JS.index("function drawDeltaMin(")]
     assert "if (!Q.isNum(c) && !Q.isNum(pu)) continue;" in cuerpo
 
 
