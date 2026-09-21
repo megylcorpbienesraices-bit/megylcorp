@@ -527,10 +527,14 @@
       <span>COBERTURA · <b id="dpCoverage">—</b></span>
       <span id="dpCoverageDetail">vías con dato en este ciclo</span>
     </div>
-    <!-- Ocho tarjetas en una rejilla de cuatro: dos filas completas. La fuente
-         primaria es Quant Data (dark-flow / dark-pool-levels / equity-prints); la
-         clasificación por venue se conserva como auditoría, no como única vía. -->
-    <div class="grid c4">
+    <!-- v1.56.1 · NUEVE tarjetas en una rejilla de TRES: tres filas completas.
+         Al añadir PERÍODO se pasó de ocho a nueve, y nueve en una rejilla de
+         cuatro deja una fila a medias —dos tarjetas huérfanas con el hueco al
+         lado—. El test de maquetación del propio proyecto lo cazó.
+         La fuente primaria es Quant Data (dark-flow / dark-pool-levels /
+         equity-prints); la clasificación por venue se conserva como auditoría,
+         no como única vía. -->
+    <div class="grid c3">
       <!-- v1.56.1 · Este contador es la SUMA de `tradeCount` de Dark Flow: son
            operaciones agregadas por intervalo. «PRINT MAYOR OFF-EX», tres
            tarjetas más allá, sale de Equity Prints INDIVIDUALES. Llamar a los
@@ -547,6 +551,12 @@
       <div class="kpi"><span>VWAP DARK POOL</span><b id="dpVwap">—</b><small id="dpVwapDetail">—</small></div>
       <div class="kpi"><span>PRINT MAYOR (INDIVIDUAL)</span><b id="dpBiggest">—</b><small id="dpBiggestDetail">—</small></div>
       <div class="kpi"><span>AUDITORÍA ESTRUCTURA / CINTA</span><b id="dpAudit">—</b><small id="dpAuditDetail">dos medidas independientes de la misma sesión</small></div>
+      <!-- v1.56.1 · El PERÍODO, a la vista. Los tres carriles no cubren la misma
+           ventana: `dark-flow` llega por intervalos de toda la sesión y
+           `equity-prints` como una cola reciente. Sin verlo, un notional de
+           sesión al lado de un print de los últimos minutos invita a dividir
+           uno entre otro, y esa división no significa nada. -->
+      <div class="kpi"><span>PERÍODO</span><b id="dpPeriodo">—</b><small id="dpPeriodoDetail">ventana realmente observada por carril</small></div>
     </div>
     <article class="card">
       <header><h2>PRECIO / TIEMPO · OFF-EXCHANGE CONFIRMADO</h2></header>

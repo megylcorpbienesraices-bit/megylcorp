@@ -48,6 +48,10 @@ CHROMIUM = "/opt/pw-browsers/chromium"
 # Los mismos umbrales que declara el componente. Si allí cambian, aquí falla, y
 # eso es lo correcto: son la definición de «legible».
 MIN_BAR_PX = 5.0
+#: Fracción mínima de píxeles con algo dibujado en un panel que no es de barras.
+#: Un campo de calor con datos delante y el 0,2 % de tinta está vacío en la
+#: práctica, aunque no lance ningún error.
+MIN_INK = 0.02
 
 
 def _free_port() -> int:
@@ -122,6 +126,24 @@ def evaluate(report: list[dict]) -> list[dict]:
     bad = []
     for r in report:
         why = []
+
+        # v1.56.1 · Los paneles que NO son barras se juzgan por otra cosa.
+        #
+        # El campo de calor, el relieve, las curvas y la vista de puntos no
+        # tienen «grosor de barra» que medir. Lo que sí puede romperse en ellos
+        # es que no pinten NADA con datos delante, y eso la suite numérica no lo
+        # ve: el dato está, la escala es correcta y la pantalla sale en blanco.
+        if r.get("thickness") is None:
+            tinta = r.get("ink")
+            if tinta is None or tinta < 0:
+                why.append("el lienzo no se pudo leer")
+            elif tinta < MIN_INK:
+                why.append(f"panel prácticamente vacío: {tinta:.3%} de tinta "
+                           f"(mínimo {MIN_INK:.1%})")
+            if why:
+                bad.append({**r, "why": " · ".join(why)})
+            continue
+
         if r["thickness"] < MIN_BAR_PX:
             why.append(f"barra de {r['thickness']:.2f}px (mínimo {MIN_BAR_PX})")
         if r["occupancy"] > 1.0:
@@ -135,25 +157,38 @@ def evaluate(report: list[dict]) -> list[dict]:
 
 def render(report: list[dict], bad: list[dict]) -> str:
     lines = ["", "=" * 96, "REGRESIÓN VISUAL · GEOMETRÍA REAL DE LOS RENDERIZADORES", "=" * 96,
-             f"{'PANEL':<24}{'TIPO':<7}{'N':>6}{'BARRAS':>8}{'GROSOR':>9}{'HUECO':>8}{'OCUP':>7}"]
+             f"{'PANEL':<24}{'TIPO':<9}{'N':>6}{'BARRAS':>8}{'GROSOR':>9}{'HUECO':>8}{'OCUP':>7}"]
     lines.append("-" * 96)
     for r in report:
-        lines.append(f"{str(r['name'])[:23]:<24}{r['kind']:<7}{r['n']:>6}{r['bins']:>8}"
+        if r.get("thickness") is None:
+            # Los paneles sin barras informan de TINTA, no de grosor.
+            lines.append(f"{str(r['name'])[:23]:<24}{r['kind']:<9}{r['n']:>6}"
+                         f"{'—':>8}{'—':>9}{'—':>8}{r.get('ink', 0):>7.1%}")
+            continue
+        lines.append(f"{str(r['name'])[:23]:<24}{r['kind']:<9}{r['n']:>6}{r['bins']:>8}"
                      f"{r['thickness']:>8.2f}px{r['gap']:>7.2f}{r['occupancy']:>7.2f}")
     lines.append("-" * 96)
-    thick = [r["thickness"] for r in report]
+    barras = [r for r in report if r.get("thickness") is not None]
+    campos = [r for r in report if r.get("thickness") is None]
     first = [r for r in report if r.get("phase") != "resize"]
     after = [r for r in report if r.get("phase") == "resize"]
-    lines.append(f"{len(first)} paneles + {len(after)} tras redimensionar · "
-                 f"grosor {min(thick):.2f}–{max(thick):.2f}px · "
-                 f"ocupación máxima {max(r['occupancy'] for r in report):.3f}")
+    lines.append(f"{len(first)} paneles + {len(after)} tras redimensionar")
+    if barras:
+        thick = [r["thickness"] for r in barras]
+        lines.append(f"  barras · grosor {min(thick):.2f}–{max(thick):.2f}px · "
+                     f"ocupación máxima {max(r['occupancy'] for r in barras):.3f}")
+    if campos:
+        tinta = [r.get("ink", 0) for r in campos]
+        lines.append(f"  campos, relieve, curvas y puntos · "
+                     f"{len(campos)} paneles · tinta {min(tinta):.1%}–{max(tinta):.1%}")
     if bad:
         lines.append("")
         lines.append(f"FALLAN {len(bad)}:")
         for r in bad:
             lines.append(f"  {r['name']} ({r['n']} obs en {r['extent_px']:.0f}px): {r['why']}")
     else:
-        lines.append("Ningún panel dibuja rayitas, masa sólida ni barras sin separación.")
+        lines.append("Ningún panel dibuja rayitas, masa sólida, barras sin separación "
+                     "ni un lienzo vacío con datos delante.")
     return "\n".join(lines)
 
 

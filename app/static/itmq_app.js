@@ -809,6 +809,27 @@
       : ((st.dark_pool_levels || {}).detail || motivoVacio(dp.reason || dp.state, '—')));
 
     const candles = dp.candles || [];
+    /* v1.56.1 · PERÍODO REALMENTE OBSERVADO, por carril.
+     *
+     * Los tres no cubren la misma ventana: `dark-flow` llega por intervalos de
+     * toda la sesión y `equity-prints` como una cola reciente. Enseñar el
+     * notional de sesión al lado de un print de los últimos minutos sin decirlo
+     * invita a dividir uno entre otro, y esa división no significa nada. */
+    const sc = vm.temporal_scope || {};
+    const ventana = (l) => {
+      const w = sc[l] || {};
+      if (!w.first || !w.last) return null;
+      return `${Q.hhmm(Q.parseTime(w.first))}–${Q.hhmm(Q.parseTime(w.last))}`;
+    };
+    const vFlow = ventana('dark_flow'), vPrints = ventana('equity_prints');
+    const sesion = (vm.session || {}).resolved || dp.session_date || '';
+    set('dpPeriodo', sesion ? `SESIÓN ${sesion}` : (vFlow || 'SIN DATOS'));
+    set('dpPeriodoDetail', (vFlow || vPrints)
+      ? [vFlow ? `flujo ${vFlow}` : null,
+         vPrints ? `prints ${vPrints}` : null,
+         'niveles: foto acumulada'].filter(Boolean).join(' · ')
+      : 'ventana realmente observada por carril');
+
     const last = candles.length ? Q.num(candles[candles.length - 1].c, NaN) : NaN;
     // VWAP oscuro: Σ(precio × acciones) / Σ(acciones) sobre prints DARK_POOL. Si
     // no hay prints clasificados, cae al VWAP de las velas, declarado como tal.

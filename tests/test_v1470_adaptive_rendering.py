@@ -513,19 +513,35 @@ def test_the_real_renderers_draw_readable_bars_in_every_case():
     activo, distribución, densidad y viewport.
     """
     rep = _harness_report()
-    assert len(rep) >= 80, f"el arnés sólo midió {len(rep)} paneles"
+    assert len(rep) >= 140, f"el arnés sólo midió {len(rep)} paneles"
     # La segunda mitad es el mismo arnés DESPUÉS de redimensionar la ventana: la
     # geometría tiene que seguir siendo correcta, no sólo al primer render.
     after = [r for r in rep if r.get("phase") == "resize"]
-    assert len(after) >= 40, "la comprobación de redimensionado no se ejecutó"
-    thin = [r for r in rep if r["thickness"] < MIN_BAR_PX]
-    overlap = [r for r in rep if r["occupancy"] > 1.0]
+    assert len(after) >= 70, "la comprobación de redimensionado no se ejecutó"
+    # v1.56.1 · El arnés cubre ahora también campo de calor, relieve, curvas y
+    # puntos. Esos NO tienen grosor de barra que medir —no tienen barras— y se
+    # juzgan por si pintan algo con datos delante, que es lo que sí puede
+    # romperse en ellos. Las dos comprobaciones conviven y no se mezclan.
+    barras = [r for r in rep if r.get("thickness") is not None]
+    campos = [r for r in rep if r.get("thickness") is None]
+    assert len(barras) >= 80, f"sólo {len(barras)} paneles de barras medidos"
+
+    thin = [r for r in barras if r["thickness"] < MIN_BAR_PX]
+    overlap = [r for r in barras if r["occupancy"] > 1.0]
     assert not thin, f"barras por debajo de {MIN_BAR_PX}px: {thin[:3]}"
     assert not overlap, f"barras solapadas: {overlap[:3]}"
-    assert all(r["gap"] > 0 for r in rep if r["bins"] > 1), "sin hueco entre barras"
+    assert all(r["gap"] > 0 for r in barras if r["bins"] > 1), "sin hueco entre barras"
+
+    # Un panel sin barras que no dibuja NADA con datos delante es el fallo que
+    # la suite numérica no ve: el dato está, la escala es correcta, la pantalla
+    # sale en blanco.
+    assert len(campos) >= 40, f"sólo {len(campos)} paneles de campo medidos"
+    vacios = [r for r in campos if (r.get("ink") or 0) < 0.02]
+    assert not vacios, f"paneles prácticamente vacíos: {[v['name'] for v in vacios[:3]]}"
+
     # Y la calidad no depende de la escala del activo: el grosor se mueve poco
     # entre los cinco activos con la misma densidad y el mismo panel.
-    same = [r for r in rep if r["kind"] == "bars" and r["n"] == 390]
+    same = [r for r in barras if r["kind"] == "bars" and r["n"] == 390]
     if len(same) >= 5:
         vals = [r["thickness"] for r in same]
         assert max(vals) - min(vals) < 0.5, f"la escala del activo cambia el grosor: {vals}"

@@ -1430,7 +1430,9 @@ def _tape_totals(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str, Any]:
+def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any],
+                     *, symbol: str = "", session_date: str = "",
+                     cycle_id: str = "") -> Dict[str, Any]:
     """¿Los tres sitios donde sale un muro dicen el MISMO precio?
 
     v1.55.0 · El Wall Engine ya resuelve los muros una sola vez, pero «hay una
@@ -1488,6 +1490,15 @@ def wall_consistency(trace: Dict[str, Any], resumen: Dict[str, Any]) -> Dict[str
     ok = all(r["agree"] for r in rows)
     return {
         "ok": ok, "rows": rows,
+        # v1.56.1 · El CONTEXTO de la comparación. Sin él, «los muros coinciden»
+        # no dice de qué activo, de qué sesión ni de qué ciclo, y dos capturas
+        # de momentos distintos parecen la misma comprobación. Es lo que
+        # convierte el resultado en evidencia archivable.
+        "symbol": str(symbol or "").upper() or None,
+        "session_date": session_date or None,
+        "cycle_id": cycle_id or None,
+        "snapshot": ((trace or {}).get("walls") or {}).get("timestamp")
+                    or ((trace or {}).get("walls") or {}).get("snapshot"),
         "detail": ("los muros coinciden en motor, TRACE y RESUMEN" if ok else
                    "hay mas de una autoridad de muros en pantalla"),
         "note": ("TRACE y FLUJO DE ORDENES dibujan la MISMA lista `levels`, asi "
@@ -2564,52 +2575,6 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
     # pueda viajar también al Auditor. La pantalla principal seguirá leyendo
     # `dark_pool.display_reason`; la causa exacta vive en `auditor`.
     dark_pool_section = _dark_pool(state, trace, intel)
-    auditor = _auditor(state)
-    auditor["dark_pool"] = {
-        "lanes": dark_pool_section.get("lanes") or [],
-        "diagnosis": dark_pool_section.get("diagnosis") or {},
-        # v1.48.0 · Con qué campo se leyó cada magnitud del flujo oscuro y qué
-        # campos publicó el proveedor. Sin esto, un carril que responde con
-        # seiscientos intervalos y un volumen de cero no se puede corregir: no
-        # hay forma de saber si el mercado no tuvo actividad o si el campo se
-        # llama de otra manera.
-        "flow_fields": dark_pool_section.get("flow_fields") or {},
-        "note": ("Tres carriles independientes. Que uno rechace el cuerpo no dice "
-                 "nada sobre los otros dos, y presentarlos juntos hacía parecer "
-                 "rota la sección entera teniendo dos de tres sanos."),
-    }
-    # v1.55.0 · AUTORIDAD ÚNICA DE MUROS, comprobada y no sólo declarada.
-    resumen_block = _resumen(state, trace, intel)
-    auditor["walls"] = wall_consistency(trace, resumen_block)
-    # El CÁLCULO, no sólo la coincidencia: exposición por strike, interés
-    # abierto, distancia, puntuación, ranking y la fórmula exacta.
-    auditor["wall_calculation"] = (trace or {}).get("wall_audit") or {
-        "authority": "ITMQ_WALL_ENGINE", "note": "el trace no publicó la auditoría"}
-    # IDENTIDAD DE LÍNEAS. Mientras `unidentified` no sea cero, hay una línea
-    # anónima sobre el gráfico de operativa y eso es un defecto abierto.
-    auditor["level_identity"] = ((trace or {}).get("level_identity_audit")
-                                 or {"ok": None, "detail": "el trace no publicó la auditoría"})
-    # ÚLTIMO VALOR BUENO · inventario real, no cobertura declarada. Contesta
-    # «¿qué está protegido y qué no?» sin leer el código, que es la pregunta que
-    # se hace cuando una sección se vacía y la de al lado no.
-    # ── AGRESOR · la auditoría completa, con sus contadores ──────────────
-    #
-    # «Todas las marcas salen neutras» no es accionable. Estos números dicen
-    # CUÁL de los eslabones se rompe y, cuando una marca queda neutral, por qué
-    # exactamente: si la cinta no llegó, si llegó sin lado, si el lado dice que
-    # se ejecutó al medio —que NO es una avería— o si no hubo dominancia.
-    try:
-        auditor["aggressor"] = _aggressor_audit(state, intel)
-    except Exception as exc:
-        _obs_note("terminal_api:aggressor_audit", exc, severity="DEGRADED")
-        auditor["aggressor"] = {"state": None, "detail": "auditoría no disponible"}
-
-    try:
-        from .core import flow_view as _FV2
-        auditor["last_known_good"] = _FV2.coverage()
-    except Exception as exc:
-        _obs_note("terminal_api:lkg_coverage", exc, severity="DEGRADED")
-        auditor["last_known_good"] = {"count": None, "detail": "inventario no disponible"}
 
     # ── IDENTIDAD DE GENERACIÓN · v1.55.0 ───────────────────────────────────
     #
@@ -2646,6 +2611,55 @@ def build_terminal_bundle(*, state: Dict[str, Any], trace: Dict[str, Any],
                str(((trace or {}).get("walls") or {}).get("put_wall", {}).get("strike")),
                str(dark_pool_section.get("cycle_id") or "")]
     cycle_id = _hashlib.sha256("|".join(_piezas).encode("utf-8")).hexdigest()[:12]
+
+    auditor = _auditor(state)
+    auditor["dark_pool"] = {
+        "lanes": dark_pool_section.get("lanes") or [],
+        "diagnosis": dark_pool_section.get("diagnosis") or {},
+        # v1.48.0 · Con qué campo se leyó cada magnitud del flujo oscuro y qué
+        # campos publicó el proveedor. Sin esto, un carril que responde con
+        # seiscientos intervalos y un volumen de cero no se puede corregir: no
+        # hay forma de saber si el mercado no tuvo actividad o si el campo se
+        # llama de otra manera.
+        "flow_fields": dark_pool_section.get("flow_fields") or {},
+        "note": ("Tres carriles independientes. Que uno rechace el cuerpo no dice "
+                 "nada sobre los otros dos, y presentarlos juntos hacía parecer "
+                 "rota la sección entera teniendo dos de tres sanos."),
+    }
+    # v1.55.0 · AUTORIDAD ÚNICA DE MUROS, comprobada y no sólo declarada.
+    resumen_block = _resumen(state, trace, intel)
+    auditor["walls"] = wall_consistency(trace, resumen_block, symbol=_sym,
+                                        session_date=_sesion, cycle_id=cycle_id)
+    # El CÁLCULO, no sólo la coincidencia: exposición por strike, interés
+    # abierto, distancia, puntuación, ranking y la fórmula exacta.
+    auditor["wall_calculation"] = (trace or {}).get("wall_audit") or {
+        "authority": "ITMQ_WALL_ENGINE", "note": "el trace no publicó la auditoría"}
+    # IDENTIDAD DE LÍNEAS. Mientras `unidentified` no sea cero, hay una línea
+    # anónima sobre el gráfico de operativa y eso es un defecto abierto.
+    auditor["level_identity"] = ((trace or {}).get("level_identity_audit")
+                                 or {"ok": None, "detail": "el trace no publicó la auditoría"})
+    # ÚLTIMO VALOR BUENO · inventario real, no cobertura declarada. Contesta
+    # «¿qué está protegido y qué no?» sin leer el código, que es la pregunta que
+    # se hace cuando una sección se vacía y la de al lado no.
+    # ── AGRESOR · la auditoría completa, con sus contadores ──────────────
+    #
+    # «Todas las marcas salen neutras» no es accionable. Estos números dicen
+    # CUÁL de los eslabones se rompe y, cuando una marca queda neutral, por qué
+    # exactamente: si la cinta no llegó, si llegó sin lado, si el lado dice que
+    # se ejecutó al medio —que NO es una avería— o si no hubo dominancia.
+    try:
+        auditor["aggressor"] = _aggressor_audit(state, intel)
+    except Exception as exc:
+        _obs_note("terminal_api:aggressor_audit", exc, severity="DEGRADED")
+        auditor["aggressor"] = {"state": None, "detail": "auditoría no disponible"}
+
+    try:
+        from .core import flow_view as _FV2
+        auditor["last_known_good"] = _FV2.coverage()
+    except Exception as exc:
+        _obs_note("terminal_api:lkg_coverage", exc, severity="DEGRADED")
+        auditor["last_known_good"] = {"count": None, "detail": "inventario no disponible"}
+
 
     return {
         "ready": bool(state.get("ready")),

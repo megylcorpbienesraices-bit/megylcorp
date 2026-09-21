@@ -70,22 +70,45 @@ se contrasta contra fórmulas cerradas y no depende de ningún proveedor.
 
 ---
 
-## Repaso punto por punto · lo que encontré al revisar
+## Repaso punto por punto · los nueve huecos que encontré
 
-Revisé los 55 puntos contra el código y encontré **cuatro huecos** que había
-dado por cerrados sin estarlo. Los tres primeros ya están corregidos:
+La primera vez que me preguntó si estaban todos contesté que sí. Era falso.
+Revisé los 55 puntos contra el código y aparecieron **nueve huecos** que había
+dado por cerrados. Ocho están corregidos; uno queda parcial y declarado.
 
 | # | Hueco | Estado |
 |---|---|---|
-| 21, 22 | El selector de EXPOSICIÓN sólo ofrecía GEX/DEX/VEX/CHEX. **OI y VOLUMEN faltaban**, aunque el backend ya los publicaba por strike en los dos ejes: el perfil 2D y el relieve 3D leen el mismo `expRows`, así que se quedaban sin dos de las seis magnitudes | ✅ corregido |
-| 27 | El KPI decía **`VWAP SESIÓN`** y enseñaba el VWAP **oscuro** —Σ(precio × acciones) / Σ(acciones) sobre prints `DARK_POOL`—. Son dos medidas distintas y el rótulo afirmaba la equivocada | ✅ corregido |
-| 27 | `OFF-EXCHANGE CONFIRMADOS` es la **suma de `tradeCount`** de Dark Flow (agregado por intervalo) y `PRINT MAYOR OFF-EX` sale de Equity Prints **individuales**. Llamar «prints confirmados» a los dos invitaba a compararlos | ✅ corregido |
-| 6 | «Eliminar todas las lecturas directas a caches legacy». El FlowViewModel **manda** —tarjetas y barras salen de él— pero dejé la cinta local (`S.prints`) como **respaldo** si el modelo no viaja, y los prints individuales del intervalo siguen viniendo del trace | ⚠️ **parcial, a propósito** |
+| 12 | La comparación de muros decía «coinciden» sin declarar **activo, sesión ni ciclo**. Dos capturas de momentos distintos parecían la misma comprobación: no era evidencia archivable | ✅ |
+| 16 | Faltaban **`level_id` y `name`** en cada línea. Sin identificador estable, el Auditor sólo podía decir «hay un `target`», no CUÁL, y `persistence` no tenía a qué agarrarse | ✅ |
+| 21, 22 | El selector de EXPOSICIÓN sólo ofrecía GEX/DEX/VEX/CHEX. **OI y VOLUMEN faltaban**, aunque el backend ya los publicaba en los dos ejes; el perfil 2D y el relieve 3D leen el mismo `expRows`, así que los dos se quedaban sin ellas | ✅ |
+| 25 | `lineage` contaba proveedor → modelo y **ahí se paraba**. Si el proveedor da 608, el modelo publica 608 y la pantalla dibuja 40, el recorte está en el frontend y ninguna de las dos cifras lo delata | ✅ |
+| 26 | El **período** de Dark Pool viajaba en el payload y no se veía. Un notional de sesión al lado de un print de los últimos minutos invita a dividir uno entre otro | ✅ |
+| 27 | El KPI decía **`VWAP SESIÓN`** y enseñaba el VWAP **oscuro**. Dos medidas distintas, rótulo equivocado | ✅ |
+| 27 | `OFF-EXCHANGE CONFIRMADOS` es Σ `tradeCount` (**agregado**) y `PRINT MAYOR OFF-EX` sale de Equity Prints (**individual**). Llamarlos igual invitaba a compararlos | ✅ |
+| 40 | La regresión visual medía **sólo barras**. Campo de calor, relieve 3D, curvas acumuladas y vista RAW de puntos —la mitad de la terminal— no se medían | ✅ |
+| 6 | «Eliminar todas las lecturas legacy». El FlowViewModel **manda**, pero dejé la cinta local como **respaldo** si el modelo no viaja | ⚠️ **parcial** |
 
-Sobre el cuarto: quitar el respaldo dejaría la sección muda ante un backend
-antiguo o un bundle sin `flujo_ordenes`. Preferí que la ruta canónica mande y
-que el respaldo exista, declarado y con su propia prueba, antes que una sección
-que se apaga. **Si prefiere la ruta única sin red, lo quito y lo digo aquí.**
+### Sobre el punto 40
+
+El arnés pasó de **46 paneles a 146**. Los 54 nuevos no tienen «grosor de barra»
+que medir, así que se juzgan por lo que sí puede romperse en ellos: **que
+pinten algo con datos delante**. Un panel en blanco con el dato correcto detrás
+es precisamente el fallo que la suite numérica no ve. Tinta medida: 6,3 %–69,7 %,
+ninguno vacío. Y se prueban con datos positivos, negativos, mixtos y **con
+huecos a propósito**, que es el defecto que corregí en `normalize_matrix`.
+
+### Sobre el punto 6
+
+Quitar el respaldo dejaría la sección muda ante un bundle sin `flujo_ordenes`.
+Preferí que la ruta canónica mande y que el respaldo exista, declarado y con su
+prueba. **Si prefiere la ruta única sin red, lo quito y lo digo aquí.**
+
+### Lo que el propio proyecto cazó
+
+Al añadir la tarjeta de PERÍODO, la rejilla de Dark Pool pasó de ocho tarjetas a
+nueve en una parrilla de cuatro columnas: dos huérfanas con el hueco al lado. Lo
+detectó `test_dark_pool_kpi_grid_matches_its_card_count`, del propio repositorio.
+Ahora son nueve en tres columnas, tres filas completas.
 
 ---
 

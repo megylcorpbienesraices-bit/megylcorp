@@ -376,9 +376,37 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
         "equity_prints": {"rows": len(prints), "last": scope["equity_prints"]["last"]},
     })
 
+    # v1.56.1 · EL RECUENTO TIENE QUE LLEGAR HASTA LA PANTALLA.
+    #
+    # `lineage` contaba proveedor → modelo, y ahí se paraba. Si el proveedor
+    # entrega 608 filas, el modelo publica 608 y la pantalla dibuja 40, el
+    # recorte está EN EL FRONTEND y ninguna de las dos cifras lo delata: las dos
+    # dicen 608 y la sección enseña otra cosa.
+    #
+    # Cada bloque publica ahora cuántas filas ENTREGA de verdad, que es lo que
+    # el cliente puede contar y comparar contra el origen.
+    entregado = {
+        "dark_flow": len(buckets),
+        "dark_pool_levels": len(levels),
+        "equity_prints": len(prints),
+    }
+    cadena_ok = all(lineage[k]["provider"] == lineage[k]["view_model"] == entregado[k]
+                    for k in entregado)
+
     return {
         "ready": covered > 0,
         "symbol": str(symbol or "").upper() or None,
+        # provider → normalizer → hub → view_model → delivered, con una cifra
+        # por etapa y un veredicto. Lo que dibuje el cliente se compara contra
+        # `delivered`, no contra `provider`.
+        "row_counts": {
+            "provider": {k: lineage[k]["provider"] for k in entregado},
+            "view_model": {k: lineage[k]["view_model"] for k in entregado},
+            "delivered": entregado,
+            "consistent": bool(cadena_ok),
+            "detail": ("el recuento se conserva de extremo a extremo" if cadena_ok else
+                       "alguna etapa recorta filas; ver `lineage` para el motivo"),
+        },
         # Huella del CONJUNTO: distingue «esto es lo de hace diez minutos» de
         # «esto acaba de llegar y resulta que es identico».
         "cycle_id": cycle,

@@ -143,5 +143,6 @@ def test_trace_y_flujo_leen_la_misma_lista_de_niveles():
 
 def test_el_bundle_publica_las_dos_auditorias():
     src = Path("app/terminal_api.py").read_text(encoding="utf-8")
-    assert 'auditor["walls"] = wall_consistency(trace, resumen_block)' in src
+    # v1.56.1 · La comparación lleva ahora su contexto (activo, sesión, ciclo).
+    assert 'auditor["walls"] = wall_consistency(trace, resumen_block, symbol=_sym,' in src
     assert 'auditor["level_identity"]' in src

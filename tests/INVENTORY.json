@@ -3070,8 +3070,30 @@
     "test_un_print_sin_prima_no_se_publica_como_cero_dolares",
     "test_un_spot_ausente_no_selecciona_los_strikes_mas_bajos"
    ]
+  },
+  "tests/test_v1561_repaso_final.py": {
+   "casos": 17,
+   "tests": [
+    "test_cada_linea_lleva_los_nueve_campos_pedidos",
+    "test_el_arnes_cubre_los_cuatro_tipos_que_faltaban",
+    "test_el_arnes_mete_huecos_a_proposito",
+    "test_el_arnes_prueba_datos_positivos_negativos_y_mixtos",
+    "test_el_contexto_no_se_inventa_cuando_no_se_pasa",
+    "test_el_identificador_distingue_dos_lineas_del_mismo_tipo",
+    "test_el_identificador_es_estable_mientras_el_nivel_no_se_mueve",
+    "test_el_nombre_visible_sale_del_motor_o_del_registro_nunca_vacio",
+    "test_el_periodo_tiene_su_tarjeta",
+    "test_el_recuento_llega_hasta_lo_que_se_entrega",
+    "test_la_comparacion_de_muros_declara_de_que_ciclo_es",
+    "test_la_tarjeta_lee_la_ventana_de_cada_carril",
+    "test_las_curvas_se_prueban_de_12_a_780_buckets",
+    "test_las_seis_magnitudes_siguen_en_el_selector",
+    "test_los_kpi_de_dark_pool_dicen_que_miden",
+    "test_los_paneles_sin_barras_se_juzgan_por_si_pintan",
+    "test_un_recorte_por_el_camino_se_denuncia"
+   ]
   }
  },
- "total_minimo": 2522,
+ "total_minimo": 2539,
  "version": "1.56.0"
 }

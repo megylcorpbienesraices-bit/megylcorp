@@ -188,6 +188,94 @@ section('MISMO DATO · viewports distintos · 180 observaciones',
     },
   })));
 
+/* ── 6 · LOS PANELES QUE NO SON BARRAS ──────────────────────────────────
+ *
+ * v1.56.1 · El arnés medía SÓLO `bars` y `hbars`. Con eso queda sin cubrir la
+ * mitad de la terminal: el campo de calor del TRACE y del Interval Map, el
+ * relieve 3D, las curvas acumuladas de Net Drift y la vista RAW de puntos.
+ *
+ * Esos cuatro no se miden con «grosor de barra» —no tienen barras— así que se
+ * comprueba lo que SÍ puede romperse en ellos: que el panel se monte con el
+ * tamaño medido, que produzca un lienzo no vacío y que no lance. Un panel que
+ * no dibuja nada con datos delante es exactamente el fallo que la suite
+ * numérica no ve.
+ */
+function matriz(h, w, seed, signo) {
+  const r = rng(seed);
+  const m = [];
+  for (let y = 0; y < h; y++) {
+    const fila = [];
+    for (let x = 0; x < w; x++) {
+      // Huecos a propósito: el renderizador tiene que saber tratarlos.
+      if (r() < 0.06) { fila.push(null); continue; }
+      const v = (y + 1) * (x + 1) * 1e4 * (r() * 2);
+      fila.push(signo === 'mixto' ? (r() > 0.45 ? v : -v)
+              : signo === 'negativo' ? -v : v);
+    }
+    m.push(fila);
+  }
+  return m;
+}
+
+function serie(n, seed, signo) {
+  const r = rng(seed);
+  const pts = [];
+  let acc = 0;
+  const t0 = Date.UTC(2026, 8, 19, 13, 30);
+  for (let i = 0; i < n; i++) {
+    acc += (r() - (signo === 'negativo' ? 0.72 : signo === 'mixto' ? 0.5 : 0.28)) * 1e5;
+    pts.push({ t: new Date(t0 + i * 60000).toISOString(), v: acc });
+  }
+  return pts;
+}
+
+for (const signo of ['positivo', 'negativo', 'mixto'])
+  section(`Campo continuo · datos ${signo}`,
+    [[13, 40], [45, 90], [90, 160]].map(([h, w]) => ({
+      name: `${h}×${w} ${signo}`, w: 420, h: 260, kind: 'heatmap', n: h,
+      build: host => {
+        const p = ITMQPanels.heatmap(host, { fmtY: v => v.toFixed(2) });
+        p.set(Array.from({ length: h }, (_, i) => 500 + i),
+              Array.from({ length: w }, (_, i) => `14:${String(i % 60).padStart(2, '0')}`),
+              matriz(h, w, 31 + h + w, signo), []);
+        return p;
+      },
+    })));
+
+section('Vista RAW de puntos', [[13, 40], [90, 160]].map(([h, w]) => ({
+  name: `puntos ${h}×${w}`, w: 420, h: 260, kind: 'dotmap', n: h,
+  build: host => {
+    const p = ITMQPanels.dotmap(host, { fmtY: v => v.toFixed(2) });
+    p.set(Array.from({ length: h }, (_, i) => 500 + i),
+          Array.from({ length: w }, (_, i) => `14:${String(i % 60).padStart(2, '0')}`),
+          matriz(h, w, 77 + h, 'mixto'), []);
+    return p;
+  },
+})));
+
+section('Relieve 3D', [12, 45, 90, 180].map(n => ({
+  name: `relieve ${n}`, w: 420, h: Math.max(260, n * 6), kind: 'relief', n,
+  build: host => {
+    const p = ITMQPanels.relief(host, { aggregate: 'none' });
+    p.set(lane(ASSETS[2], n, rng(51 + n)));
+    return p;
+  },
+})));
+
+for (const signo of ['positivo', 'negativo', 'mixto'])
+  section(`Curvas acumuladas · ${signo}`, [12, 120, 390, 780].map(n => ({
+    name: `${n} buckets ${signo}`, w: 460, h: 220, kind: 'lines', n,
+    build: host => {
+      const p = ITMQPanels.lines(host, { fmt: v => String(Math.round(v)) });
+      p.set([
+        { name: 'CALL', color: '#22c55e', points: serie(n, 11 + n, signo) },
+        { name: 'PUT', color: '#ef4444', points: serie(n, 12 + n, signo) },
+        { name: 'NETO', color: '#38bdf8', width: 2, points: serie(n, 13 + n, signo) },
+      ]);
+      return p;
+    },
+  })));
+
 /* ── Informe de geometría REAL para la comprobación automática ───────────
    Se lee el plan que el componente calculó con el ancho medido del panel, no
    una simulación: si el panel dibuja rayitas, aquí salen rayitas. */
@@ -196,6 +284,32 @@ window.__harnessReport = function () {
   return PANELS.map(p => {
     const host = document.getElementById(p.id);
     const rect = host.getBoundingClientRect();
+
+    /* Los paneles que NO son barras se miden por lo que SÍ puede romperse en
+     * ellos: que se monten con el tamaño medido y que pinten algo. Un panel que
+     * no dibuja nada con datos delante es el fallo que la suite numérica no ve. */
+    if (p.kind !== 'bars' && p.kind !== 'hbars') {
+      const cv = host.querySelector('canvas');
+      let pintado = 0;
+      if (cv && cv.width > 0 && cv.height > 0) {
+        try {
+          const g = cv.getContext('2d');
+          const px = g.getImageData(0, 0, cv.width, cv.height).data;
+          // Cuántos píxeles llevan algo dibujado encima del fondo.
+          for (let i = 3; i < px.length; i += 4 * 97) if (px[i] > 8) pintado++;
+        } catch (e) { pintado = -1; }
+      }
+      const muestras = cv ? Math.ceil((cv.width * cv.height) / 97) : 0;
+      const note = document.getElementById(p.id + '_n');
+      if (note) note.textContent = `${p.kind} · ${pintado}/${muestras} px`;
+      return {
+        id: p.id, name: p.name, kind: p.kind, n: p.n,
+        extent_px: Math.round(rect.width), painted: pintado, samples: muestras,
+        ink: muestras > 0 ? pintado / muestras : 0,
+        bins: p.n, group: 1, thickness: null, gap: null, pitch: null,
+        aggregated: false, occupancy: null,
+      };
+    }
     // Márgenes reales de cada tipo de panel, los mismos que usa el renderizador.
     const m = p.kind === 'hbars' ? { l: 62, r: 16, t: 10, b: 24 } : { l: 52, r: 16, t: 14, b: 26 };
     const extent = p.kind === 'hbars'

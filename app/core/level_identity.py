@@ -233,8 +233,22 @@ def describe(levels: List[Dict[str, Any]], *, symbol: str,
                 magnitude, magnitude_field = v, f
                 break
         out.append({
+            # v1.56.1 · `level_id` faltaba. Sin un identificador ESTABLE, dos
+            # líneas del mismo tipo a precios distintos —dos objetivos, dos
+            # zonas— no se pueden referenciar ni seguir entre ciclos: el
+            # Auditor sólo podía decir «hay un `target`», no CUÁL.
+            #
+            # Se compone de tipo y precio a propósito: el mismo nivel en el
+            # mismo sitio conserva su id entre ciclos, y uno que se mueve
+            # estrena identidad, que es lo que hace que `persistence` signifique
+            # algo.
+            "level_id": f"{kind or 'SIN_KIND'}@{price:.4f}",
             "price": price,
             "type": kind or "SIN_KIND",
+            # El nombre que la pantalla enseña: el del motor si lo publica, el
+            # del registro si no. `engine_name` sigue viajando crudo al lado
+            # para poder distinguir uno del otro.
+            "name": lv.get("name") or (origin or {}).get("label") or kind or "SIN NOMBRE",
             # El nombre que el motor le puso, sin tocar. Si viene vacío, se dice.
             "engine_name": lv.get("name") or None,
             "source": (lv.get("authority") or (origin or {}).get("function")
