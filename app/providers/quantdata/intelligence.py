@@ -27,7 +27,7 @@ from .tools import (build_catalog, is_missing_tool_error, is_validation_error,
                     TOOL_FORBIDDEN_FIELDS,
                     STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
-from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS
+from .shared import RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa
 from ...core.obs import note as _obs_note, expected as _obs_expected
 from ...core.data_hub_runtime import HUB_RUNTIME
 
@@ -459,7 +459,8 @@ class QuantDataIntelligence:
             # una cuarta: se arregla leyendo el diagnóstico.
             for _attempt in range(3):
                 body = tool.request_body(ticker)
-                QUOTA.spend(1)
+                # La cuota la anota el cliente, que es el único sitio por donde
+                # pasan los dos carriles. Ver `QuantDataClient.post`.
                 outcome, detail = await self._attempt(tool, path, body, ticker, epoch)
                 if outcome == "OK":
                     return
@@ -687,15 +688,8 @@ class QuantDataIntelligence:
                           "declarado de la herramienta")
             else:
                 pausa = dict(sch.get("pages_paused") or {})
-                if pausa.get("reason") == "PLAN_AGOTADO":
-                    accion = (f"CUOTA DEL PLAN AGOTADA: quedan {pausa.get('remaining')} de "
-                              f"{pausa.get('limit')} y la reserva del motor es "
-                              f"{pausa.get('engine_reserve')}. El carril de páginas está "
-                              "PARADO hasta que el proveedor reinicie la ventana. No es el "
-                              "endpoint ni la autorización")
-                elif pausa.get("reason") == "RATE_LIMITED":
-                    accion = (f"el proveedor está limitando el ritmo; reabre en "
-                              f"{pausa.get('seconds')} s")
+                if pausa:
+                    accion = describir_pausa(pausa)
                 else:
                     accion = ("exigible y aún sin turno: es PRESUPUESTO DE CUOTA por ciclo, "
                               "no el proveedor. Si persiste con cuota libre, es el programador")

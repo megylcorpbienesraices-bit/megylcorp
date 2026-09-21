@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2852 casos / 183 ficheros**.
+sentinela en vez de describirlo. Inventario: **2859 casos / 183 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,4 +272,56 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2852 casos / 183 ficheros**.
+25 regresiones nuevas. Inventario: **2859 casos / 183 ficheros**.
+
+## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
+
+La documentación oficial publica:
+
+```
+240 peticiones / 60 s   en VENTANA DESLIZANTE
+ 20 peticiones /  1 s   de ráfaga
+X-RateLimit-Reset       segundos hasta que el cubo se rellena
+```
+
+Con eso escrito, la revisión anterior estaba equivocada en sus dos conclusiones:
+
+- **`Reset: 60` no era una señal dudosa.** Se trataba como «una ventana tan corta
+  no puede ser el plan» y se acotaba el ritmo con una ventana DIARIA inventada.
+  Con el contrato real, 240/60 s son 4 peticiones por segundo sostenidas y el
+  carril del motor —4 cada 15 s— consume **el 6,7 %**. Nunca estuvo quemando el
+  plan, y la «corrección» bajaba su ciclo a 1.920 s (32 minutos), que habría
+  dejado la terminal inservible. Revertido: la base del ritmo es el contrato y
+  las cabeceras, no una conjetura.
+- **`remaining = 7` no era un plan agotado.** En una ventana deslizante son las
+  233 anteriores todavía dentro de los últimos 60 s; se reponen solas conforme
+  salen por el otro extremo. Es una espera de **segundos**. El veredicto
+  `PLAN_AGOTADO` desaparece, y con él el consejo de declarar 86.400 s.
+
+Lo que sí faltaba de verdad, y es lo que entra ahora:
+
+1. **ITM QUANT no llevaba ningún contador propio.** Se enteraba de haberse pasado
+   cuando llegaba el 429. Ahora hay dos ventanas deslizantes reales —240/60 s y
+   20/1 s— que frenan **antes** de pedir. Una ventana deslizante de verdad, no un
+   cubo fijo: una petición hecha hace 59,5 s todavía cuenta.
+2. **Las cuatro cabeceras se leen dinámicamente** —`X-RateLimit-Limit`,
+   `-Remaining`, `-Reset` y `Retry-After`— y también **en las respuestas de
+   error**, que es justo cuando el presupuesto se quedaba ciego. Si el proveedor
+   cambia el tope, se adopta solo.
+3. **Una sola contabilidad.** Antes el carril del motor hacía `note()` +
+   `spend()` y el de páginas sólo `spend()`: la mitad de las respuestas no
+   actualizaba la telemetría y cada petición del motor se contaba dos veces.
+   Ahora cuenta `QuantDataClient.post`, el único sitio por donde pasan los dos.
+4. **La ráfaga de arranque respeta las 20/s.** Era 5 en paralelo cada 1,2 s sin
+   ningún freno propio: el origen más probable de los 429.
+5. **El Auditor nombra el freno exacto** —ráfaga, ventana deslizante, reserva del
+   motor o 429— con los segundos que dura, y dice que es transitorio.
+6. `Retry-After` llega al guardián **sin mezclarse** con `Reset`, y el suelo de
+   espera del 429 baja de 30 s a 1 s: con una ventana de 60 s, esperar 30
+   tiraba media ventana a la basura.
+
+Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
+Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
+contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
+una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
+ráfaga. Inventario: **2859 casos / 183 ficheros**.

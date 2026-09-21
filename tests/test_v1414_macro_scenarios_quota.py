@@ -87,11 +87,20 @@ def test_a_small_dip_is_not_mistaken_for_a_reset(quota):
     assert quota.window_samples == 0
 
 
-def test_without_any_telemetry_the_daily_window_is_assumed(quota):
-    """Equivocarse por lento cuesta frescura; por rápido cuesta la sesión entera."""
+def test_without_any_telemetry_the_PUBLISHED_contract_is_assumed(quota):
+    """v1.57.3 · Antes se asumía una ventana DIARIA a falta de cabeceras.
+
+    Quant Data publica 240 peticiones / 60 s deslizante. Con el contrato escrito,
+    caer a 240/día no es prudencia sino un ciclo cada 32 minutos por una ventana
+    inventada. Se asume el contrato, y se comprueba que cabe de sobra.
+    """
+    from app.providers.quantdata.shared import SUSTAINED_LIMIT, SUSTAINED_WINDOW_S
+
     quota.note(remaining=None, limit=240, reset_seconds=None)
-    assert quota.recommended_interval(4) > 900.0
-    assert quota.snapshot()["window_source"] == "ASUMIDA_DIARIA"
+    intervalo = quota.recommended_interval(4)
+    assert intervalo == 15.0
+    assert (SUSTAINED_WINDOW_S / intervalo) * 4 <= SUSTAINED_LIMIT * 0.1
+    assert quota.snapshot()["window_source"] == "CONTRATO"
 
 
 def test_recommended_interval_is_bounded(quota):

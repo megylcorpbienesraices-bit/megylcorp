@@ -412,10 +412,9 @@ class QuantDataRuntime:
         self._status["remaining"] = response.remaining
         self._status["limit"] = response.limit
         self._status["reset_seconds"] = response.reset_seconds
-        # Las cabeceras de cuota son de la cuenta, no de este carril: el carril de
-        # páginas necesita verlas para no vaciar el presupuesto de la estructura.
-        QUOTA.note(remaining=response.remaining, limit=response.limit, reset_seconds=response.reset_seconds)
-        QUOTA.spend(1)
+        # v1.57.3 · La cuota ya la anota `QuantDataClient.post`, que es por donde
+        # pasan LOS DOS carriles. Repetirlo aquí contaba dos veces cada petición
+        # del motor y dejaba el presupuesto de páginas más apretado de lo real.
         return response.payload
 
     async def refresh_once(self) -> dict[str, Any]:

@@ -155,7 +155,15 @@ def test_pages_lane_reuses_every_endpoint_the_engine_already_fetched():
 def test_engine_lane_publishes_raw_payloads_for_sharing():
     src = text("app/providers/quantdata/runtime.py")
     assert "RAW_CACHE.put(_name, target.active_symbol, _payload)" in src
-    assert "QUOTA.note(" in src and "QUOTA.spend(1)" in src
+    # v1.57.3 · La contabilidad de cuota vive en `QuantDataClient.post`, el único
+    # sitio por el que pasan LOS DOS carriles. Antes cada uno anotaba lo suyo: el
+    # del motor hacía `note()` + `spend()` y el de páginas sólo `spend()`, así que
+    # la mitad de las respuestas no actualizaba las cabeceras y cada petición del
+    # motor se contaba dos veces. La garantía es más fuerte ahora, no más débil:
+    # ningún carril puede contar por su cuenta ni saltarse el contador.
+    assert "QUOTA.spend(" not in src, "el carril del motor vuelve a contar por su cuenta"
+    cliente = text("app/providers/quantdata/client.py")
+    assert "QUOTA.spend(1)" in cliente and "QUOTA.note(remaining=remaining" in cliente
 
 
 def test_raw_cache_expires_so_stale_data_is_never_shown_as_fresh():
@@ -211,7 +219,9 @@ def test_rate_limit_stops_both_lanes_not_just_one():
 def test_client_reports_rate_limit_to_the_shared_budget():
     src = text("app/providers/quantdata/client.py")
     block = src[src.find("if response.status_code == 429:"):]
-    assert "QUOTA.note_rate_limited(wait)" in block
+    # `Retry-After` llega SIN mezclar con `Reset`: el guardián cae a `Reset` solo
+    # si la cabecera no viene, y así puede distinguir una de otra en el Auditor.
+    assert "QUOTA.note_rate_limited(retry_after)" in block
 
 
 def test_unknown_quota_advances_slowly_instead_of_blindly():
@@ -466,14 +476,27 @@ def test_nearly_exhausted_quota_backs_off_on_its_own():
     assert q.recommended_interval(ENGINE_FAST_REQUESTS) >= 300
 
 
-def test_unknown_window_assumes_the_most_restrictive_one():
-    """Equivocarse por lento cuesta frescura; por rápido deja la terminal muda."""
-    from app.providers.quantdata.shared import QuotaGuard, ENGINE_FAST_REQUESTS
+def test_unknown_window_falls_back_to_the_PUBLISHED_contract():
+    """v1.57.3 · Esta prueba exigía asumir una ventana DIARIA cuando el proveedor
+    no manda `Reset`. Era una precaución de cuando no conocíamos el plan.
+
+    La documentación de Quant Data publica 240 peticiones / 60 s en ventana
+    deslizante. Asumir 240/día con eso escrito no es prudencia: es estrangular la
+    terminal a un ciclo cada 32 minutos por una ventana que nadie ha contratado.
+    Lo que se exige ahora es lo correcto —vivir dentro del contrato publicado— y
+    se sigue midiendo con el mismo criterio: que el carril del motor no se acerque
+    al tope.
+    """
+    from app.providers.quantdata.shared import (
+        QuotaGuard, ENGINE_FAST_REQUESTS, SUSTAINED_LIMIT, SUSTAINED_WINDOW_S)
 
     q = QuotaGuard()
     q.note(remaining=None, limit=240, reset_seconds=None)
-    per_hour = (3600.0 / q.recommended_interval(ENGINE_FAST_REQUESTS)) * ENGINE_FAST_REQUESTS
-    assert per_hour <= 240
+    por_ventana = (SUSTAINED_WINDOW_S / q.recommended_interval(ENGINE_FAST_REQUESTS)) * ENGINE_FAST_REQUESTS
+    assert por_ventana <= SUSTAINED_LIMIT
+    assert por_ventana <= SUSTAINED_LIMIT * 0.1, (
+        f"{por_ventana:.0f} de {SUSTAINED_LIMIT} por ventana: el carril del motor "
+        "tiene que seguir siendo una fracción pequeña del contrato")
 
 
 def test_engine_tiers_endpoints_by_how_fast_they_actually_move():

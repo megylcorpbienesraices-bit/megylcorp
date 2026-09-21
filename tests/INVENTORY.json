@@ -1757,7 +1757,7 @@
     "test_terminal_modules_parse_under_node",
     "test_trace_profile_has_no_undeclared_identifier",
     "test_unknown_quota_advances_slowly_instead_of_blindly",
-    "test_unknown_window_assumes_the_most_restrictive_one",
+    "test_unknown_window_falls_back_to_the_PUBLISHED_contract",
     "test_vwap_is_absent_rather_than_zero_without_volume",
     "test_vwap_is_computed_on_the_backend_from_the_same_candles"
    ]
@@ -1843,7 +1843,7 @@
     "test_snapshot_does_not_deadlock",
     "test_the_heatmap_panel_exists_for_the_interval_map",
     "test_window_is_learned_from_the_counter_resetting",
-    "test_without_any_telemetry_the_daily_window_is_assumed"
+    "test_without_any_telemetry_the_PUBLISHED_contract_is_assumed"
    ]
   },
   "tests/test_v1414_quant_engine_formula_audit.py": {
@@ -3377,33 +3377,44 @@
     "test_una_herramienta_ya_servida_cuenta_desde_su_ultimo_exito"
    ]
   },
-  "tests/test_v1572_cuota_del_plan.py": {
-   "casos": 25,
+  "tests/test_v1573_contrato_de_cuota.py": {
+   "casos": 32,
    "tests": [
-    "test_con_el_plan_agotado_la_rafaga_no_pide_nada",
-    "test_con_el_plan_sano_no_se_inventa_una_pausa",
-    "test_con_el_proveedor_limitando_la_rafaga_no_pide_nada",
-    "test_el_auditor_lo_ENSEÑA_en_una_linea",
-    "test_el_diagnostico_por_herramienta_nombra_la_cuota_exacta",
-    "test_el_guardian_publica_por_que_estan_paradas_las_paginas",
-    "test_el_limite_de_ritmo_tambien_se_nombra",
-    "test_el_plan_DECLARADO_manda_sobre_toda_conjetura",
-    "test_el_programador_aplica_el_tope_de_la_rafaga",
-    "test_el_snapshot_lo_lleva_al_auditor",
-    "test_el_umbral_de_credibilidad_es_explicito",
-    "test_la_pastilla_se_pone_en_rojo_cuando_esta_parado",
+    "test_con_pocas_restantes_la_espera_es_de_SEGUNDOS_y_se_dice_transitoria",
+    "test_el_429_para_los_DOS_carriles",
+    "test_el_carril_del_motor_conserva_su_reserva_cuando_las_paginas_no_pueden",
+    "test_el_cliente_anota_la_peticion_ANTES_de_hacerla",
+    "test_el_cliente_lee_las_CUATRO_cabeceras",
+    "test_el_contador_local_frena_aunque_el_servidor_diga_que_queda_de_todo",
+    "test_el_contador_y_las_cabeceras_se_aplican_los_DOS",
+    "test_el_freno_sostenido_muerde_cuando_toca",
+    "test_el_limite_del_servidor_se_adopta_dinamicamente",
+    "test_el_plan_declarado_por_el_operador_sigue_mandando",
+    "test_el_ritmo_del_motor_sale_del_contrato_y_cabe_de_sobra",
+    "test_el_snapshot_es_json_estricto",
+    "test_el_snapshot_publica_el_contrato_y_lo_gastado",
+    "test_la_espera_del_429_no_puede_tirar_media_ventana_a_la_basura",
+    "test_la_espera_del_429_nunca_supera_la_ventana_sostenida",
+    "test_la_espera_es_la_del_hueco_mas_proximo",
     "test_la_pausa_coincide_SIEMPRE_con_el_presupuesto_real",
-    "test_la_rafaga_no_se_come_la_reserva_del_motor",
-    "test_la_rafaga_sigue_sirviendo_para_lo_que_existe",
-    "test_la_ventana_MEDIDA_manda_sobre_la_cabecera",
-    "test_ninguna_ventana_corta_supera_el_ritmo_diario",
-    "test_sin_telemetria_la_rafaga_no_se_bloquea",
-    "test_sin_telemetria_no_se_corre",
-    "test_un_reset_de_un_minuto_NO_autoriza_a_quemar_el_plan",
-    "test_un_reset_largo_SI_describe_el_plan_y_se_respeta"
+    "test_la_rafaga_de_arranque_no_puede_cruzar_las_20_por_segundo",
+    "test_la_rafaga_del_contrato_se_agota_en_un_segundo_y_se_repone_al_siguiente",
+    "test_la_rafaga_nunca_se_come_la_reserva_del_motor",
+    "test_la_ventana_suelta_por_el_extremo_viejo",
+    "test_las_cabeceras_se_adoptan_tambien_en_las_respuestas_de_ERROR",
+    "test_las_constantes_son_las_del_contrato_oficial",
+    "test_ningun_carril_cuenta_por_su_cuenta",
+    "test_ningun_veredicto_dice_ya_que_el_plan_esta_agotado",
+    "test_retry_after_llega_al_guardian_sin_intermediarios",
+    "test_retry_after_manda_sobre_todo",
+    "test_sin_cabeceras_todavia_se_asume_el_CONTRATO_no_una_ventana_diaria",
+    "test_sin_retry_after_se_usa_el_reset_de_la_cabecera",
+    "test_un_reset_de_60_segundos_ya_NO_se_trata_como_sospechoso",
+    "test_una_respuesta_suelta_NO_levanta_la_retencion_antes_de_tiempo",
+    "test_una_ventana_deslizante_no_permite_el_doble_en_el_cambio_de_cubo"
    ]
   }
  },
- "total_minimo": 2852,
+ "total_minimo": 2859,
  "version": "1.56.0"
 }

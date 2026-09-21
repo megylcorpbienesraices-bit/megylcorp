@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, Tuple
 
 
@@ -40,10 +41,29 @@ def _env_float(name: str, default: float | None) -> float | None:
 # número de peticiones restantes, el carril de páginas no pide nada.
 ENGINE_RESERVE = 12
 
-#: Por debajo de esta ventana, la cabecera `Reset` describe un CUBO DE RITMO y no
-#: el plan contratado. Cinco minutos: ningún plan se renueva más rápido, y todo
-#: limitador de ritmo que hemos visto cabe por debajo.
-VENTANA_CREIBLE_S = 300.0
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTRATO OFICIAL DE QUANT DATA
+#
+#   240 peticiones / 60 s   en VENTANA DESLIZANTE
+#    20 peticiones /  1 s   de ráfaga
+#   `X-RateLimit-Reset`     segundos hasta que el cubo se rellena
+#
+# Son DOS límites simultáneos y hay que respetar los dos: cumplir 240/60 no
+# autoriza a lanzar 30 peticiones en el mismo segundo.
+#
+# v1.57.3 · Esto sustituye a la heurística `VENTANA_CREIBLE_S = 300`, que trataba
+# un `Reset: 60` como una señal dudosa y acotaba el ritmo con una ventana DIARIA.
+# Era falso y caro: con el contrato real, 240/60 s son 4 peticiones por segundo
+# sostenidas, y el carril del motor —4 peticiones cada 15 s— consume el 6,7 % del
+# presupuesto. Nunca estuvo quemando el plan.
+#
+# Y la consecuencia que sí importa: en una ventana DESLIZANTE, `remaining = 7` no
+# es «plan agotado». Es una condición TRANSITORIA que se repone sola en menos de
+# 60 s según van saliendo las peticiones viejas por el otro extremo.
+SUSTAINED_LIMIT = 240
+SUSTAINED_WINDOW_S = 60.0
+BURST_LIMIT = 20
+BURST_WINDOW_S = 1.0
 
 # Un payload compartido más viejo que esto ya no representa el ciclo actual y se
 # vuelve a pedir en lugar de mostrarse como si fuera fresco.
@@ -94,8 +114,98 @@ class RawCache:
             }
 
 
+def describir_pausa(pausa: Dict[str, Any] | None) -> str:
+    """Una frase que dice qué freno del CONTRATO está mordiendo y cuánto dura.
+
+    Los cuatro son transitorios y ninguno es un fallo del proveedor ni de
+    autorización. Decirlo mal —«plan agotado»— mandaba a buscar el fallo donde no
+    estaba y a cambiar credenciales que funcionaban.
+    """
+    if not pausa:
+        return ""
+    p = dict(pausa)
+    segundos = p.get("seconds")
+    cuando = f" · se repone en {float(segundos):.0f} s" if segundos is not None else ""
+    motivo = str(p.get("reason") or "")
+    if motivo == "RATE_LIMITED":
+        return (f"el proveedor está limitando el ritmo (429){cuando}. "
+                "Se respeta Retry-After; no es el endpoint ni la autorización")
+    if motivo == "RAFAGA_20_POR_SEGUNDO":
+        return (f"tope de RÁFAGA del contrato: {p.get('burst_limit')} peticiones por "
+                f"{p.get('burst_window_seconds', 1)} s ya usadas{cuando}. Transitorio")
+    if motivo == "VENTANA_DESLIZANTE":
+        return (f"VENTANA DESLIZANTE llena: {p.get('sustained_used')} de "
+                f"{p.get('sustained_limit')} en los últimos "
+                f"{p.get('window_seconds')} s{cuando}. Transitorio: la ventana se "
+                "repone conforme salen las peticiones viejas")
+    if motivo == "RESERVA_DEL_MOTOR":
+        return (f"por debajo de la reserva del motor ({p.get('engine_reserve')}): el "
+                f"proveedor publica {p.get('remaining')} restantes{cuando}. La "
+                "estructura tiene preferencia; es transitorio, no un plan agotado")
+    return f"carril de páginas en pausa ({motivo}){cuando}"
+
+
+class VentanaDeslizante:
+    """Contador de una ventana deslizante: `limite` peticiones por `ventana` s.
+
+    Guarda el instante de cada petición y va soltando por el extremo viejo. No es
+    un cubo que se vacía de golpe cada minuto —eso sería una ventana FIJA y
+    permitiría el doble de peticiones en el cambio de cubo—: aquí una petición
+    hecha hace 59,5 s todavía cuenta, y deja de contar medio segundo después.
+    """
+
+    __slots__ = ("limite", "ventana", "_sellos")
+
+    def __init__(self, limite: int, ventana: float) -> None:
+        self.limite = int(limite)
+        self.ventana = float(ventana)
+        self._sellos: deque[float] = deque()
+
+    def _podar(self, ahora: float) -> None:
+        corte = ahora - self.ventana
+        while self._sellos and self._sellos[0] <= corte:
+            self._sellos.popleft()
+
+    def usadas(self, ahora: float) -> int:
+        self._podar(ahora)
+        return len(self._sellos)
+
+    def libres(self, ahora: float) -> int:
+        return max(0, self.limite - self.usadas(ahora))
+
+    def espera_s(self, ahora: float) -> float:
+        """Segundos hasta que se libere UN hueco. 0 si ya lo hay."""
+        if self.libres(ahora) > 0:
+            return 0.0
+        return max(0.0, (self._sellos[0] + self.ventana) - ahora)
+
+    def anotar(self, ahora: float, n: int = 1) -> None:
+        for _ in range(max(0, int(n))):
+            self._sellos.append(ahora)
+
+    def reiniciar(self) -> None:
+        self._sellos.clear()
+
+
 class QuotaGuard:
-    """Presupuesto de peticiones común, alimentado por las cabeceras del proveedor."""
+    """Presupuesto común, ceñido al CONTRATO PUBLICADO por Quant Data.
+
+    v1.57.3 · Antes esto era una adivinanza sobre cuál sería la ventana del plan.
+    Ya no hace falta adivinar nada: el contrato dice 240/60 s deslizante y 20/1 s
+    de ráfaga, y `X-RateLimit-Reset` son los segundos hasta que el cubo se rellena.
+
+    De modo que aquí hay DOS autoridades, y las dos mandan a la vez:
+
+      * CONTADOR LOCAL — lo que ITM QUANT ya ha pedido, en las dos ventanas. Es
+        el que impide pasarse ANTES de que el proveedor tenga que decirnos que
+        nos hemos pasado. Un 429 evitado no cuesta nada; uno recibido cuesta el
+        ciclo entero y arrastra a los dos carriles.
+      * CABECERAS — `X-RateLimit-Limit`, `-Remaining`, `-Reset` y `Retry-After`.
+        Son la verdad del servidor y se leen en cada respuesta, incluidas las de
+        error. Si el proveedor cambia el plan, el límite se adopta solo.
+
+    El mínimo de las dos es el presupuesto. Ninguna puede relajar a la otra.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -104,95 +214,165 @@ class QuotaGuard:
         self.reset_seconds: float | None = None
         self.updated_at: float = 0.0
         self.rate_limited_until: float = 0.0
-        # Ventana del plan aprendida observando cuándo se reinicia el contador.
+        self.retry_after_s: float | None = None
+        # Las dos ventanas del contrato. El límite sostenido se re-ajusta solo si
+        # el proveedor publica otro en `X-RateLimit-Limit`.
+        self._sostenida = VentanaDeslizante(SUSTAINED_LIMIT, SUSTAINED_WINDOW_S)
+        self._rafaga = VentanaDeslizante(BURST_LIMIT, BURST_WINDOW_S)
+        # Ventana del plan aprendida observando cuándo se repone el contador.
+        # Con el contrato conocido es corroboración, no la base del ritmo.
         self.observed_window_s: float | None = None
         self.window_samples: int = 0
         self._last_reset_at: float | None = None
-        # Presupuesto declarado por el operador. Cuando existe, manda sobre
-        # cualquier inferencia: es el dato que el proveedor no siempre publica bien.
+        # Presupuesto declarado por el operador. Cuando existe, manda sobre todo.
         self.declared_requests: float | None = _env_float("QUANTDATA_PLAN_REQUESTS", None)
         self.declared_window_s: float | None = _env_float("QUANTDATA_PLAN_WINDOW_SECONDS", None)
 
-    def note(self, *, remaining: int | None, limit: int | None, reset_seconds: float | None) -> None:
+    # ------------------------------------------------------------ telemetría
+
+    def note(self, *, remaining: int | None, limit: int | None,
+             reset_seconds: float | None) -> None:
+        """Adopta las cabeceras de una respuesta. Se llama SIEMPRE, también en error."""
         now = time.time()
         with self._lock:
             prev = self.remaining
             if remaining is not None:
-                # Un salto hacia ARRIBA sólo ocurre cuando el proveedor reinicia la
-                # ventana. Medir ese periodo es la única forma fiable de saber si el
-                # plan es por minuto, por hora o por día: la cabecera Reset no siempre
-                # lo dice, y adivinarlo mal deja la terminal sin datos toda la sesión.
+                # Un salto hacia ARRIBA es el cubo reponiéndose. Medir ese periodo
+                # corrobora la ventana declarada en el contrato.
                 if prev is not None and int(remaining) > prev + 1:
                     if self._last_reset_at:
                         observed = now - self._last_reset_at
-                        if 30.0 <= observed <= 172_800.0:
+                        if 5.0 <= observed <= 172_800.0:
                             self.observed_window_s = observed
                             self.window_samples += 1
                     self._last_reset_at = now
                 elif self._last_reset_at is None:
                     self._last_reset_at = now
                 self.remaining = int(remaining)
-            if limit is not None:
+                # El servidor dice que hay hueco: se levanta la retención.
+                if int(remaining) > 0 and now >= self.rate_limited_until:
+                    self.rate_limited_until = 0.0
+            if limit is not None and int(limit) > 0:
                 self.limit = int(limit)
+                # El contrato puede cambiar sin avisarnos: se adopta el límite que
+                # publica el servidor en vez de conservar la constante compilada.
+                self._sostenida.limite = int(limit)
             if reset_seconds is not None:
                 self.reset_seconds = float(reset_seconds)
             self.updated_at = now
 
     def note_rate_limited(self, retry_after_s: float | None = None) -> None:
-        wait = 30.0 if retry_after_s is None else max(5.0, float(retry_after_s))
+        """429. `Retry-After` manda; si no viene, se usa `Reset`; si tampoco, 1 s.
+
+        v1.57.3 · El suelo era de 30 s, heredado de cuando se creía que la ventana
+        podía ser diaria. Con una ventana deslizante de 60 s, esperar 30 s por un
+        429 tira media ventana a la basura: el hueco se abre según van saliendo
+        las peticiones viejas, no de golpe.
+        """
         with self._lock:
+            reset = self.reset_seconds
+        if retry_after_s is not None:
+            wait = max(0.0, float(retry_after_s))
+        elif reset is not None and reset > 0:
+            wait = float(reset)
+        else:
+            wait = BURST_WINDOW_S
+        wait = max(BURST_WINDOW_S, min(wait, SUSTAINED_WINDOW_S))
+        with self._lock:
+            self.retry_after_s = wait
             self.rate_limited_until = time.time() + wait
             self.remaining = 0
 
     def spend(self, n: int = 1) -> None:
+        """Anota lo pedido en las DOS ventanas. Se llama antes de la petición."""
+        now = time.time()
         with self._lock:
+            self._sostenida.anotar(now, n)
+            self._rafaga.anotar(now, n)
             if self.remaining is not None:
                 self.remaining = max(0, self.remaining - int(n))
+
+    # -------------------------------------------------------- presupuestos
+
+    def _margen(self, now: float, reserva: int) -> int:
+        """Peticiones que caben AHORA, por el más restrictivo de los tres frenos.
+
+        Sin lock: lo toma quien llama.
+        """
+        libre = min(self._sostenida.libres(now), self._rafaga.libres(now))
+        stale = (now - self.updated_at) > 120.0 if self.updated_at else True
+        if self.remaining is not None and not stale:
+            libre = min(libre, int(self.remaining))
+        return max(0, libre - int(reserva))
+
+    def headroom(self, *, reserve: int = 0) -> int:
+        """Cuántas peticiones caben ahora mismo, dejando `reserve` sin tocar."""
+        now = time.time()
+        with self._lock:
+            if now < self.rate_limited_until:
+                return 0
+            return self._margen(now, reserve)
 
     def pages_paused_reason(self) -> Dict[str, Any] | None:
         """Por qué el carril de páginas no puede pedir nada. `None` = puede.
 
-        Es la MISMA condición que aplica `budget_for_pages`, expuesta para que el
+        La misma condición que aplica `budget_for_pages`, expuesta para que el
         Auditor no tenga que deducirla ni el operador adivinarla.
+
+        v1.57.3 · Ya no existe el veredicto «PLAN_AGOTADO». En una ventana
+        DESLIZANTE de 60 s no hay plan que agotar: `remaining = 7` significa que
+        las 233 peticiones anteriores siguen dentro de la ventana, y se reponen
+        solas conforme van saliendo. Es una espera de SEGUNDOS, y decirlo como un
+        agotamiento hacía buscar el fallo donde no estaba.
         """
         now = time.time()
         with self._lock:
             if now < self.rate_limited_until:
                 return {"reason": "RATE_LIMITED",
                         "seconds": round(self.rate_limited_until - now, 1),
+                        "retry_after_s": self.retry_after_s,
                         "remaining": self.remaining, "limit": self.limit}
-            remaining = self.remaining
-            limit = self.limit
+            if self._margen(now, ENGINE_RESERVE) > 0:
+                return None
+            # Qué freno concreto es el que muerde, y cuántos segundos dura.
+            espera_r = self._rafaga.espera_s(now)
+            espera_s = self._sostenida.espera_s(now)
             stale = (now - self.updated_at) > 120.0 if self.updated_at else True
-        if remaining is None or stale:
-            return None
-        if int(remaining) - ENGINE_RESERVE <= 0:
-            return {"reason": "PLAN_AGOTADO", "remaining": int(remaining),
-                    "limit": None if limit is None else int(limit),
-                    "engine_reserve": ENGINE_RESERVE}
-        return None
+            servidor = None if (self.remaining is None or stale) else int(self.remaining)
+            if self._rafaga.libres(now) <= 0:
+                freno, espera = "RAFAGA_20_POR_SEGUNDO", espera_r
+            elif self._sostenida.libres(now) <= 0:
+                freno, espera = "VENTANA_DESLIZANTE", espera_s
+            else:
+                freno = "RESERVA_DEL_MOTOR"
+                espera = max(espera_s, self.reset_seconds or 0.0)
+            return {
+                "reason": freno,
+                "transient": True,
+                "seconds": round(float(espera), 1),
+                "remaining": servidor,
+                "limit": self.limit,
+                "engine_reserve": ENGINE_RESERVE,
+                "window_seconds": self._sostenida.ventana,
+                "sustained_used": self._sostenida.usadas(now),
+                "sustained_limit": self._sostenida.limite,
+                "burst_used": self._rafaga.usadas(now),
+                "burst_limit": self._rafaga.limite,
+            }
 
     def burst_ceiling(self, requested: int) -> int:
         """Tope DURO de la ráfaga de arranque. No es el ritmo: es el límite.
 
-        v1.57.2 · La ráfaga hacía `allowed = max(allowed, len(priority_due))` y se
-        saltaba `budget_for_pages` ENTERA: con el plan en las últimas seguía
-        pidiendo, y podía comerse la reserva del motor —que es la que sostiene la
-        estructura— para dibujar tablas de presentación.
-
-        Aquí la ráfaga conserva su motivo de ser (llenar la pantalla del activo
-        nuevo sin esperar al ritmo de régimen) pero no puede cruzar la reserva ni
-        pedir con el proveedor limitando.
+        La ráfaga existe para llenar la pantalla del activo nuevo sin esperar al
+        ritmo de régimen, y por eso puede saltarse el paso corto de
+        `budget_for_pages`. Lo que NO puede saltarse es el contrato: ni las 20
+        por segundo, ni las 240 de la ventana, ni la reserva del motor.
         """
         now = time.time()
         with self._lock:
             if now < self.rate_limited_until:
                 return 0
-            remaining = self.remaining
-            stale = (now - self.updated_at) > 120.0 if self.updated_at else True
-        if remaining is None or stale:
-            return max(0, int(requested))
-        return max(0, min(int(requested), int(remaining) - ENGINE_RESERVE))
+            return min(max(0, int(requested)), self._margen(now, ENGINE_RESERVE))
 
     def budget_for_pages(self, requested: int) -> int:
         """Cuántas peticiones puede hacer el carril de páginas en este ciclo.
@@ -205,104 +385,98 @@ class QuotaGuard:
         with self._lock:
             if now < self.rate_limited_until:
                 return 0
-            remaining = self.remaining
+            margen = self._margen(now, ENGINE_RESERVE)
             stale = (now - self.updated_at) > 120.0 if self.updated_at else True
-        if remaining is None or stale:
-            # Sin telemetría fiable se avanza despacio en lugar de a ciegas.
-            return max(1, min(int(requested), 4))
-        usable = int(remaining) - ENGINE_RESERVE
-        if usable <= 0:
-            return 0
-        return max(0, min(int(requested), usable))
+            sin_telemetria = self.remaining is None or stale
+        if sin_telemetria:
+            # Sin cabeceras frescas queda el contador local, que ya es un freno
+            # real. Aun así se avanza despacio: el contador no sabe lo que hayan
+            # gastado otras instancias de la misma cuenta.
+            return max(0, min(int(requested), margen, 4))
+        return max(0, min(int(requested), margen))
 
     def recommended_interval(self, requests_per_cycle: int, *, share: float = 0.75,
                              floor_s: float = 15.0, ceil_s: float = 3600.0) -> float:
-        """Segundos mínimos entre ciclos para que el plan aguante toda la sesión.
+        """Segundos mínimos entre ciclos para vivir dentro del contrato.
 
-        Un plan de 240 peticiones no soporta 9 endpoints cada 15 s: son 2160 por
-        hora y la cuota se agota en minutos, que es exactamente lo que dejaba al
-        proveedor DEGRADED con las herramientas envejeciendo en pantalla.
-
-        El ritmo sostenible se deriva de lo que el propio proveedor reporta
-        (`remaining` y `reset_seconds`), no de una constante fija, así que funciona
-        igual si la ventana del plan es por minuto, por hora o por día.
+        v1.57.3 · La base ya no es una conjetura sobre la ventana: es el contrato
+        publicado, 240/60 s, y la cabecera `Limit`/`Reset` cuando el proveedor las
+        manda. Con 4 peticiones por ciclo salen 15 s —el suelo—, que son 16
+        peticiones por minuto: el 6,7 % del presupuesto sostenido.
         """
         n = max(1, int(requests_per_cycle))
         with self._lock:
-            remaining = self.remaining
             limit = self.limit
             reset = self.reset_seconds
             declared_n = self.declared_requests
             declared_w = self.declared_window_s
             observed_w = self.observed_window_s
 
-        # 1 · Presupuesto declarado por el operador: la fuente más fiable, porque
-        #     es el plan que realmente se contrató. Manda sola.
+        # 1 · Presupuesto declarado por el operador: el plan que se contrató.
         if declared_n and declared_w:
             per_second = float(declared_n) / float(declared_w)
-        # 2 · Ventana MEDIDA observando los reinicios reales del contador. Es una
-        #     medición, no una suposición, así que también manda sola.
+        # 2 · Cabeceras del proveedor: tope y ventana, tal cual vienen.
+        elif limit and limit > 0 and reset and reset > 0:
+            per_second = float(limit) / float(reset)
+        # 3 · Ventana medida observando cómo se repone el contador.
         elif limit and limit > 0 and observed_w:
             per_second = float(limit) / float(observed_w)
+        # 4 · El CONTRATO. Ya no se cae a una ventana diaria inventada: el
+        #     proveedor publica 240/60 s y eso es lo que se aplica.
         else:
-            # 3 · Sin plan declarado y sin ventana medida sólo quedan CONJETURAS.
-            #
-            #     v1.57.2 · Aquí estaba el agujero que vaciaba el plan. La cabecera
-            #     Reset se tomaba como si describiera la VENTANA DEL PLAN, y muchas
-            #     veces describe un CUBO DE RITMO: «60 s» no significa que el tope
-            #     contratado se renueve cada minuto. Con `limit = 240` y
-            #     `reset = 60` salían 4 req/s, el intervalo caía al suelo de 15 s y
-            #     el carril del motor se comía las 240 peticiones en QUINCE MINUTOS.
-            #     Lo que se ve después es la terminal entera muda con `remaining`
-            #     de un solo dígito y treinta y cuatro herramientas «sin intentos».
-            #
-            #     Una ventana corta no es prueba del plan: es un limitador de
-            #     ritmo. Por debajo de este umbral la conjetura se acota con la
-            #     ventana DIARIA, que es la más restrictiva.
-            conjeturas = []
-            if remaining and reset and reset > 0:
-                conjeturas.append(float(remaining) / float(reset))
-                if float(reset) >= VENTANA_CREIBLE_S and limit and limit > 0:
-                    # Reset largo: sí describe el plan. Se respeta tal cual.
-                    per_second = conjeturas[0]
-                    budget = max(per_second * max(0.05, min(1.0, share)), 1e-9)
-                    return max(floor_s, min(ceil_s, n / budget))
-            if limit and limit > 0:
-                # Equivocarse por lento sólo cuesta frescura; equivocarse por
-                # rápido agota el plan en minutos y deja la sesión entera sin datos.
-                conjeturas.append(float(limit) / 86_400.0)
-            if not conjeturas:
-                return max(floor_s, 60.0)
-            per_second = min(conjeturas)
+            per_second = float(limit or SUSTAINED_LIMIT) / SUSTAINED_WINDOW_S
 
         budget = max(per_second * max(0.05, min(1.0, share)), 1e-9)
-        return max(floor_s, min(ceil_s, n / budget))
+        interval = max(floor_s, min(ceil_s, n / budget))
+
+        # Y un freno que no depende del ritmo sino del saldo: con menos de la
+        # reserva en la mano no se puede ciclar más rápido de lo que tarda el cubo
+        # en reponerse, por mucho que el ritmo sostenido lo permitiera. En la
+        # ventana deslizante del contrato eso son segundos; con una ventana larga
+        # son los que el proveedor diga en `Reset`.
+        with self._lock:
+            restantes = self.remaining
+            reset_s = self.reset_seconds
+            fresca = bool(self.updated_at) and (time.time() - self.updated_at) <= 120.0
+        if fresca and restantes is not None and int(restantes) <= ENGINE_RESERVE:
+            interval = max(interval, float(reset_s or SUSTAINED_WINDOW_S))
+        return min(ceil_s, interval)
 
     def snapshot(self) -> Dict[str, Any]:
         now = time.time()
-        # Fuera de la sección crítica a propósito: recommended_interval() toma este
-        # mismo lock y threading.Lock no es reentrante.
+        # Fuera de la sección crítica a propósito: vuelven a tomar el lock.
         interval = round(self.recommended_interval(ENGINE_FAST_REQUESTS), 1)
-        # Igual que `interval`: fuera del lock, porque vuelve a tomarlo.
         pausa = self.pages_paused_reason()
         with self._lock:
             return {
                 "remaining": self.remaining,
                 "limit": self.limit,
                 "reset_seconds": self.reset_seconds,
+                "retry_after_seconds": self.retry_after_s,
                 "engine_reserve": ENGINE_RESERVE,
                 "pages_paused": pausa,
                 "rate_limited": now < self.rate_limited_until,
                 "rate_limited_for_seconds": max(0.0, round(self.rate_limited_until - now, 1)),
                 "telemetry_age_seconds": None if not self.updated_at else round(now - self.updated_at, 1),
                 "engine_interval_seconds": interval,
-                "window_seconds": self.declared_window_s or self.observed_window_s,
+                # El contrato, publicado tal cual, y lo que llevamos gastado de él.
+                "contract": {
+                    "sustained_limit": self._sostenida.limite,
+                    "sustained_window_seconds": self._sostenida.ventana,
+                    "sustained_used": self._sostenida.usadas(now),
+                    "burst_limit": self._rafaga.limite,
+                    "burst_window_seconds": self._rafaga.ventana,
+                    "burst_used": self._rafaga.usadas(now),
+                },
+                "window_seconds": (self.declared_window_s or self.reset_seconds
+                                   or self.observed_window_s or SUSTAINED_WINDOW_S),
                 "window_source": ("DECLARADA" if self.declared_window_s
+                                  else "CABECERA" if self.reset_seconds
                                   else "MEDIDA" if self.observed_window_s
-                                  else "ASUMIDA_DIARIA"),
+                                  else "CONTRATO"),
                 "window_samples": self.window_samples,
                 "declared_plan": (None if not self.declared_requests else
-                                  {"requests": self.declared_requests, "window_seconds": self.declared_window_s}),
+                                  f"{int(self.declared_requests)}/{int(self.declared_window_s or 0)}s"),
             }
 
 

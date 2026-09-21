@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from .settings import QuantDataSettings
+from .shared import QUOTA
 from ...version import APP_VERSION
 
 
@@ -174,6 +175,13 @@ class QuantDataClient:
             raise QuantDataError("Quant Data is not configured")
         await self.start()
         assert self._client is not None
+        # v1.57.3 · LA CONTABILIDAD VIVE AQUÍ, EN EL ÚNICO SITIO POR DONDE PASAN
+        # LAS DOS CARRILES. Antes cada carril anotaba lo suyo: el del motor hacía
+        # `note()` + `spend()` y el de páginas sólo `spend()`, así que la mitad de
+        # las respuestas no actualizaba las cabeceras de cuota y el presupuesto se
+        # calculaba con telemetría a medias. Se anota ANTES de pedir, porque una
+        # petición en vuelo ya ocupa sitio en la ventana deslizante.
+        QUOTA.spend(1)
         try:
             response = await self._client.post(path, json=body)
         except httpx.TimeoutException as exc:
@@ -184,14 +192,18 @@ class QuantDataClient:
         remaining = self._int_header(response.headers, "X-RateLimit-Remaining")
         limit = self._int_header(response.headers, "X-RateLimit-Limit")
         reset = self._float_header(response.headers, "X-RateLimit-Reset")
+        # Las cabeceras son de la CUENTA y llegan también en las respuestas de
+        # error. Leerlas sólo en el camino feliz dejaba el presupuesto ciego justo
+        # cuando más importa: cuando el proveedor está devolviendo errores.
+        QUOTA.note(remaining=remaining, limit=limit, reset_seconds=reset)
 
         if response.status_code == 429:
             retry_after = self._float_header(response.headers, "Retry-After")
+            # `Retry-After` manda; el guardián cae a `Reset` si no viene. El límite
+            # es de la cuenta: frenar sólo al carril que recibió el 429 dejaría al
+            # otro gastando peticiones que ya se sabe que van a fallar.
+            QUOTA.note_rate_limited(retry_after)
             wait = retry_after if retry_after is not None else reset
-            # El límite es de la cuenta: frenar sólo al carril que recibió el 429
-            # dejaría al otro gastando peticiones que ya se sabe que van a fallar.
-            from .shared import QUOTA
-            QUOTA.note_rate_limited(wait)
             raise QuantDataError(f"Quant Data rate limited; retry_after={wait}")
         if response.status_code in {401, 403}:
             raise QuantDataError(f"Quant Data authorization failed ({response.status_code})")
