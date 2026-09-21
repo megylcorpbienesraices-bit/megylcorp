@@ -820,11 +820,14 @@
    * gráfico de operativa puede costar dinero; un rombo que dice «no sé» no.
    */
   /* v1.56.0 · Autoridad ÚNICA de la marca, en `itmq_core`. Ver allí por qué
-   * no puede haber dos copias de esto. */
-  const flowSide = Q.flowSide;
-  const flowArrow = Q.flowArrow;
-  const flowAmount = Q.flowAmount;
-  const evStrength = Q.flowStrength;
+   * no puede haber dos copias de esto.
+   *
+   * v1.57.0 · Aquí había cuatro alias locales —`flowSide`, `flowArrow`,
+   * `flowAmount`, `evStrength`— que apuntaban a `Q.*` y que ya no usaba nadie:
+   * las marcas se dibujan con `Q.flowMark`. Un alias muerto con el nombre exacto
+   * de la función duplicada que se elimino es justo la trampa contra la que
+   * avisa el comentario de arriba: alguien lo "corrige" aqui, no cambia nada en
+   * pantalla, y se pasa la tarde buscando por que. */
 
   function markerLabel(ev) {
     if (!ev) return '';

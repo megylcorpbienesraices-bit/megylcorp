@@ -10,9 +10,13 @@
 | `VALIDADO LIVE` | Ejercitado contra la API real con datos de mercado | Que aguante ocho activos una sesión entera |
 | `CERTIFICADO` | Validado LIVE sobre los ocho activos, con evidencia archivada | — |
 
-**Este entorno no tiene credenciales ni salida a `quantdata.us`.** Nada que
-dependa del proveedor puede subir de `TEST SINTÉTICO` sin ejecutar la validación
-en su máquina. Donde pongo otra cosa es porque la comprobación **no depende del
+**Este entorno no tiene credenciales del proveedor.** Medido el 21/09: la
+salida de red a `quantdata.us:443` SÍ funciona; lo que falta es
+`QUANTDATA_API_KEY` y un terminal escuchando en `127.0.0.1:8000`, que es a donde
+apunta el verificador. (Una versión anterior de este documento decía que
+tampoco había salida de red. Era falso, y conviene saberlo: el bloqueo es de
+credenciales, no de conectividad.) Nada que dependa del proveedor puede subir de
+`TEST SINTÉTICO` sin ejecutar la validación en su máquina. Donde pongo otra cosa es porque la comprobación **no depende del
 proveedor**, y lo digo en cada caso.
 
 ---
@@ -64,8 +68,8 @@ se contrasta contra fórmulas cerradas y no depende de ningún proveedor.
 | 15 | Cambio de símbolo transaccional | ✅ `generation_id` + `cycle_id` + commit |
 | 16 | Londres desde 04:00 sin tocar el proveedor | ✅ verificado, incluido el horario de verano |
 | 17 | Validación LIVE multiactivo | ⏳ **PENDIENTE LIVE** · `--cierre` |
-| 18 | Regresión visual final | ✅ 92 paneles en Chromium |
-| 19 | `PACKAGING UNLOCKED` | ⏳ **PENDIENTE** · requiere su toolchain |
+| 18 | Regresión visual final | ✅ **146 paneles** en Chromium (73 + 73 tras redimensionar) |
+| 19 | `PACKAGING UNLOCKED` | ⏳ **PENDIENTE** · requiere su toolchain · *era además inalcanzable: ver auditoría, defecto 5* |
 | 20 | ZIP oficial + SHA256 | ⏳ **PENDIENTE** · depende del 19 |
 
 ---
@@ -176,3 +180,84 @@ Monte Carlo (matemática contra fórmulas cerradas), la geometría de los panele
 del hueco en el Interval Map, el inventario de acumulaciones y la
 transaccionalidad del cambio de activo. **Eso queda congelado como regresión:**
 cada uno tiene pruebas que fallan si alguien lo deshace.
+
+
+---
+
+## Auditoría integral · los cinco defectos que la suite en verde no veía
+
+Se pidió una auditoría completa —arquitectura, datos, normalizadores, Data Hub,
+ViewModels, motor, Scanner, TRACE, Flow, Net Drift, Interval Map, Dark Pool,
+Walls, Monte Carlo, sesiones, LKG, cambio de símbolo, fallbacks, excepciones,
+frontend, rendimiento, pruebas y packaging— sobre un árbol con 2.539 pruebas en
+verde y cero errores de consola.
+
+Aparecieron cinco defectos. Los cinco son de la misma familia: **ninguno lanzaba
+una excepción ni pintaba un número imposible**, así que la suite entera en verde
+los tapaba perfectamente. Se ven midiendo, no leyendo. Y esa es la lección que
+vale más que las correcciones: *2.500 PASS y 0 errores de consola no son una
+demostración de nada por sí solos.*
+
+| # | Defecto | Cómo se midió | Estado |
+|---|---|---|---|
+| 1 | El último valor bueno no caducaba nunca | 30 sesiones × 8 activos × 10 carriles = **2.400 entradas vivas**; `session_mode`: 320 acumulados | ✅ CORREGIDO |
+| 2 | La hora del Scanner era local y sin zona | `datetime.now()` con el resto del proyecto en UTC con zona | ✅ CORREGIDO |
+| 3 | Describir un nivel avanzaba su contador | **2 ciclos reales se publicaban como 5** | ✅ CORREGIDO |
+| 4 | Atribuir concentraciones era cuadrático | 195 ms → 728 ms al doblar entradas (**×3,7**) | ✅ CORREGIDO |
+| 5 | El empaquetado se suspendía a sí mismo | el preflight escribía el `.pyc` que la línea siguiente rechazaba | ✅ CORREGIDO |
+
+### Por qué el 5 importa más de lo que parece
+
+`release_traceability_guard()` importa `verify_release_artifact` de forma
+perezosa. La guarda que evitaba dejar bytecode cubría sólo el import de
+`release_gate_full` y se levantaba justo después, así que ese segundo import
+escribía `scripts/__pycache__/verify_release_artifact.cpython-311.pyc` — y la
+línea **siguiente**, `artifact_cleanliness_guard()`, rechazaba el árbol por
+contener un artefacto de build.
+
+Sobre un árbol limpio la comprobación no podía pasar **nunca**, ni con el
+toolchain correcto. El punto 19 de la tabla de arriba no estaba sólo esperando a
+Python 3.12: estaba muerto. Ahora el preflight llega hasta el veredicto real y
+deja cero ficheros nuevos.
+
+### Rendimiento del camino de refresco, tras la corrección 4
+
+| carga | antes | después |
+|---|---|---|
+| 390 concentraciones × 1.500 operaciones | 195,5 ms | **64,7 ms** |
+| 780 × 3.000 | 728,2 ms (×3,7) | **133,5 ms (×2,06)** |
+| 1.560 × 6.000 | — | **245,4 ms (×1,84)** |
+
+El resto del camino se sondeó y es lineal: `classify_trade` ×6.000 = 18,5 ms,
+`bucketize` ×6.000 = 17,2 ms, `build_evidence` ×4.000 = 1,7 ms.
+
+### Limpieza posterior · nueve alias muertos en el frontend
+
+La unificación de la marca de flujo en `itmq_core` dejó nueve alias locales
+—`flowArrow`, `flowAmount`, `markerStrength`, `markerAmount`, `evStrength`,
+`LEVEL_STYLE`— que apuntaban a `Q.*` y que no llamaba nadie. No cambiaban nada en
+pantalla, pero llevan el nombre exacto de las funciones duplicadas que se
+eliminaron: alguien los "corrige", no ve ningún efecto y pierde la tarde. Una
+prueba exigía incluso que `LEVEL_STYLE` **siguiera existiendo**, que es guardar
+la forma en vez del fondo; ahora comprueba que TRACE pida el estilo a
+`Q.levelStyle` y no tenga tabla propia.
+
+### Las regresiones
+
+`tests/test_v1570_auditoria_integral.py` · 15 casos. **Los quince fallan contra
+la versión anterior**, comprobado revirtiendo cada corrección una a una.
+
+Ninguno mide el reloj de pared, que sería inestable en una máquina cargada: el
+de rendimiento cuenta **restas de instantes** —exacto y reproducible— y devuelve
+×4,00 sobre el código viejo. El de empaquetado mide el **delta** de residuo, no
+el estado, porque la propia suite deja su `__pycache__` al ejecutarse y exigir un
+árbol limpio haría la prueba dependiente de quién corriera antes.
+
+### Lo que sigue bloqueado, y por qué no es mío
+
+- **Validación LIVE**: falta `QUANTDATA_API_KEY` y un terminal en
+  `127.0.0.1:8000`. `scripts/verify_live_quantdata.py --cierre` está listo y
+  devuelve `ConnectError: Connection refused` en los ocho tickers.
+- **ZIP certificado**: `Python 3.11.15 ≠ 3.12.14`, `Node 22.22.2 ≠ 22.16.0`,
+  `npm 10.9.7 ≠ 10.9.2`, y `pip-audit` / `ruff` / `pyzmq` ausentes. El gate es
+  fail-closed a propósito y no se ha tocado.

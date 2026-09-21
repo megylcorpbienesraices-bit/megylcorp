@@ -85,7 +85,9 @@
 
   // Los estilos de nivel viven en el núcleo para que TRACE y el panel de flujo
   // dibujen el mismo precio con el mismo color y el mismo nombre.
-  const LEVEL_STYLE = Q.LEVELS;
+  /* v1.57.0 · `LEVEL_STYLE` era un alias muerto de `Q.LEVELS`: los estilos se
+   * piden por `Q.levelStyle(kind)`, que ademas DENUNCIA el `kind` desconocido
+   * en vez de pintarlo con el color por defecto. */
 
   /* ------------------------------------------------------------ estado */
 
@@ -959,11 +961,10 @@
    * problema: dos copias equivalentes se separan en cuanto alguien corrige una,
    * y una marca que significa COMPRA en una pantalla y otra cosa en la de al
    * lado es peor que no dibujarla. Ahora hay UNA, en `itmq_core`. */
+  /* v1.57.0 · De los cinco alias solo `flowSide` se sigue usando (abajo, para
+   * decidir el lado de la etiqueta). Los otros cuatro apuntaban a `Q.*` y no
+   * los llamaba nadie desde que las marcas se dibujan con `Q.flowMark`. */
   const flowSide = Q.flowSide;
-  const flowArrow = Q.flowArrow;
-  const flowAmount = Q.flowAmount;
-  const markerStrength = ev => Q.flowStrength(ev, S.qflowPeak);
-  const markerAmount = Q.flowAmountText;
 
   function drawQflowMarkers(ctx, box, sx, sy, qflow) {
     const marks = (qflow && qflow.markers) || [];

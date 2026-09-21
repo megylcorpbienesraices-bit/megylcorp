@@ -92,8 +92,13 @@ def test_level_styles_have_a_single_definition():
     assert "const LEVELS = {" in core
     assert "FLOW_LEVEL_KINDS" in core and "levelStyle" in core
     trace = text("app/static/itmq_trace.js")
-    assert "const LEVEL_STYLE = Q.LEVELS;" in trace
+    # v1.57.0 · Esto exigia que existiera `const LEVEL_STYLE = Q.LEVELS;`, un
+    # alias que ya no llamaba nadie. Obligar a que sobreviva codigo muerto es
+    # guardar la forma en vez del fondo: lo que importa es que TRACE PIDA el
+    # estilo a la autoridad compartida y no tenga tabla propia.
+    assert "Q.levelStyle(lv.kind)" in trace
     assert "flip: { color:" not in trace       # ya no hay copia local
+    assert "const LEVELS = {" not in trace     # ni una tabla local con otro nombre
 
 
 def test_flow_panel_draws_the_same_structural_levels_as_trace():
