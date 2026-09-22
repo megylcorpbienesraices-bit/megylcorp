@@ -1,11 +1,203 @@
-# ITM QUANT MULTI ASSET · v1.61.0 — Los carriles, con sitio para leerse
+# ITM QUANT MULTI ASSET · v1.62.0 — Una sola verdad por carril
 
-Release: `ITM_QUANT_v1.61.0_PRE_VPS` · Base: `v1.60.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.62.0_PRE_VPS` · Base: `v1.61.0` · Alcance: `MULTI_ASSET`
 
-**Ninguna matemática cambia.** Esta release reparte ALTO EN PANTALLA. El
-transporte de v1.60.0 y los bloques 3, 4, 5 y 7 de v1.59.0 quedan intactos.
+**La fórmula de Call Wall / Put Wall no se toca.** Lo que cambia es de dónde
+sale el ESTADO, no cómo se calcula ninguna magnitud.
+
+> Este bloque queda **abierto** hasta que LIVE demuestre los seis criterios de
+> cierre. Lo que hay aquí es la corrección de la autoridad y su regresión.
 
 ---
+
+## 0 · LO QUE ENSEÑABAN LAS CAPTURAS
+
+Sobre el **mismo ciclo** y el **mismo carril**:
+
+```
+Herramientas Quant Data    equity_prints      PROVIDER_ERROR (tardó >11 s)
+Diagnóstico de paneles     equity_prints      SIN DATOS · EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS
+
+Dark Pool · por carril     dark_pool_levels   STALE · 382
+Pantalla del analista      dark_pool_levels   CON DATOS · 382
+```
+
+Las dos son **imposibles para una misma ejecución**.
+
+---
+
+## 1 · LA CAUSA, QUE ERA UNA SOLA
+
+**Cuatro recomputaciones independientes del mismo hecho**, cada una con su
+regla:
+
+```
+lane_state()            miraba `lane_status` y la clasificación del hub
+_dark_pool_rows()       miraba `bool(rows)` y, si no había, INVENTABA el motivo
+_lane_status() (vista)  miraba `ready` y contaba filas
+la tabla                miraba `ready` y contaba filas
+```
+
+Y aquí está el detalle que lo hacía inevitable: **un refresco fallido conserva
+el bloque anterior** —y debe conservarlo, para no tirar el último dato bueno—,
+así que `ready` seguía en `True` y `rows` seguía trayendo 382.
+
+Quien mirara `bool(rows)` concluía **CON DATOS**. Quien mirara `lane_status`
+concluía **STALE**. Ninguno mentía sobre lo que miraba: **los cuatro miraban la
+sombra del hecho en vez del hecho**.
+
+Y cuando no quedaba bloque anterior, el diagnóstico rellenaba el hueco con
+`EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS`, que es una causa **inventada**: el proveedor no
+devolvió nada porque la petición se murió por plazo, no porque no tuviera filas.
+
+---
+
+## 2 · LA AUTORIDAD · `app/core/lane_truth.py` (NUEVO)
+
+Un objeto canónico por carril, **escrito en el instante de la ejecución** —el
+único en que se sabe qué pasó— y leído sin reinterpretar por todas las
+superficies.
+
+```
+current_status       qué pasó en ESTA ejecución
+current_rows         filas que trajo ESTA ejecución
+serving              qué se sirve: LIVE · LKG · NONE
+served_rows          cuántas filas ve el operador, vengan de donde vengan
+lkg_rows             filas del último ciclo que SÍ funcionó
+lkg_age              su edad en segundos
+last_success_at      cuándo fue
+refresh_error        el error de ESTE refresco, entero
+refresh_error_phase  qué fase expiró
+as_of                instante de esta verdad
+request_id·cycle_id  a qué ejecución pertenece
+```
+
+### Las cuatro reglas, y no hay una quinta
+
+```
+respuesta válida + filas > 0   → LIVE, sirviendo LIVE
+respuesta válida + 0 filas     → NO_DATA (no es avería), sin nada que servir
+fallo + LKG válido             → PROVIDER_ERROR, serving=LKG, en pantalla DATO ANTERIOR · Ns
+fallo + sin LKG                → PROVIDER_ERROR, sin nada que servir
+todavía no ejecutado           → WAITING_* con su causa
+```
+
+`LIVE` sin filas es **imposible por construcción**.
+
+### `known`: lo que nadie midió no se afirma
+
+`known == False` significa «ningún ciclo ha escrito la verdad de este carril».
+Ninguna vista puede tomarlo por bueno: cae a lo que sepa por su cuenta y dice
+`SIN_REGISTRO_DE_EJECUCION`. **Afirmar una espera no medida es el mismo pecado
+que afirmar un vacío no medido**, y lo encontré al cablearlo: sin esta
+distinción, un registro vacío habría puesto los 36 carriles en «EN COLA».
+
+---
+
+## 3 · LAS DOS CONTRADICCIONES, CERRADAS
+
+```
+equity_prints      las cuatro vistas dicen PROVIDER_ERROR · serving NONE · 0 filas
+                   y la causa es «el canal tardó más de 11.4 s · fase READ_TIMEOUT»
+
+dark_pool_levels   las cuatro dicen PROVIDER_ERROR · serving LKG · 382 filas
+                   y NINGUNA las llama frescas: «DATO ANTERIOR · 47s»
+```
+
+### Dos preguntas que siguen siendo distintas
+
+```
+¿falló el refresco?     current_status = PROVIDER_ERROR   → sí
+¿la sección está rota?  is_failure     = False            → no: hay 382 filas
+```
+
+Las dos son verdad a la vez. Lo que **no** puede pasar —y pasaba— es usar la
+segunda respuesta para afirmar la primera: «CON DATOS» decía que el refresco
+había ido bien, y no fue así.
+
+---
+
+## 4 · ESPERAR NO ES FALLAR
+
+Los estados de espera se escriben **donde el programador decide no llamar**, con
+`waiting_since`, `reason` y `next_eligible_at`. No son fallos y **no cambian
+ninguna severidad**. Una espera que excede el máximo sale como **anomalía
+aparte** —sin convertirla en error—, porque esperar es legítimo y esperar sin
+fin es un defecto.
+
+`dark_pool_state` gana su noveno estado, `ESPERANDO`: antes caía en
+`SIN_DATOS_REALES`, que afirma un vacío del proveedor sobre una llamada que
+nunca salió.
+
+---
+
+## 5 · LOS 11 SEGUNDOS, EXPLICADOS
+
+Cada fallo publica la fase que expiró y el desglose:
+
+```
+queue_wait_ms · pool_wait_ms · connect_ms · read_ms · request_ms
+timeout_budget_ms · phase_that_expired
+```
+
+«El canal tardó más de 11.4 s» no decía si el tiempo se fue esperando hueco en
+**nuestro** pool, conectando o esperando al proveedor — y los tres se arreglan
+al revés.
+
+---
+
+## 6 · WALLSNAPSHOT NO PUEDE SER UNA CAJA VACÍA
+
+Cuatro estados, y en cada ciclo se publica **exactamente uno**:
+
+```
+COMPLETO · LKG · NO_CALCULABLE · WAITING_DEPENDENCY
+```
+
+El cuarto es nuevo y necesario: si el carril del que salen los ingredientes aún
+no se ha ejecutado, decir `NO_CALCULABLE` **afirma que el dato no existe**
+cuando lo que pasa es que todavía no se ha pedido.
+
+Cuando hay snapshot se publican los **diez controles**. Cuando no lo hay se
+publica `controls_absent_because` con el estado, los ingredientes que faltan uno
+a uno y los diez controles esperados. La tabla nunca se queda sin nada que decir.
+
+---
+
+## 7 · REGRESIÓN
+
+`tests/test_v1620_una_sola_verdad.py` · **41 casos**. El núcleo es
+parametrizado: **seis escenarios × tres carriles**, comprobando que las **cuatro
+vistas** dicen lo mismo. Si una dice `PROVIDER_ERROR`, otra no puede decir
+`NO_DATA`; si una sirve LKG, ninguna puede llamarlo fresco.
+
+Y en `conftest`, los registros de proceso se vacían entre tests: un registro
+global que sobrevive de un test al siguiente es la peor forma de tener la suite
+verde.
+
+---
+
+## 8 · AUDITORÍA DEL MOTOR
+
+En `QUANT_ENGINE_AUDIT_v1.62.0.md`.
+
+---
+
+## 9 · CRITERIO DE CIERRE · LIVE
+
+```
+py -3.13 scripts\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12
+```
+
+Sin contradicciones de estado · Equity Prints con una sola causa · Dark Pool
+Levels distinguiendo LIVE de LKG · Walls nunca vacío · cada timeout con su fase
+· recuperación automática a LIVE.
+
+---
+
+# Historial · v1.61.0 — Los carriles, con sitio para leerse
+
+Release: `ITM_QUANT_v1.61.0_PRE_VPS` · Base: `v1.60.0` · Alcance: `MULTI_ASSET`
 
 ## 0 · LO QUE SE MIDIÓ, NO LO QUE SE SUPUSO
 

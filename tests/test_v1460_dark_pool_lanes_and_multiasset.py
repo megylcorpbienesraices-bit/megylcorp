@@ -377,14 +377,21 @@ def test_prints_that_cannot_be_classified_are_not_a_healthy_lane():
     assert "sin clasificar" in out["coverage_reason"]
 
 
-# ─────────────────────────────────────────────── 7 · OCHO ESTADOS, UNA PANTALLA
+# ───────────────────────────────────────────── 7 · NUEVE ESTADOS, UNA PANTALLA
 
-def test_the_eight_internal_states_exist_with_cause_and_remedy():
+def test_the_nine_internal_states_exist_with_cause_and_remedy():
+    """v1.62.0 · El noveno es `ESPERANDO`: la petición todavía no se ha hecho.
+
+    Antes caía en `SIN_DATOS_REALES`, que afirma un vacío del proveedor sobre
+    una llamada que nunca salió. El invariante que este test defiende no
+    cambia: cada estado tiene que traer su remedio.
+    """
     from app.core import dark_pool_state as S
 
     assert set(S.DARK_POOL_STATES) == {
         "DIRECT_PROVIDER_OK", "SIN_DATOS_REALES", "MARKET_CLOSED", "STALE",
-        "REQUEST_INVALID", "PROVIDER_ERROR", "PARSER_ERROR", "NO_CLASIFICABLE"}
+        "REQUEST_INVALID", "PROVIDER_ERROR", "PARSER_ERROR", "NO_CLASIFICABLE",
+        "ESPERANDO"}
     for state in S.DARK_POOL_STATES:
         if state == S.DIRECT_PROVIDER_OK:
             continue

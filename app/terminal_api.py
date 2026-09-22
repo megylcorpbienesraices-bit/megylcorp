@@ -1644,18 +1644,69 @@ def _dark_pool_rows(row, intel: Dict[str, Any] | None) -> List[Dict[str, Any]]:
     esté en MARKET_CLOSED no puede hacer que Dark Flow parezca vacío.
     """
     intel = intel if isinstance(intel, dict) else {}
+    from .core.lane_truth import TRUTH as LANE_TRUTH
+
     out: List[Dict[str, Any]] = []
     for label, key, tool in (
         ("DARK POOL · dark flow", "dark_flow", "QUANTDATA_DARK_FLOW"),
         ("DARK POOL · niveles", "dark_pool_levels", "QUANTDATA_DARK_POOL_LEVELS"),
         ("DARK POOL · prints de equity", "equity_prints", "QUANTDATA_EQUITY_PRINTS"),
     ):
-        block = _qd_block(intel, key)
-        rows_ = _qd_rows(intel, key)
-        reason = (block.get("schema_detail") or block.get("error")
-                  or block.get("reason") or block.get("detail")
-                  or "EL_PROVEEDOR_NO_DEVOLVIO_FILAS")
-        out.append(row(label, bool(rows_), len(rows_), tool, reason))
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.62.0 · ESTE DIAGNÓSTICO YA NO DEDUCE NADA
+        # ═══════════════════════════════════════════════════════════════════
+        #
+        # Aquí estaba la contradicción de `equity_prints`: el Auditor decía
+        # PROVIDER_ERROR —la llamada murió a los 11 s— y este panel decía
+        # «SIN DATOS · EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS», que es una causa
+        # INVENTADA: se miraba `bool(rows)` y, al no haber, se rellenaba el
+        # hueco con la última frase de la lista. El proveedor no devolvió nada
+        # porque la petición se murió por plazo, no porque no tuviera filas.
+        #
+        # Ahora se lee la verdad de la ejecución, con su `request_id`, y la
+        # causa es la REAL o no hay causa.
+        verdad = LANE_TRUTH.read(key)
+        if verdad.get("known") is False:
+            # Sin registro no se afirma nada: se cae a lo que el bloque
+            # publicado permita, y la causa se deja en blanco antes que
+            # inventarla —que es de donde salía
+            # `EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS`—.
+            filas_bloque = len(_qd_rows(intel, key))
+            verdad = {"current_status": "", "serving": ("LIVE" if filas_bloque else "NONE"),
+                      "served_rows": filas_bloque, "fresh": bool(filas_bloque),
+                      # Sin registro, la causa es NUESTRA falta de registro y se
+                      # dice así. `EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS` culpaba al
+                      # proveedor de un hueco que era del motor.
+                      "refresh_error": ("SIN_REGISTRO_DE_EJECUCION · ningún ciclo ha "
+                                        "escrito la verdad de este carril"),
+                      "waiting_reason": "", "refresh_error_phase": "", "known": False}
+        sirviendo = str(verdad.get("serving") or "NONE")
+        filas = int(verdad.get("served_rows") or 0)
+        ok = sirviendo != "NONE"
+        motivo = (verdad.get("refresh_error") or verdad.get("waiting_reason")
+                  or _qd_block(intel, key).get("schema_detail") or "")
+        fase = str(verdad.get("refresh_error_phase") or "")
+        if fase:
+            motivo = f"{motivo} · fase {fase}" if motivo else f"expiró la fase {fase}"
+        fila = row(label, ok, filas, tool, motivo or None)
+        # Y viaja la verdad entera, para que nadie tenga que volver a deducirla
+        # y para que la regresión de consistencia pueda comparar con el resto.
+        fila.update({
+            "current_status": verdad.get("current_status"),
+            "serving": sirviendo,
+            "served_rows": filas,
+            "fresh": bool(verdad.get("fresh")),
+            "lkg_age": verdad.get("lkg_age"),
+            "request_id": verdad.get("request_id"),
+            "cycle_id": verdad.get("cycle_id"),
+            "screen": verdad.get("screen"),
+            "phase_that_expired": fase,
+        })
+        # Un carril que sirve el ÚLTIMO VALOR BUENO no puede presentarse igual
+        # que uno con dato fresco: el `state` lo dice, con la edad.
+        if sirviendo == "LKG":
+            fila["state"] = verdad.get("screen")
+        out.append(fila)
     return out
 
 

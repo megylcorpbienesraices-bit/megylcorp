@@ -24,7 +24,7 @@ from ...core import session_resolver
 from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_validation_error,
                     _validation_detail, repair_body, classify_provider_failure,
                     STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
-                    TOOL_FORBIDDEN_FIELDS,
+                    STATUS_PROVIDER_ERROR, TOOL_FORBIDDEN_FIELDS,
                     STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
@@ -34,6 +34,7 @@ from ...core.obs import note as _obs_note, expected as _obs_expected
 from ...core.obs import get_logger as _get_logger
 from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
 from ...core.transport_runtime import TRANSPORT, READ as FASE_LECTURA
+from ...core import lane_truth as LT
 from ...core import consumer_contracts as CC
 from ...core import scheduler_states as SS
 from ...core.wall_snapshot import SNAPSHOTS as WALL_SNAPSHOTS, LKG_FRESCO_S as _WALL_FRESCO_S
@@ -182,6 +183,14 @@ class QuantDataIntelligence:
         #: Claves con petición VIVA ahora mismo. No es telemetría: es el estado
         #: `RUNNING` del programador, que antes no existía.
         self._en_vuelo: set[str] = set()
+        #: v1.62.0 · El `request_id` de la llamada en curso de cada herramienta.
+        #: Es lo que ata el resultado a UNA ejecución concreta, para que dos
+        #: pantallas que discrepen se puedan contrastar en vez de discutir.
+        self._request_id: Dict[str, str] = {}
+        #: Desde cuándo lleva esperando cada herramienta, por estado de espera.
+        #: Sin esto, «esperando» no se distingue de «esperando desde hace diez
+        #: minutos», que es un defecto y no una espera.
+        self._esperando_desde: Dict[str, tuple] = {}
         self._running = False
         self._cycle = 0
         self._burst_until = 0.0
@@ -433,6 +442,14 @@ class QuantDataIntelligence:
                 #
                 # La ráfaga sigue hidratando rápido: entra más gente en el lote,
                 # pero sale escalonada en vez de toda en el mismo milisegundo.
+                # v1.62.0 · LA ESPERA TAMBIÉN SE DECLARA, Y AQUÍ ES DONDE SE
+                # DECIDE. A quien no entra en el lote se le escribe su verdad
+                # de ESPERA —desde cuándo, por qué y cuándo vuelve a ser
+                # elegible—, en vez de dejar que alguien deduzca después que
+                # «no hay datos». Una petición que nunca se hizo no puede
+                # atribuirle al proveedor un silencio que es nuestro.
+                self._registrar_esperas(batch, now,
+                                        pausa_cuota=QUOTA.pages_paused_reason())
                 results = await asyncio.gather(*[self._fetch(t) for t in batch],
                                                return_exceptions=True)
                 for tool, res in zip(batch, results):
@@ -499,6 +516,107 @@ class QuantDataIntelligence:
         if not block.get("path"):
             block["path"] = tool.resolved_path or (tool.paths[0] if tool.paths else None)
         self._data[tool.key] = block
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.62.0 · LA VERDAD SE ESCRIBE AQUÍ, NO SE DEDUCE DESPUÉS
+        # ═══════════════════════════════════════════════════════════════════
+        #
+        # Éste es el único instante en que se sabe qué pasó: si el refresco
+        # falló, con qué error, en qué fase y cuántas filas quedaban del último
+        # ciclo bueno. Deducirlo luego desde el bloque publicado es leer una
+        # huella: el bloque conserva `ready` y `rows` del ciclo anterior —y debe
+        # conservarlos—, así que quien mirara `bool(rows)` concluía CON DATOS
+        # sobre una llamada que se había muerto por plazo.
+        anteriores = int((previous or {}).get("count") or 0) if isinstance(previous, dict) else 0
+        LT.TRUTH.put(LT.executed(
+            tool.key, symbol=self._symbol, rows=0,
+            status=self._estado_de_verdad(status),
+            error=str(detail or "")[:400],
+            phase=str(getattr(tool, "last_error_phase", "") or ""),
+            lkg_rows=anteriores,
+            lkg_age=(round(time.time() - tool.last_success, 2)
+                     if tool.last_success else None),
+            last_success_at=(previous or {}).get("fetched_at") if isinstance(previous, dict) else None,
+            request_id=self._request_id.get(tool.key, ""),
+            cycle_id=str(self._cycle),
+            timing=dict(self._timings.get(tool.key) or {}),
+            endpoint=str(block.get("path") or ""),
+            rejected_fields=tuple(str(f) for f in (fields or []))[:8]))
+
+    @staticmethod
+    def _estado_de_verdad(lane_status: str) -> str:
+        """Traduce el estado del proveedor al vocabulario de la autoridad.
+
+        Una sola tabla. Sin ella, cada pantalla volvía a decidir si un 404 era
+        «sin datos» o «roto», y cada una elegía distinto.
+        """
+        return {
+            STATUS_REQUEST_INVALID: LT.REQUEST_INVALID,
+            STATUS_MISSING_TOOL: LT.MISSING_TOOL,
+            STATUS_NO_DATA: LT.NO_DATA,
+            STATUS_PROVIDER_ERROR: LT.PROVIDER_ERROR,
+            STATUS_TRANSIENT: LT.PROVIDER_ERROR,
+        }.get(str(lane_status or ""), LT.PROVIDER_ERROR)
+
+    def _registrar_esperas(self, batch, now: float, *, pausa_cuota=None) -> None:
+        """Escribe la verdad de ESPERA de todo el que no entra en este lote.
+
+        Cinco causas distintas, con cinco remedios distintos, que el cajón
+        «sin datos» juntaba en uno:
+
+            la cadencia no vence      → es el ritmo, no pasa nada
+            la cuota está agotada     → esperar segundos
+            falta un dato del que
+              depende                 → arreglar OTRA cosa
+            viene de fallar           → esperar el backoff
+            está llamando ahora       → esperar milisegundos
+
+        Con `waiting_since` y `next_eligible_at`, una espera legítima se
+        distingue de una herramienta abandonada: lo segundo sale como ANOMALÍA
+        —ver `LaneTruth.anomaly`— sin cambiar su severidad ni fingir un error.
+        """
+        en_lote = {t.key for t in (batch or [])}
+        pausa = dict(pausa_cuota or {})
+        for clave, herramienta in self.catalog.items():
+            if clave in en_lote:
+                continue
+            bloque = self._data.get(clave) or {}
+            filas_lkg = int(bloque.get("count") or 0)
+            enfriando = max(0.0, float(herramienta.unavailable_until) - now)
+            falta = (list(bloque.get("lane_fields") or [])
+                     if str(bloque.get("lane_status") or "") == "REQUISITO_AUSENTE" else [])
+            if clave in self._en_vuelo:
+                estado, motivo, proximo = LT.RUNNING, "petición en vuelo", None
+            elif enfriando > 0:
+                estado = LT.WAITING_COOLDOWN
+                motivo = f"enfriamiento tras un fallo anterior: {enfriando:.0f} s"
+                proximo = float(herramienta.unavailable_until)
+            elif falta:
+                estado = LT.WAITING_DEPENDENCY
+                motivo = "le falta " + ", ".join(str(f) for f in falta)
+                proximo = None
+            elif pausa:
+                estado = LT.WAITING_RATE_LIMIT
+                motivo = str(pausa.get("reason") or "presupuesto de cuota agotado")
+                segundos = pausa.get("seconds")
+                proximo = (now + float(segundos)) if segundos else None
+            else:
+                estado = LT.WAITING_SCHEDULED
+                motivo = "su cadencia todavía no vence, o el presupuesto del ciclo no llegó a ella"
+                cadencia = CADENCE.get(herramienta.cadence, 60.0)
+                ultimo = self._fetched_at.get(clave)
+                proximo = (float(ultimo) + float(cadencia)) if ultimo else None
+            desde, previo = self._esperando_desde.get(clave, (None, None))
+            if desde is None or previo != estado:
+                desde = now                     # cambió la causa: el reloj empieza de nuevo
+            self._esperando_desde[clave] = (desde, estado)
+            LT.TRUTH.put(LT.waiting(
+                clave, symbol=self._symbol, state=estado, reason=motivo,
+                waiting_since=desde, next_eligible_at=proximo,
+                lkg_rows=filas_lkg,
+                lkg_age=(round(now - herramienta.last_success, 2)
+                         if herramienta.last_success else None),
+                last_success_at=bloque.get("fetched_at"),
+                cycle_id=str(self._cycle)))
 
     async def _fetch(self, tool: QuantDataTool) -> None:
         """Marca la petición como VIVA mientras dura, y la descarga.
@@ -508,6 +626,11 @@ class QuantDataIntelligence:
         llamando AHORA se leía con el resultado de su intento anterior.
         """
         self._en_vuelo.add(tool.key)
+        # v1.62.0 · Un identificador por LLAMADA. Es lo que convierte «una
+        # pantalla dice A y otra dice B» en una comprobación: o las dos leen la
+        # misma ejecución, o se ve en el identificador que no.
+        self._request_id[tool.key] = LT.next_request_id(tool.key)
+        self._esperando_desde.pop(tool.key, None)
         try:
             await self._fetch_one(tool)
         finally:
@@ -745,6 +868,24 @@ class QuantDataIntelligence:
             status = classify_provider_failure(exc)
             tool.provider_status = status
             tool.note_attempt(path, msg)
+            # ═══════════════════════════════════════════════════════════════
+            # v1.62.0 · QUÉ FASE EXPIRÓ, Y DÓNDE SE FUERON LOS SEGUNDOS
+            # ═══════════════════════════════════════════════════════════════
+            #
+            # «El canal tardó más de 11.4 s» no es un diagnóstico: no dice si
+            # esos once segundos se fueron esperando hueco en NUESTRO pool,
+            # abriendo el socket o esperando la respuesta del proveedor, y los
+            # tres se arreglan al revés. La fase viaja en el error desde
+            # v1.60.0; aquí se guarda junto al desglose de tiempos para que
+            # salga en el Auditor con el fallo, no en otra tabla.
+            tool.last_error_phase = str(getattr(exc, "phase", "") or "")
+            _t = dict(self._timings.get(tool.key) or {})
+            _t.update(dict(getattr(exc, "transport", None) or {}))
+            _t["phase_that_expired"] = tool.last_error_phase
+            _t["timeout_budget_ms"] = (None if getattr(exc, "limit_seconds", None) is None
+                                       else round(float(exc.limit_seconds) * 1000.0, 2))
+            _t["retry_decision"] = getattr(exc, "retry_decision", None)
+            self._timings[tool.key] = _t
             # Un 400 es culpa del cuerpo, no del canal: no cuenta para abrir el
             # circuito, porque reintentarlo menos no lo arregla.
             if isinstance(exc, QuantDataTimeout):
@@ -860,6 +1001,23 @@ class QuantDataIntelligence:
             "lane_fields": [],
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
+        # v1.62.0 · La verdad del camino BUENO, escrita con el mismo criterio
+        # que la del malo. Respuesta válida con filas es LIVE; respuesta válida
+        # con CERO filas es NO_DATA y no es una avería —confundirlos manda a
+        # buscar una avería en un mercado que simplemente está tranquilo—.
+        _filas = int(normalized.get("count") or 0)
+        _ilegible = bool(normalized.get("error")) and not normalized.get("ready")
+        LT.TRUTH.put(LT.executed(
+            tool.key, symbol=ticker, rows=_filas,
+            status=(LT.PARSER_ERROR if _ilegible else
+                    (LT.LIVE if _filas > 0 else LT.NO_DATA)),
+            error=(str(normalized.get("error") or "")[:400] if _ilegible else ""),
+            lkg_rows=_filas, lkg_age=0.0,
+            last_success_at=self._data[tool.key]["fetched_at"],
+            request_id=self._request_id.get(tool.key, ""),
+            cycle_id=str(self._cycle),
+            timing=dict(self._timings.get(tool.key) or {}),
+            endpoint=str(path or "")))
         return "OK", ""
 
     # ------------------------------------------------------------ lectura
@@ -1055,6 +1213,9 @@ class QuantDataIntelligence:
                 "state": state,
                 # Los nueve estados del programador, con su causa.
                 "lifecycle": lifecycle,
+                # Y la VERDAD de su última ejecución, que es lo que tienen que
+                # leer todas las pantallas sin reinterpretarla.
+                "truth": LT.TRUTH.read(key),
                 # Y la anomalía, que NO es un estado: es un defecto del
                 # programador —exigible, con cuota libre y sin un solo intento—.
                 "anomaly": anomalia,
@@ -1154,6 +1315,12 @@ class QuantDataIntelligence:
             # v1.59.0 · QUIÉN SE QUEDA SIN QUÉ. La criticidad es del PAR
             # (dato, consumidor): el mismo fallo es opcional para quien tiene
             # respaldo y bloqueante para quien no lo tiene.
+            # v1.62.0 · LA AUTORIDAD DE ESTADO, publicada entera. Es lo que
+            # leen el hub, el diagnóstico de paneles y la pantalla del
+            # analista: una sola verdad por carril, con su `request_id` y su
+            # `cycle_id`, para que dos vistas que discrepen se puedan
+            # contrastar en vez de discutir.
+            "lane_truth": LT.TRUTH.snapshot(),
             "consumers": CC.evaluate_all(disponibilidad),
             # Y los nueve estados del programador, con las anomalías aparte:
             # una herramienta exigible, con cuota libre y sin un solo intento no

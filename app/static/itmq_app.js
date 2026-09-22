@@ -1987,12 +1987,29 @@
         : 'El cálculo de muros no publicó su fórmula en este ciclo.';
     }
 
+  /* v1.62.0 · La tabla de controles NUNCA se queda sin nada que decir.
+   *
+   * «Los controles del contrato de muros no se publicaron en este ciclo» era
+   * una caja vacía: no decía si faltó la gamma, el vencimiento o el precio, ni
+   * si el carril estaba esperando turno. El motor publica ahora la causa en
+   * `controls_absent_because`; esto sólo la pinta. La UI no la deduce.
+   */
+  function wallControlsFallback(wc) {
+    const c = (wc && wc.controls_absent_because) || null;
+    if (!c || !c.detail) {
+      return 'El motor no publicó ni los controles ni su causa: eso es un defecto suyo.';
+    }
+    const faltan = (c.missing || []).length
+      ? ` · falta: ${(c.missing || []).join(' · ')}` : '';
+    return `${c.snapshot_state || 'SIN SNAPSHOT'} · ${c.detail}${faltan}`;
+  }
+
     fillTable('tblWallControls', (wc.controls || []), (c, i) => [
       String((wc.controls || []).indexOf(c) + 1),
       `<code class="mute">${esc(c.control)}</code>`,
       c.ok ? '<span class="pos">CUMPLE</span>' : '<span class="neg">FALTA</span>',
       esc(c.detail || '—'),
-    ], 'Los controles del contrato de muros no se publicaron en este ciclo', true);
+    ], wallControlsFallback(wc), true);
     const wcCtrl = el('wallControlsNote');
     if (wcCtrl) {
       const fallidos = wc.failed_controls || [];

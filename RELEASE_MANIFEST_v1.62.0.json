@@ -1,40 +1,38 @@
 {
-  "version": "1.61.0",
-  "release": "ITM_QUANT_v1.61.0_PRE_VPS",
+  "version": "1.62.0",
+  "release": "ITM_QUANT_v1.62.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.60.0",
-  "focus": "FLUJO DE ORDENES Y DARK POOL, CON SITIO PARA LEERSE. Medido con el navegador sobre la terminal en marcha: en NET DRIFT tres carriles median UN PIXEL (ofDriftTotal, ofDeltaMin, ofDriftVolume) y la curva DESBORDABA su contenedor. Dos causas: la rejilla declaraba CUATRO filas para SEIS hijos, y `[hidden]` habia dejado de ocultar porque cualquier clase con `display` le gana. No se toca ninguna matematica ni el transporte de v1.60.0.",
+  "base_version": "1.61.0",
+  "focus": "UNA SOLA VERDAD POR CARRIL. Las capturas LIVE mostraban dos contradicciones imposibles para una misma ejecucion: equity_prints en PROVIDER_ERROR arriba y SIN DATOS · EL_PROVEEDOR_NO_DEVOLVIO_FILAS abajo; dark_pool_levels en STALE·382 arriba y CON DATOS·382 abajo. Causa unica: CUATRO recomputaciones independientes del mismo hecho. Ahora el estado se ESCRIBE en la ejecucion (lane_truth) y las cuatro superficies lo LEEN sin reinterpretarlo. No se toca la formula de Walls.",
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "NINGUN cambio de logica cuantitativa. Esta release reparte ALTO EN PANTALLA.",
-    "`.drift-stack` declaraba 4 filas para 6 hijos: los dos ultimos caian en filas implicitas `auto` y, al ser lienzos sin alto intrinseco, se aplastaban a nada. Medido en el navegador: ofDriftTotal 1 px, ofDeltaMin 1 px, ofDriftVolume 1 px, y ofDrift 660 px dentro de un contenedor de 645.",
-    "`[hidden] { display: none !important }`: `[hidden]` es una regla del navegador con la especificidad mas baja, y `.grid { display: grid }` la ganaba. Por eso los DOS bloques de KPI de FLUJO se veian a la vez y se comian 200 px de alto. Se habia parcheado caso por caso; ahora se cierra la causa para todo el documento.",
-    "suelos en PIXELES por carril (132 px) y para el grafico principal (420 px en la cinta, 660 px en Net Drift), con scroll cuando la ventana no da: aplastar era la opcion anterior y producia carriles de un pixel.",
-    "KPI compactos en las vistas de grafico: las cifras acompanan, el grafico manda. No se quita ninguna, se compacta el aire.",
-    "DARK POOL: el grafico pasa de 420 px fijos a `clamp(420px, 56vh, 760px)` y las nueve tarjetas bajan de tres filas a dos.",
-    "placa (`laneTag`) con fondo y borde para el nombre de cada carril: escrito sobre el fondo dejaba de leerse en cuanto le pasaba una barra por detras."
+    "lane_truth (NUEVO): objeto canonico por carril con los diez campos exigidos —current_status, current_rows, serving, served_rows, lkg_rows, lkg_age, last_success_at, refresh_error, refresh_error_phase, as_of— mas request_id y cycle_id. Se escribe en el instante de la ejecucion, que es el unico en que se sabe que paso.",
+    "las cuatro reglas, sin una quinta: valida+filas>0 -> LIVE; valida+0 filas -> NO_DATA; fallo+LKG -> PROVIDER_ERROR sirviendo LKG; fallo sin LKG -> PROVIDER_ERROR. Y LIVE sin filas es imposible por construccion.",
+    "CUATRO superficies dejan de deducir y pasan a leer: quant_data_hub.dark_pool, terminal_api._dark_pool_rows, dark_pool_view._lane_status y el Auditor. Era donde salian las dos contradicciones: un refresco fallido CONSERVA el bloque anterior, asi que `ready` seguia True y `rows` seguia trayendo 382; quien mirara eso concluia CON DATOS sobre una llamada muerta por plazo.",
+    "EL_PROVEEDOR_NO_DEVOLVIO_FILAS eliminado: era una causa INVENTADA que culpaba al proveedor de un hueco que era del motor. Sin registro se dice SIN_REGISTRO_DE_EJECUCION.",
+    "`known` distingue «se que espera» de «nadie lo ha medido»: sin registro NINGUNA vista afirma un estado, cae a lo que sepa por su cuenta. Afirmar una espera no medida es el mismo pecado que afirmar un vacio no medido.",
+    "estados de ESPERA con waiting_since, reason y next_eligible_at, escritos donde el programador DECIDE no llamar. No son fallos y no cambian ninguna severidad; una espera que excede el maximo sale como ANOMALIA aparte.",
+    "cada fallo publica la FASE que expiro (CONNECT/POOL/READ/WRITE) y el desglose queue_wait_ms · pool_wait_ms · connect_ms · read_ms · request_ms · timeout_budget_ms: «tardo 11.4 s» no decia si el tiempo se fue en el pool, conectando o esperando al proveedor.",
+    "dark_pool_state gana el noveno estado ESPERANDO: antes caia en SIN_DATOS_REALES, que afirma un vacio del proveedor sobre una llamada que nunca salio.",
+    "WallSnapshot gana el cuarto estado WAITING_DEPENDENCY y publica SIEMPRE uno de los cuatro; wall_audit publica `controls_absent_because` con el estado, los ingredientes que faltan uno a uno y los diez controles esperados. «Los controles no se publicaron en este ciclo» deja de existir. LA FORMULA NO SE TOCA.",
+    "conftest: los registros de PROCESO (lane_truth, transporte) se vacian entre tests. Un registro global que sobrevive de un test al siguiente es la peor forma de tener la suite verde."
   ],
   "tests": {
-    "collected": 3223,
-    "passed": 3172,
+    "collected": 3264,
+    "passed": 3213,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 195,
+    "files": 196,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "ad5f220d1ce7c636f5e31a2a5dcb249910299a9a8c967e98c04b0df8b63d7799",
+    "plan_sha256": "ebdd3df66b97411c3a7bbc256e5dcf947f29a8da86cdb7a35e2ea0768d224849",
     "run_observed": {
-      "passed": 3172,
+      "passed": 3213,
       "skipped": 51,
       "failed": 0,
-      "collected": 3223,
+      "collected": 3264,
       "interprete": "CPython 3.11.15 (el del contenedor de desarrollo)",
-      "skips_desglosados": {
-        "live_con_credenciales": 45,
-        "pyzmq_ausente_en_el_contenedor": 2,
-        "universo_retirado_en_v1.58.0_con_regla_cubierta_en_otro_fichero": 4
-      },
       "note": "`skipped` del contrato es 0 porque ningun salto se presenta como auditado. El interprete CERTIFICADO sigue siendo CPython 3.13.12."
     }
   },
@@ -216,11 +214,17 @@
     "que_falta_para_PASS": "ejecutar el gate en el entorno certificado (CPython 3.13.12 con los locks instalados, pyzmq incluido) y con QUANTDATA_API_KEY + ITMQ_LIVE_TESTS=1 con la terminal levantada."
   },
   "bloque_abierto": {
-    "nombre": "TRANSPORTE_QUANT_DATA",
+    "nombre": "CONSISTENCIA_DE_ESTADO_Y_TRANSPORTE",
     "estado": "ABIERTO_HASTA_CERTIFICACION_LIVE",
-    "criterio_de_cierre": "el informe LIVE en Windows tiene que demostrar que desaparece la repeticion sistematica de `connect timed out` y que el sistema se recupera. Afirmaciones 8 a 14 del certificador.",
-    "comando": "py -3.13 scripts\\\\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12",
-    "ensayo_en_seco": "contra un proveedor local: 13 peticiones, 1 handshake, 92,31 % de reutilizacion de conexion, 0 timeouts de conexion. No sustituye a la medicion en la red del operador."
+    "criterio_de_cierre": [
+      "no existan contradicciones de estado entre las cuatro vistas",
+      "Equity Prints tenga UNA sola causa, y sea la real",
+      "Dark Pool Levels identifique explicitamente LIVE vs LKG con su edad",
+      "Walls nunca quede vacio: siempre uno de los cuatro estados con su causa",
+      "cada timeout indique la fase real que expiro",
+      "la recuperacion posterior a un fallo vuelva automaticamente a LIVE"
+    ],
+    "comando": "py -3.13 scripts\\\\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12"
   },
   "evidencia_visual": {
     "metodo": "Chromium headless contra la terminal en marcha, midiendo getBoundingClientRect() de cada carril en una ventana de 1600x1000.",

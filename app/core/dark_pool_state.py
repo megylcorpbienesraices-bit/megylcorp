@@ -48,10 +48,16 @@ REQUEST_INVALID = "REQUEST_INVALID"
 PROVIDER_ERROR = "PROVIDER_ERROR"
 PARSER_ERROR = "PARSER_ERROR"
 NO_CLASIFICABLE = "NO_CLASIFICABLE"
+#: v1.62.0 · El NOVENO: todavía no se ha ejecutado. No es un fallo y no es
+#: «sin datos»: es que la petición aún no se ha hecho. Decir «el proveedor no
+#: devolvió filas» de una llamada que nunca salió le atribuye al proveedor un
+#: silencio que es nuestro.
+ESPERANDO = "ESPERANDO"
 
 DARK_POOL_STATES = (
     DIRECT_PROVIDER_OK, SIN_DATOS_REALES, MARKET_CLOSED, STALE,
     REQUEST_INVALID, PROVIDER_ERROR, PARSER_ERROR, NO_CLASIFICABLE,
+    ESPERANDO,
 )
 
 #: Los tres carriles, con el nombre de la herramienta del proveedor.
@@ -73,6 +79,7 @@ REMEDY = {
     PROVIDER_ERROR: "fallo del proveedor: reintento programado con backoff",
     PARSER_ERROR: "el proveedor respondió y el normalizador no supo leerlo",
     NO_CLASIFICABLE: "llegaron impresiones sin señal de centro de ejecución utilizable",
+    ESPERANDO: "la petición de este ciclo todavía no se ha hecho: no es un vacío del proveedor",
 }
 
 #: Un estado que el analista no debe leer en crudo. La pantalla dice SIN DATOS;
@@ -81,6 +88,7 @@ SCREEN_TEXT = {
     DIRECT_PROVIDER_OK: "",
     MARKET_CLOSED: "MERCADO CERRADO",
     STALE: "DATO ANTERIOR",
+    ESPERANDO: "EN COLA",
 }
 
 
@@ -142,7 +150,8 @@ STALE_LKG = "STALE_LKG"
 
 def lane_state(block: Any, classification: Dict[str, Any], *,
                market_open: Optional[bool] = None,
-               unclassified: int = 0, classified: int = 0) -> Dict[str, Any]:
+               unclassified: int = 0, classified: int = 0,
+               truth: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Estado de UN carril, con su causa y su remedio.
 
     `block` es lo que publicó el carril de páginas; `classification` lo que
@@ -156,6 +165,29 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
     generic = str(cls.get("state") or NO_PROVIDER_DATA)
     rows = int(cls.get("rows") or 0)
     provider_status = str(block.get("lane_status") or "")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # v1.62.0 · LA VERDAD MANDA. ESTO YA NO LA DEDUCE.
+    # ═══════════════════════════════════════════════════════════════════════
+    #
+    # Lo que este carril publica sobre la EJECUCIÓN —qué pasó, qué se sirve y
+    # cuántas filas ve el operador— sale del registro que escribió quien hizo la
+    # llamada (`lane_truth`), no de mirar el bloque publicado. Deducirlo desde
+    # el bloque era leer una huella: un refresco fallido CONSERVA el bloque
+    # anterior —y debe conservarlo—, así que `ready` seguía en `True` y `rows`
+    # seguía trayendo 382, y quien mirara eso concluía «CON DATOS» sobre una
+    # llamada muerta por plazo.
+    #
+    # Los OCHO estados de esta sección siguen aquí porque dicen cosas que la
+    # autoridad genérica no distingue —`NO_CLASIFICABLE`, `MARKET_CLOSED`—,
+    # pero ya no pueden contradecirla: se derivan de ella.
+    # `known == False` significa que NADIE ha escrito la verdad de este carril.
+    # Tomarla por buena afirmaría una espera que nadie midió, que es el mismo
+    # error que afirmar un vacío que nadie midió. Sin registro se cae a lo que
+    # el bloque publicado permita deducir, que es lo que había antes.
+    verdad = dict(truth or {})
+    if verdad and verdad.get("known") is False:
+        verdad = {}
     detail = str(block.get("lane_detail") or cls.get("detail") or "")
     fields = list(block.get("lane_fields") or [])
 
@@ -174,12 +206,33 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
     # `REQUEST_INVALID` NO entra aquí: un 400 significa que el cuerpo está mal
     # y reintentarlo no lo va a arreglar. Ése sí es un fallo nuestro y se
     # declara aunque haya filas antiguas.
-    fallo_de_llamada = (provider_status in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL")
-                        or generic == LINEAGE_PROVIDER_ERROR)
-    hay_dato_bueno = bool(rows) and bool(cls.get("has_payload", rows > 0))
+    if verdad:
+        estado_ejecucion = str(verdad.get("current_status") or "")
+        fallo_de_llamada = bool(verdad.get("is_failure"))
+        hay_dato_bueno = str(verdad.get("serving") or "") == "LKG"
+        rows = int(verdad.get("served_rows") or 0)
+    else:
+        estado_ejecucion = ""
+        fallo_de_llamada = (provider_status in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL")
+                            or generic == LINEAGE_PROVIDER_ERROR)
+        hay_dato_bueno = bool(rows) and bool(cls.get("has_payload", rows > 0))
 
-    if provider_status == "REQUEST_INVALID":
+    if estado_ejecucion == "REQUEST_INVALID" or provider_status == "REQUEST_INVALID":
         state = REQUEST_INVALID
+    elif estado_ejecucion in ("WAITING_SCHEDULED", "WAITING_RATE_LIMIT",
+                              "WAITING_DEPENDENCY", "WAITING_COOLDOWN", "RUNNING"):
+        # Esperar NO es un fallo y no se puede pintar como tal. Si mientras
+        # espera hay último valor bueno, se sirve y se dice que es viejo.
+        state = STALE if hay_dato_bueno else ESPERANDO
+    elif estado_ejecucion == "PARSER_ERROR":
+        state = PARSER_ERROR
+    elif estado_ejecucion == "NO_DATA" and not hay_dato_bueno:
+        state = MARKET_CLOSED if market_open is False else SIN_DATOS_REALES
+    elif estado_ejecucion in ("PROVIDER_ERROR", "MISSING_TOOL") and not hay_dato_bueno:
+        # Un fallo SIN último valor bueno es un fallo, y tiene que decirlo. Caer
+        # aquí en «sin datos reales» fue lo que dejaba a `equity_prints`
+        # declarando un vacío de mercado sobre una llamada muerta por plazo.
+        state = PROVIDER_ERROR
     elif fallo_de_llamada and hay_dato_bueno:
         state = STALE
     elif provider_status in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL"):
@@ -249,16 +302,39 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
         #                               lo que se ve es el último ciclo bueno
         #   timeout/5xx sin LKG       → current_status PROVIDER_ERROR y no hay
         #                               nada que servir
-        "current_status": _current_status(provider_status, generic, rows),
-        "current_rows": (rows if not fallo_de_llamada else 0),
-        "lkg_rows": (rows if fallo_de_llamada and hay_dato_bueno else
-                     (rows if not fallo_de_llamada else 0)),
-        "lkg_age": cls.get("age_seconds"),
-        # Y lo que el operador está viendo AHORA, que es la conclusión de los
-        # cinco hechos anteriores y no un sexto hecho independiente.
-        "serving": ("LIVE" if (not fallo_de_llamada and rows > 0) else
-                    (STALE_LKG if (fallo_de_llamada and hay_dato_bueno) else "NONE")),
-        "last_success_at": block.get("fetched_at") or cls.get("last_success_at"),
+        # Los diez campos canónicos NO se recalculan aquí: se copian de la
+        # autoridad. Si algún día vuelven a divergir, es que alguien volvió a
+        # deducirlos, y la regresión de consistencia lo caza.
+        "current_status": (verdad.get("current_status")
+                           if verdad else _current_status(provider_status, generic, rows)),
+        "current_rows": (int(verdad.get("current_rows") or 0) if verdad
+                         else (rows if not fallo_de_llamada else 0)),
+        "serving": (verdad.get("serving") if verdad else
+                    ("LIVE" if (not fallo_de_llamada and rows > 0) else
+                     (STALE_LKG if (fallo_de_llamada and hay_dato_bueno) else "NONE"))),
+        "served_rows": (int(verdad.get("served_rows") or 0) if verdad else rows),
+        "lkg_rows": (int(verdad.get("lkg_rows") or 0) if verdad else
+                     (rows if hay_dato_bueno or not fallo_de_llamada else 0)),
+        "lkg_age": (verdad.get("lkg_age") if verdad else cls.get("age_seconds")),
+        "last_success_at": (verdad.get("last_success_at") if verdad else
+                            (block.get("fetched_at") or cls.get("last_success_at"))),
+        "refresh_error": (verdad.get("refresh_error") if verdad else
+                          (str(cls.get("detail") or "")[:400] if fallo_de_llamada else "")),
+        "refresh_error_phase": (verdad.get("refresh_error_phase") if verdad else ""),
+        "as_of": verdad.get("as_of") if verdad else None,
+        "request_id": verdad.get("request_id") if verdad else "",
+        "cycle_id": verdad.get("cycle_id") if verdad else "",
+        # La etiqueta que ve el operador sale de la MISMA función para todas las
+        # pantallas. Que una dijera «CON DATOS» y otra «STALE» sobre la misma
+        # ejecución es justo lo que esto impide.
+        "truth_screen": verdad.get("screen") if verdad else "",
+        "fresh": bool(verdad.get("fresh")) if verdad else (not fallo_de_llamada and rows > 0),
+        "waiting_since": verdad.get("waiting_since") if verdad else None,
+        "waiting_seconds": verdad.get("waiting_seconds") if verdad else None,
+        "waiting_reason": verdad.get("waiting_reason") if verdad else "",
+        "next_eligible_at": verdad.get("next_eligible_at") if verdad else None,
+        "anomaly": verdad.get("anomaly") if verdad else None,
+        "timing": dict(verdad.get("timing") or {}) if verdad else {},
         "endpoint": block.get("path"),
         "request_body": block.get("request_body"),
         "unclassified": int(unclassified),

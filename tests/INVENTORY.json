@@ -2449,12 +2449,12 @@
     "test_raw_to_normalizer_to_hub_to_frontend_stays_direct_provider",
     "test_the_analyst_screen_never_reads_a_provider_error_code",
     "test_the_chain_window_is_proportional_for_every_discovered_asset",
-    "test_the_eight_internal_states_exist_with_cause_and_remedy",
     "test_the_exact_cause_reaches_the_auditor_and_not_the_main_screen",
     "test_the_heatmap_normalization_is_rank_based_for_every_asset",
     "test_the_live_script_checks_three_lanes_across_a_basket",
     "test_the_live_script_keeps_the_rejected_field_not_the_first_line",
     "test_the_live_script_sends_the_same_body_production_sends",
+    "test_the_nine_internal_states_exist_with_cause_and_remedy",
     "test_the_normalizer_preserves_every_official_field",
     "test_the_order_flow_scale_has_no_absolute_floor",
     "test_the_terminal_publishes_the_cause_for_the_auditor_only"
@@ -3805,8 +3805,37 @@
     "test_los_dos_bloques_de_kpi_de_flujo_se_excluyen",
     "test_net_drift_declara_una_fila_por_hijo"
    ]
+  },
+  "tests/test_v1620_una_sola_verdad.py": {
+   "casos": 41,
+   "tests": [
+    "test_cuando_hay_snapshot_se_publican_los_diez_controles",
+    "test_dark_pool_levels_dice_en_todas_partes_que_sus_382_filas_son_LKG",
+    "test_el_estado_de_la_EJECUCION_y_el_de_la_SECCION_son_dos_preguntas",
+    "test_el_fallo_publica_la_fase_y_el_desglose_de_tiempos",
+    "test_el_snapshot_publica_siempre_uno_de_los_cuatro_estados",
+    "test_equity_prints_tiene_UNA_sola_causa",
+    "test_fallo_con_lkg_sirve_lkg_y_lo_declara",
+    "test_fallo_sin_lkg_no_tiene_nada_que_servir",
+    "test_la_espera_publica_desde_cuando_por_que_y_hasta_cuando",
+    "test_la_fase_llega_hasta_el_diagnostico",
+    "test_la_interfaz_pinta_la_causa_en_vez_del_hueco",
+    "test_las_anomalias_salen_en_el_resumen",
+    "test_las_cuatro_vistas_dicen_lo_mismo",
+    "test_las_dos_vistas_declaran_la_misma_ejecucion",
+    "test_lo_que_no_se_ha_ejecutado_no_es_no_data",
+    "test_nadie_puede_declarar_live_sin_filas",
+    "test_ninguna_vista_puede_llamar_fresco_a_un_lkg",
+    "test_respuesta_valida_con_filas_es_live",
+    "test_respuesta_valida_sin_filas_es_no_data_y_no_es_averia",
+    "test_si_el_carril_todavia_no_corrio_es_ESPERA_y_no_no_calculable",
+    "test_sin_ingredientes_se_nombran_uno_a_uno",
+    "test_un_carril_esperando_no_se_presenta_como_averia_en_ninguna_vista",
+    "test_una_espera_normal_no_genera_anomalia",
+    "test_una_espera_sin_fin_si_la_genera"
+   ]
   }
  },
- "total_minimo": 3223,
- "version": "1.61.0"
+ "total_minimo": 3264,
+ "version": "1.62.0"
 }

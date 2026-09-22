@@ -50,6 +50,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import data_lineage as DL
 from . import dark_pool_state
+from .lane_truth import TRUTH as LANE_TRUTH
 from .asset_normalization import normalize_matrix, asset_scale
 from .data_lineage import (LINEAGE, DIRECT_PROVIDER, DERIVED, FALLBACK, UNAVAILABLE,
                            CAPABILITY_AVAILABLE, CAPABILITY_UNAVAILABLE,
@@ -758,10 +759,14 @@ def dark_pool(symbol: str, intel: Dict[str, Any]) -> Dict[str, Any]:
                          ("equity_prints", "QD_EQUITY_PRINTS")):
         block = _block(intel, tool)
         cls = classify(block, cadence="MEDIUM")
+        # v1.62.0 · El estado de la EJECUCIÓN lo pone la autoridad, no este
+        # módulo. Aquí sólo se le añade lo que la autoridad no puede saber:
+        # si la sesión está abierta y si las impresiones se pudieron clasificar.
         lane = dark_pool_state.lane_state(
             block, cls, market_open=market_open,
             unclassified=(_unclassified if tool == "equity_prints" else 0),
-            classified=(_classified if tool == "equity_prints" else 0))
+            classified=(_classified if tool == "equity_prints" else 0),
+            truth=LANE_TRUTH.read(tool))
         lanes[tool] = lane
         # Se registra el estado del CARRIL, no el genérico: un 400 y un 503 dejan el
         # bloque igual de vacío y no se corrigen igual, y el Auditor existe

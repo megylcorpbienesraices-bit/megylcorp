@@ -1,14 +1,87 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.61.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.62.0
 
-Release: `ITM_QUANT_v1.61.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.62.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A22** es la de esta release.
+> Documento acumulativo. La sección **A23** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **3223 casos / 195 ficheros**
-- Particiones: 21 · `plan_sha256`: `ad5f220d1ce7c636f5e31a2a5dcb249910299a9a8c967e98c04b0df8b63d7799`
+- Inventario nominal: **3264 casos / 196 ficheros**
+- Particiones: 21 · `plan_sha256`: `ebdd3df66b97411c3a7bbc256e5dcf947f29a8da86cdb7a35e2ea0768d224849`
 - Resultado: **PASS**
+
+---
+
+## A23 · v1.62.0 · Una sola verdad por carril
+
+### Las dos contradicciones que abrieron el caso
+
+Sobre el mismo ciclo y el mismo carril, en las capturas LIVE:
+
+| vista | equity_prints | dark_pool_levels |
+|---|---|---|
+| Herramientas Quant Data | `PROVIDER_ERROR` (>11 s) | `STALE · 382` |
+| Diagnóstico de paneles | `SIN DATOS · EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS` | — |
+| Pantalla del analista | — | `CON DATOS · 382` |
+
+Imposibles para una misma ejecución. Causa única: **cuatro recomputaciones
+independientes** del mismo hecho, sobre un bloque que —correctamente— conserva
+los datos del ciclo anterior cuando el refresco falla.
+
+### Qué se certifica
+
+Cuarenta y un casos en `tests/test_v1620_una_sola_verdad.py`.
+
+**Las cuatro reglas**, sin una quinta, y que `LIVE` sin filas es imposible por
+construcción. **Lo no ejecutado no es `NO_DATA`**: decir «el proveedor no
+devolvió filas» de una llamada que nunca salió le atribuye al proveedor un
+silencio nuestro.
+
+**La consistencia, parametrizada**: seis escenarios × tres carriles × cuatro
+vistas. Si una dice `PROVIDER_ERROR`, otra no puede decir `NO_DATA`; si una
+sirve LKG, ninguna puede llamarlo fresco. Y el `request_id` es el mismo en
+todas, que es lo que convierte una discrepancia en una comprobación.
+
+**Las dos contradicciones, nombradas una a una**: Equity Prints con su causa
+real —«tardó más de 11.4 s · fase READ_TIMEOUT»— y sin rastro de la inventada;
+Dark Pool Levels declarando en las cuatro vistas que sus 382 filas son del ciclo
+anterior, con la edad visible.
+
+**La distinción que hay que mantener**: `current_status = PROVIDER_ERROR` y
+`is_failure = False` son verdad a la vez cuando hay 382 filas que enseñar.
+
+**La espera**: con `waiting_since`, `reason` y `next_eligible_at`; no es fallo,
+no cambia severidades, y cuando excede el máximo sale como anomalía aparte.
+
+**La fase del timeout** y su desglose, hasta el diagnóstico de paneles.
+
+**WallSnapshot**: los cuatro estados; sin ingredientes se nombran uno a uno; si
+el carril aún no corrió es `WAITING_DEPENDENCY` y no `NO_CALCULABLE`; con
+snapshot se publican los diez controles; y la interfaz pinta la causa en vez del
+hueco.
+
+### Un defecto encontrado al cablear
+
+`read()` devolvía una verdad de ESPERA cuando no había registro. Es falso: que
+nadie lo haya escrito no demuestra que esté esperando, y con el registro vacío
+los 36 carriles se habrían declarado «EN COLA» teniendo datos. Es el mismo
+error de esta release por el otro lado —afirmar lo no medido— y apareció en
+**tres** sitios: el carril, el diagnóstico y el motor de muros. De ahí `known`.
+
+### Qué NO se certifica aquí
+
+- **Que las contradicciones hayan desaparecido en producción.** Aquí hay
+  sintéticos y un ciclo real contra un proveedor local; las capturas son del
+  Windows del operador y ahí se cierra.
+- **Que los 11 segundos se acorten.** Ahora se explican por fase; explicarlos no
+  los reduce. El bloque de transporte sigue abierto.
+- Ninguna magnitud: la fórmula de Walls no se toca.
+
+### Entorno de ejecución
+
+Suite completa en el contenedor de desarrollo (**CPython 3.11.15**): 3213
+pasados, 51 saltados, 0 fallos. El intérprete **certificado** sigue siendo
+**CPython 3.13.12**.
 
 ---
 

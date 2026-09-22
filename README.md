@@ -1,5 +1,29 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.62.0 · Una sola verdad por carril
+
+Las capturas LIVE enseñaban dos contradicciones **imposibles para una misma
+ejecución**: `equity_prints` en `PROVIDER_ERROR` arriba y «SIN DATOS ·
+EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS» abajo; `dark_pool_levels` en `STALE · 382`
+arriba y «CON DATOS · 382» abajo.
+
+- **Cuatro sitios deducían el mismo hecho**, cada uno con su regla, y ninguno
+  tenía un error de lógica: los cuatro leían una **sombra** del hecho.
+- Un refresco fallido **conserva** el bloque anterior —y debe conservarlo, para
+  no tirar 382 filas buenas por un fallo de red—, así que `ready` seguía en
+  `True` y `rows` seguía trayendo 382. El bloque no dice si son de este ciclo.
+- **Ahora el estado se escribe en la ejecución** (`lane_truth`), con
+  `request_id` y `cycle_id`, y las cuatro superficies lo **leen** sin
+  reinterpretarlo. Dos vistas que discrepen dejan de ser una discusión: o citan
+  la misma ejecución, o se ve en el identificador.
+- **`EL_PROVEEDOR_NO_DEVOLVIÓ_FILAS` desaparece.** Era una causa inventada que
+  culpaba al proveedor de un hueco del transporte propio.
+- **Esperar no es fallar**: los estados de espera llevan `waiting_since`,
+  `reason` y `next_eligible_at`, no cambian ninguna severidad, y una espera sin
+  fin sale como anomalía aparte.
+- **Los muros nunca quedan vacíos**: cuatro estados, y cuando no se calculan se
+  nombran los ingredientes que faltan, uno a uno. La fórmula no se toca.
+
 ## v1.61.0 · Los carriles, con sitio para leerse
 
 Medido con el navegador sobre la terminal en marcha, no supuesto: en el panel de

@@ -180,3 +180,24 @@ def universo_ampliado():
         yield _admitir
     finally:
         U.ALLOWED = original
+
+
+@pytest.fixture(autouse=True)
+def _registros_de_proceso_limpios():
+    """La verdad de los carriles y el transporte viven en registros de PROCESO.
+
+    v1.62.0 · Un registro global que sobrevive de un test al siguiente es la
+    peor forma de tener la suite verde: una prueba pasa por lo que dejó escrito
+    otra, y el día que se ejecutan en otro orden falla algo que nadie tocó.
+
+    Se vacían antes y después de CADA test, así que cada uno empieza sin
+    afirmaciones heredadas —que es justo lo que este bloque exige del producto—.
+    """
+    from app.core.lane_truth import TRUTH
+    from app.core.transport_runtime import TRANSPORT
+
+    TRUTH.reset()
+    TRANSPORT.reset()
+    yield
+    TRUTH.reset()
+    TRANSPORT.reset()

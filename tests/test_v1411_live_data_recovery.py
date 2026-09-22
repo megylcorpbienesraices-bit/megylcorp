@@ -384,7 +384,13 @@ def test_diagnostics_names_the_reason_for_every_empty_panel():
     assert by["TRACE · velas"]["reason"] == "BOOTSTRAP_EMPTY"
     # v1.52.1 · La causa ya no sale de las zonas de liquidez propias —una capa
     # DERIVADA— sino del carril del proveedor, que es el que la pantalla lee.
-    assert by["DARK POOL · niveles"]["reason"] == "EL_PROVEEDOR_NO_DEVOLVIO_FILAS"
+    # v1.62.0 · `EL_PROVEEDOR_NO_DEVOLVIO_FILAS` era una causa INVENTADA: se
+    # ponía cuando no había filas, sin haber comprobado por qué no las había.
+    # El invariante que este test defiende —todo panel vacío NOMBRA su causa—
+    # se mantiene; lo que cambia es que la causa ahora es cierta.
+    assert by["DARK POOL · niveles"]["reason"]
+    assert "NO_DEVOLVIO_FILAS" not in by["DARK POOL · niveles"]["reason"].upper()
+    assert "SIN_REGISTRO_DE_EJECUCION" in by["DARK POOL · niveles"]["reason"]
     assert by["DARK POOL · niveles"]["source"] == "QUANTDATA_DARK_POOL_LEVELS"
     assert by["DARK POOL · dark flow"]["source"] == "QUANTDATA_DARK_FLOW"
     assert "TRACE · velas" in d["failing"]

@@ -1339,6 +1339,11 @@ class QuantDataTool:
     repair_log: List[str] = field(default_factory=list)
     stripped_fields: List[str] = field(default_factory=list)
     provider_status: str | None = field(default=None)
+    #: v1.62.0 · Qué FASE del transporte expiró en el último fallo:
+    #: `CONNECT_TIMEOUT`, `POOL_TIMEOUT`, `READ_TIMEOUT` o `WRITE_TIMEOUT`.
+    #: Sin esto, «tardó más de 11.4 s» no dice si el tiempo se fue esperando
+    #: hueco en nuestro pool, conectando o esperando al proveedor.
+    last_error_phase: str | None = field(default=None)
 
     def available(self, now: float | None = None) -> bool:
         return (now or time.time()) >= self.unavailable_until

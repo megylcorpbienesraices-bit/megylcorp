@@ -75,6 +75,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from . import data_lineage as DL
 from . import wall_gex as WG
 from . import wall_snapshot as WS
+from .lane_truth import TRUTH as LANE_TRUTH
 from .data_lineage import LINEAGE, DERIVED, DATA_OK, NO_PROVIDER_DATA, UNAVAILABLE
 from .obs import note as _obs_note
 
@@ -663,7 +664,23 @@ def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = 
                            contract_rows=contract_rows, spot=spot,
                            price_as_of=price_as_of, expiry=pedido,
                            source=fuente_griegas, ages=edades)
-    resuelta = WS.resolve(str(symbol or "").upper(), instantanea)
+    # v1.62.0 · ¿FALTAN los ingredientes, o todavía NO SE HAN PEDIDO?
+    #
+    # Las griegas por contrato salen del order flow. Si ese carril aún no se ha
+    # ejecutado en este ciclo, el snapshot no es NO_CALCULABLE —que afirma que
+    # el dato no existe— sino WAITING_DEPENDENCY, que dice la verdad: no se ha
+    # preguntado todavía.
+    esperando_por = ""
+    if not instantanea.get("ready"):
+        for carril in ("options_order_flow_raw", "options_order_flow"):
+            estado = LANE_TRUTH.read(carril)
+            # `known == False` es «nadie lo ha medido», no «está esperando».
+            # Tomarlo por espera afirmaría algo que nadie comprobó.
+            if estado.get("known") and estado.get("is_waiting"):
+                esperando_por = carril
+                break
+    resuelta = WS.resolve(str(symbol or "").upper(), instantanea,
+                          waiting_on=esperando_por)
     filas_snapshot = list(resuelta.get("rows") or [])
     # El snapshot es COHERENTE o no es nada: si se sirve el anterior, se sirve
     # ENTERO. Tomar sus filas y el precio de ahora mezclaría una cadena de hace
@@ -698,6 +715,41 @@ def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = 
             muro["missing_ingredients"] = list(resuelta.get("missing_names") or [])
             muro["detail"] = resuelta.get("detail")
     return out
+
+
+def _causa_sin_controles(walls: Dict[str, Any],
+                         contrato: Dict[str, Any]) -> Dict[str, Any]:
+    """Por qué NO hay diez controles que enseñar, dicho con nombres.
+
+    Se publica siempre. Cuando hay controles queda en `None` y la tabla los
+    pinta; cuando no los hay, esto es lo que la tabla pinta en su lugar, y
+    nombra el ingrediente que falta en vez de la ausencia de la tabla.
+    """
+    if contrato.get("controls"):
+        return {}
+    instantanea = dict(walls.get("snapshot") or {})
+    estado = str(walls.get("snapshot_state") or instantanea.get("state") or "")
+    faltan = [str(x) for x in (instantanea.get("missing_names") or [])]
+    detalle = str(instantanea.get("detail") or "")
+    if estado == WS.WAITING_DEPENDENCY:
+        resumen = (f"el carril del que salen los ingredientes todavía no se ha "
+                   f"ejecutado en este ciclo: {instantanea.get('waiting_on') or '—'}")
+    elif estado == WS.LKG:
+        resumen = ("se está sirviendo el último snapshot bueno; sus controles son "
+                   "los de ESE ciclo y no los de éste")
+    elif faltan:
+        resumen = "no se pudo armar el snapshot: falta " + ", ".join(faltan)
+    else:
+        resumen = (detalle or "no se publicó snapshot y tampoco su causa: "
+                              "esto es un defecto del motor, no del proveedor")
+    return {
+        "snapshot_state": estado or WS.NO_CALCULABLE,
+        "missing": faltan,
+        "detail": resumen,
+        "expected_controls": list(WG.CONTROL_KEYS),
+        "policy": ("los diez controles se publican cuando hay snapshot; cuando no "
+                   "lo hay se publica POR QUÉ, nunca una tabla vacía"),
+    }
 
 
 def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -848,7 +900,17 @@ def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> D
         "snapshot": w.get("snapshot") or {},
         "snapshot_state": w.get("snapshot_state"),
         "failed_controls": contrato.get("failed_controls") or [],
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.62.0 · LOS DIEZ CONTROLES, O LA CAUSA DE QUE NO EXISTAN
+        # ═══════════════════════════════════════════════════════════════════
+        #
+        # «Los controles del contrato de muros no se publicaron en este ciclo»
+        # era una caja vacía: no decía si faltó la gamma, el vencimiento o el
+        # precio, ni si el carril estaba esperando turno. Ahora, cuando no hay
+        # controles, viaja el ESTADO del snapshot y el ingrediente que falta,
+        # uno a uno. La tabla nunca se queda sin nada que decir.
         "controls": contrato.get("controls") or [],
+        "controls_absent_because": _causa_sin_controles(w, contrato),
         "gex_formula": contrato.get("formula") or WG.FORMULA,
         "expiry": w.get("expiry") or contrato.get("expiry"),
         "expiry_reason": contrato.get("expiry_reason"),

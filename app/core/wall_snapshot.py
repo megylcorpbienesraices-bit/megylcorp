@@ -46,10 +46,18 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 CONTRACT = "ITMQ_WALL_SNAPSHOT_V1"
 
-#: Estados del snapshot.
+#: Estados del snapshot. CUATRO, y en cada ciclo se publica EXACTAMENTE UNO.
+#: «No se publicó nada» dejó de ser una opción: una caja vacía no dice si faltó
+#: la gamma, el vencimiento o el precio, ni si había muros hace treinta
+#: segundos, y las tres cosas se arreglan de maneras distintas.
 COMPLETO = "COMPLETO"
 LKG = "LKG"
 NO_CALCULABLE = "NO_CALCULABLE"
+#: Y el cuarto: no es que los ingredientes falten, es que el carril del que
+#: dependen todavía no se ha ejecutado. Esperar no es no poder calcular.
+WAITING_DEPENDENCY = "WAITING_DEPENDENCY"
+
+ESTADOS = (COMPLETO, LKG, NO_CALCULABLE, WAITING_DEPENDENCY)
 
 #: Los ingredientes, con el nombre EXACTO que se publica cuando faltan.
 GAMMA = "GAMMA"
@@ -240,7 +248,8 @@ SNAPSHOTS = WallSnapshotStore()
 
 
 def resolve(symbol: str, actual: Mapping[str, Any], *,
-            store: Optional[WallSnapshotStore] = None) -> Dict[str, Any]:
+            store: Optional[WallSnapshotStore] = None,
+            waiting_on: str = "") -> Dict[str, Any]:
     """Decide con qué snapshot se calculan las Walls y en qué estado queda.
 
     Tres salidas, y ninguna es una caja vacía:
@@ -274,6 +283,21 @@ def resolve(symbol: str, actual: Mapping[str, Any], *,
                        f"se publica el último snapshot válido de hace {edad:.0f} s"),
         }
 
+    # Si lo que falta es que el carril del que dependen los ingredientes AÚN NO
+    # SE HA EJECUTADO, esto no es «no calculable»: es una espera. Decir
+    # NO_CALCULABLE aquí afirma que el dato no existe cuando lo que pasa es que
+    # todavía no se ha pedido.
+    if str(waiting_on or ""):
+        return {
+            **actual,
+            "state": WAITING_DEPENDENCY,
+            "from_lkg": False,
+            "age_seconds": None,
+            "waiting_on": str(waiting_on),
+            "detail": (f"los ingredientes vienen de «{waiting_on}», que todavía no "
+                       f"se ha ejecutado en este ciclo: no es que falten, es que "
+                       f"aún no se han pedido"),
+        }
     return {
         **actual,
         "state": NO_CALCULABLE,
@@ -287,6 +311,8 @@ def resolve(symbol: str, actual: Mapping[str, Any], *,
 def verdict_label(resuelto: Mapping[str, Any], wall_verdict: str = "") -> str:
     """La etiqueta que ve el operador, con la edad cuando corresponde."""
     estado = str(resuelto.get("state") or "")
+    if estado == WAITING_DEPENDENCY:
+        return (f"ESPERANDO · {resuelto.get('waiting_on') or 'un dato del que depende'}")
     if estado == NO_CALCULABLE:
         faltan = ", ".join(resuelto.get("missing_names") or []) or "ingredientes"
         return f"NO CALCULABLE · falta {faltan}"
@@ -300,7 +326,8 @@ def verdict_label(resuelto: Mapping[str, Any], wall_verdict: str = "") -> str:
 
 __all__ = [
     "build", "resolve", "verdict_label", "WallSnapshotStore", "SNAPSHOTS",
-    "CONTRACT", "COMPLETO", "LKG", "NO_CALCULABLE", "INGREDIENTES",
+    "CONTRACT", "COMPLETO", "LKG", "NO_CALCULABLE", "WAITING_DEPENDENCY",
+    "ESTADOS", "INGREDIENTES",
     "GAMMA", "OI", "VENCIMIENTO", "SPOT", "COBERTURA", "MULTIPLICADOR",
     "LKG_FRESCO_S", "LKG_MAXIMO_S", "MIN_CONTRATOS_POR_LADO",
 ]

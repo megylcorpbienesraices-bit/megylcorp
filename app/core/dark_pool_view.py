@@ -104,6 +104,10 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+from .lane_truth import TRUTH as LANE_TRUTH
+
+#: El carril sirve el último valor bueno: hay filas, y NO son de este ciclo.
+STALE_LKG = "STALE_LKG"
 from typing import Any, Dict, List, Optional, Tuple
 
 #: Estados de un carril. Se corresponden con los de `data_lineage`, más el de
@@ -144,8 +148,54 @@ def _sum(rows: List[Dict[str, Any]], key: str) -> Tuple[Optional[float], int]:
     return (total if seen else None), seen
 
 
-def _lane_status(block: Any, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Estado de un carril, con su causa. Un carril mudo no es auditable."""
+def _lane_status(block: Any, rows: List[Dict[str, Any]],
+                 tool: str = "") -> Dict[str, Any]:
+    """Estado de un carril, con su causa. Un carril mudo no es auditable.
+
+    ═══════════════════════════════════════════════════════════════════════
+    v1.62.0 · ESTA ERA LA CUARTA DEDUCCIÓN, Y LA QUE SE VEÍA EN PANTALLA
+    ═══════════════════════════════════════════════════════════════════════
+
+    Aquí salía el «CON DATOS · 382» del analista: se miraba `ready` y se
+    contaban las filas. Pero un refresco fallido CONSERVA el bloque anterior
+    —y debe conservarlo—, así que `ready` seguía en `True` y las 382 filas
+    seguían ahí. La conclusión «CON DATOS» era falsa: esas filas eran del ciclo
+    anterior y el de ahora se había muerto por plazo.
+
+    La ejecución la declara la AUTORIDAD. Aquí sólo se traduce, y sólo se
+    deduce cuando no hay registro —y entonces se dice que no lo hay, en vez de
+    inventar una causa—.
+    """
+    verdad = LANE_TRUTH.read(tool) if tool else {"known": False}
+    if verdad.get("known"):
+        servidas = int(verdad.get("served_rows") or 0)
+        if str(verdad.get("serving")) == "LKG":
+            return {"state": STALE_LKG, "rows": servidas,
+                    "fresh": False, "lane_truth": verdad,
+                    "detail": (f"{servidas} filas del último ciclo bueno, de hace "
+                               f"{float(verdad.get('lkg_age') or 0):.0f} s: el "
+                               f"refresco de este ciclo falló"),
+                    "field_map": (block.get("field_map") or {}) if isinstance(block, dict) else {}}
+        if verdad.get("is_failure"):
+            fase = str(verdad.get("refresh_error_phase") or "")
+            return {"state": PROVIDER_ERROR, "rows": 0, "fresh": False,
+                    "lane_truth": verdad,
+                    "detail": (str(verdad.get("refresh_error") or "el refresco falló")
+                               + (f" · fase {fase}" if fase else ""))[:240]}
+        if verdad.get("is_waiting"):
+            return {"state": NO_PROVIDER_DATA, "rows": servidas, "fresh": False,
+                    "lane_truth": verdad,
+                    "detail": (f"todavía no se ha ejecutado en este ciclo: "
+                               f"{verdad.get('waiting_reason') or 'en cola'}")[:240]}
+        if str(verdad.get("current_status")) == "NO_DATA":
+            return {"state": NO_PROVIDER_DATA, "rows": 0, "fresh": False,
+                    "lane_truth": verdad,
+                    "detail": "respuesta válida del proveedor sin filas en esta ventana"}
+        return {"state": DATA_OK, "rows": servidas, "fresh": True,
+                "lane_truth": verdad,
+                "detail": f"{servidas} filas del proveedor en este ciclo",
+                "field_map": (block.get("field_map") or {}) if isinstance(block, dict) else {}}
+
     if not isinstance(block, dict):
         return {"state": NO_PROVIDER_DATA, "rows": 0,
                 "detail": "el proveedor no devolvió este carril en el ciclo"}
@@ -254,9 +304,9 @@ def build(*, flow_block: Any, levels_block: Any, prints_block: Any,
     print_rows = _rows_of(prints_block)
 
     status = {
-        "dark_flow": _lane_status(flow_block, flow_rows),
-        "dark_pool_levels": _lane_status(levels_block, level_rows),
-        "equity_prints": _lane_status(prints_block, print_rows),
+        "dark_flow": _lane_status(flow_block, flow_rows, "dark_flow"),
+        "dark_pool_levels": _lane_status(levels_block, level_rows, "dark_pool_levels"),
+        "equity_prints": _lane_status(prints_block, print_rows, "equity_prints"),
     }
 
     # ── Dark Flow ────────────────────────────────────────────────────────────
