@@ -52,6 +52,37 @@
    */
   const AB = global.ITMQBars;
 
+  /* ------------------------------------------------- etiqueta de carril
+   *
+   * v1.61.0 · El nombre del carril, en una PLACA y no suelto sobre el lienzo.
+   *
+   * Escrito directamente sobre el fondo, el rótulo compite con las barras y con
+   * la rejilla: en cuanto una barra le pasa por detrás deja de leerse. Con
+   * fondo propio y borde se lee siempre y separa visualmente un carril del
+   * siguiente, que es lo que hace la referencia del operador.
+   */
+  function laneTag(ctx, box, text, opts) {
+    const t = String(text || '');
+    if (!t) return;
+    const o = opts || {};
+    const x = box.x + (o.dx || 0);
+    const y = (o.y !== undefined) ? o.y : box.y + 3;
+    ctx.save();
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(t).width + 12;
+    const h = 15;
+    ctx.fillStyle = Q.alpha(Q.token('--panel-2', '#141b28'), 0.92);
+    ctx.strokeStyle = Q.token('--border', '#243044');
+    ctx.lineWidth = 1;
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, 3); ctx.fill(); ctx.stroke(); }
+    else { ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h); }
+    ctx.fillStyle = o.color || Q.token('--text-dim', '#8494ad');
+    ctx.fillText(t, x + 6, y + h / 2 + 0.5);
+    ctx.restore();
+  }
+
   function laneExtent(px, value, axisPx) {
     return AB ? AB.extent(px, value, axisPx)
               : (!Number.isFinite(value) || value === 0 ? 0 : Math.max(3, Math.abs(px)));
@@ -516,14 +547,9 @@
     }
     ctx.restore();
 
-    ctx.save();
-    ctx.font = '9px ui-monospace, monospace';
-    ctx.fillStyle = Q.token('--text-dim', '#8494ad');
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     // v1.56.0 · Tres datasets DISTINTOS, con nombres que no se confunden:
     // el agresor y la prima son de OPCIONES; el volumen gris es del SUBYACENTE.
-    ctx.fillText('AGRESOR · OPCIONES', box.x + 4, box.y + 3);
-    ctx.restore();
+    laneTag(ctx, box, 'AGRESOR · OPCIONES', { dx: 4, y: 2 });
 
     if (S.panels.aggr && S.panels.aggr.pointer.inside) crosshairX(ctx, box, S.panels.aggr.pointer.x);
     return false;
@@ -668,7 +694,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('FLUJO NETO · PRIMA DIRECCIONAL', box.x + 4, box.y + 3);
+    laneTag(ctx, box, 'FLUJO NETO · PRIMA DIRECCIONAL', { dx: 4, y: 2 });
     // Un estado degradado se declara aquí, no se disfraza de serie plana.
     if (qf && !qf.ready && qf.state && qf.state !== 'DATA_OK') {
       ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.85);
@@ -793,7 +819,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('PRIMA · OPCIONES', box.x + 4, box.y - 8);
+    laneTag(ctx, box, 'PRIMA · OPCIONES', { dx: 4, y: 2 });
     
     // Los mismos eventos de concentración que se marcan sobre el precio, aquí en
     // su magnitud. Ver el pico y saber a qué precio ocurrió es lo que une los dos
@@ -1001,7 +1027,7 @@
     ctx.globalAlpha = 0.72;
     ctx.fillStyle = Q.token('--text-dim', '#8494ad');
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('VOLUMEN SUBYACENTE · SIP · COLOR = SIGNO DE CINTA', box.x + 6, box.y + 4);
+    laneTag(ctx, box, 'VOLUMEN SUBYACENTE · SIP · COLOR = SIGNO DE CINTA', { dx: 6, y: 2 });
     ctx.restore();
     return true;
   }
@@ -1446,7 +1472,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.alpha(dim, 0.85);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('TOTAL · PRIMA POR INTERVALO', box.x + 4, box.y - 10);
+    laneTag(ctx, box, 'TOTAL · PRIMA POR INTERVALO', { dx: 4, y: 2 });
     ctx.restore();
     return false;
   }
@@ -1508,7 +1534,7 @@
     }
     ctx.globalAlpha = 0.72;
     ctx.textBaseline = 'top';
-    ctx.fillText('VOLUMEN NETO CALL / PUT · QUANT DATA', box.x + 6, box.y + 4);
+    laneTag(ctx, box, 'VOLUMEN NETO CALL / PUT · QUANT DATA', { dx: 6, y: 2 });
     ctx.restore();
     Q.axisX(ctx, box, sx, win.t0, win.t1);
     return true;
@@ -1587,7 +1613,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.85);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('NOTIONAL / MIN', box.x + 4, box.y - 10);
+    laneTag(ctx, box, 'NOTIONAL / MIN', { dx: 4, y: 2 });
     ctx.textAlign = 'right';
     ctx.fillText(Q.money(peak, 1), box.x + box.w - 4, box.y - 10);
     ctx.restore();
@@ -1667,7 +1693,7 @@
     ctx.font = '9px ui-monospace, monospace';
     ctx.fillStyle = Q.alpha(Q.token('--text-dim', '#8494ad'), 0.85);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText('DELTA / MIN', box.x + 4, box.y - 10);
+    laneTag(ctx, box, 'DELTA / MIN', { dx: 4, y: 2 });
     ctx.textAlign = 'right';
     ctx.fillText(`±${Q.money(mag, 1)}`, box.x + box.w - 4, box.y - 10);
     ctx.restore();

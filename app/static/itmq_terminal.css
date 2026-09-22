@@ -162,6 +162,23 @@ nav.sections button.nav-audit.active {
 }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); }
 
+/* v1.61.0 · `[hidden]` TIENE QUE OCULTAR SIEMPRE.
+ *
+ * `[hidden]` es una regla del navegador (`display: none`) con la especificidad
+ * más baja que existe. Cualquier clase propia que declare `display` la gana:
+ *
+ *     .grid { display: grid; }        ← gana
+ *     [hidden] { display: none; }     ← pierde
+ *
+ * Con eso, `<div class="grid c5" hidden>` SE VEÍA. En FLUJO eso ponía los dos
+ * bloques de KPI en pantalla a la vez —los de la cinta y los de Net Drift— y se
+ * comían doscientos píxeles de alto que le faltaban al gráfico. El síntoma se
+ * había parcheado antes caso por caso, pila por pila, que es tratar la fiebre;
+ * esto cierra la causa para todo el documento.
+ */
+[hidden] { display: none !important; }
+
+
 /* --------------------------------------------------------------- main */
 
 main { flex: 1; overflow: hidden; position: relative; }
@@ -209,6 +226,28 @@ section.view.fixed.active { display: flex; flex-direction: column; gap: 8px; }
 .kpi small { font-size: 10px; color: var(--text-dim); font-family: var(--mono); }
 .kpi.pos b { color: var(--pos); } .kpi.neg b { color: var(--neg); }
 .kpi.accent b { color: var(--accent); }
+
+/* v1.61.0 · EN LAS VISTAS DE GRÁFICO, LAS CIFRAS ACOMPAÑAN; NO MANDAN.
+ *
+ * En FLUJO, cuatro tarjetas a tamaño de portada ocupaban 85 px de alto antes de
+ * que empezara el gráfico. La referencia del operador no tiene tarjetas encima
+ * del gráfico en absoluto: el gráfico ES la pantalla.
+ *
+ * No se quitan —son medidas reales y se usan—: se compactan. La cifra sigue
+ * entera y legible; lo que se recorta es el aire, que es lo que le faltaba al
+ * carril de abajo. */
+.view.fixed .kpi { padding: 5px 10px; gap: 1px; }
+.view.fixed .kpi span { font-size: 9px; letter-spacing: .07em; }
+.view.fixed .kpi b { font-size: 15px; line-height: 1.1; }
+.view.fixed .kpi small { font-size: 9px; }
+.view.fixed .grid { gap: 6px; }
+/* Y en una sola fila mientras quepan: cinco tarjetas repartidas en tres
+   columnas dejan una fila a medias —dos tarjetas y un hueco— y esa fila de
+   sobra son sesenta píxeles que le faltan al gráfico. */
+@media (min-width: 1200px) {
+  .view.fixed .grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .view.fixed .grid.c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
 
 /* ------------------------------------------------------------ controls */
 
@@ -359,43 +398,65 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
   .trace-col + .trace-col { border-left: 0; border-top: 1px solid var(--border); }
 }
 
-/* ------------------------------------------------------- flow stack */
+/* ------------------------------------------------------- flow stack
+ *
+ * v1.61.0 · CADA CARRIL CON SITIO PARA LEERSE.
+ *
+ * Lo que había medía esto en una ventana de 1000 px:
+ *
+ *     ofDrift          660 px   (su mínimo, DESBORDANDO el contenedor de 645)
+ *     ofDriftTotal       1 px
+ *     ofDeltaMin         1 px
+ *     ofDriftNotional   88 px
+ *     ofDriftVolume      1 px
+ *
+ * Tres carriles de UN PÍXEL. La causa: `.drift-stack` declaraba CUATRO filas
+ * para SEIS hijos, así que los dos últimos caían en filas implícitas `auto` y,
+ * al ser lienzos sin alto intrínseco, se aplastaban a nada. El dato estaba, la
+ * pantalla no lo tenía.
+ *
+ * Ahora cada hijo tiene su fila declarada y su ALTURA MÍNIMA EN PÍXELES. Si la
+ * ventana no da para todos con su mínimo, la pila hace scroll: más vale
+ * desplazarse que leer una barra de un píxel. El reparto sigue la proporción de
+ * la referencia del operador — el precio se lleva cerca de la mitad y los
+ * carriles inferiores son bandas anchas, no rayas.
+ */
 
 .flow-stack {
   flex: 1; min-height: 0; display: grid;
-  grid-template-rows: minmax(0, 1fr) 24px minmax(0, .36fr) minmax(0, .30fr) minmax(0, .36fr);
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
+  /* precio · agresor · flujo neto · volumen · total */
+  /* precio · agresor · flujo neto · volumen · total.
+     Los suelos van en PÍXELES y a la vista: una fracción de una ventana baja
+     sigue siendo una raya, y lo que se lee en un carril de barras es la
+     DIFERENCIA entre barras, que por debajo de ~130 px no cabe. */
+  grid-template-rows:
+    minmax(420px, 3.4fr)
+    28px
+    minmax(132px, 1fr)
+    minmax(132px, 1fr)
+    minmax(132px, 1fr);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+  overflow-x: hidden; overflow-y: auto;
 }
 .flow-lane { position: relative; min-height: 0; }
 .flow-lane + .flow-lane { border-top: 1px solid var(--border); }
 
 /* NET DRIFT · mismo contenedor y mismo reloj que la cinta, otra lectura.
-   La curva acumulada manda (1fr), el volumen neto la acompaña y la lista de
-   trades del intervalo seleccionado cierra abajo con altura fija: así el
-   gráfico nunca se queda sin sitio cuando la lista crece. */
+   La curva acumulada manda y cada carril auxiliar conserva su banda: son los
+   que dicen EN QUÉ MINUTO se pagó, y para eso hay que poder verlos. */
 .drift-stack {
-  /* v1.50.0 · La curva se lleva el sitio. Con 1fr / .34fr / .38fr el gráfico
-     principal se quedaba con menos de la mitad del alto y las tres curvas
-     acumuladas se aplastaban unas sobre otras justo donde hay que leer su
-     separación. La tabla de trades es un detalle bajo demanda: se le deja lo
-     justo para tres o cuatro filas y crece con scroll. */
   flex: 1; min-height: 0; display: grid;
-  /* v1.51.0 · 2.2fr seguia saliendo corto: los dos carriles auxiliares y la tabla
-     se reparten el resto por fraccion, asi que en una ventana baja el grafico
-     principal volvia a quedarse pequeno. Un suelo de 360 px en PIXELES lo impide
-     pase lo que pase con el alto de la ventana. */
-  /* v1.52.0 · 360 px seguía saliendo corto en pantalla completa: con el bloque
-     de ocho KPI encima, el gráfico se quedaba en poco más de un tercio del alto
-     útil. 520 px de suelo y 4.2fr de reparto; los dos carriles auxiliares y la
-     tabla se conforman con lo que sobra, que es lo justo para lo que son. */
-  /* v1.55.0 · 520 -> 660 px y 4.2fr -> 6fr. Con las tres curvas acumuladas
-     —CALL, PUT y NETO— superpuestas, lo que se lee es su SEPARACIÓN, y a 520 px
-     con los ocho KPI encima seguían saliendo pegadas en la mitad de la sesión en
-     que el neto se acerca a cero, que es justo cuando hace falta distinguirlas.
-     Los dos carriles auxiliares bajan a .24fr: dicen «en qué minuto», y para eso
-     les sobra. */
-  grid-template-rows: minmax(660px, 6fr) minmax(0, .24fr) minmax(0, .24fr) minmax(88px, .30fr);
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
+  /* curva · total · delta/min · notional/min · volumen neto · trades */
+  /* curva · total · delta/min · notional/min · volumen neto · trades */
+  grid-template-rows:
+    minmax(660px, 6fr)
+    minmax(132px, 1fr)
+    minmax(132px, 1fr)
+    minmax(132px, 1fr)
+    minmax(132px, 1fr)
+    minmax(104px, .9fr);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+  overflow-x: hidden; overflow-y: auto;
 }
 .drift-stack[hidden], .flow-stack[hidden] { display: none; }
 .drift-trades { min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
@@ -412,6 +473,29 @@ body.replaying main { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn)
 .chart { position: relative; width: 100%; height: 300px; }
 .chart.sm { height: 210px; }
 .chart.lg { height: 420px; }
+
+/* v1.61.0 · EL GRÁFICO PRINCIPAL DE UNA VISTA SE LLEVA LA PANTALLA.
+ *
+ * 420 px fijos es el alto de una tarjeta, no el de un gráfico que se mira. En
+ * DARK POOL, con nueve KPI encima repartidos en TRES filas, el precio quedaba
+ * en la mitad inferior y aplastado; y en un monitor grande seguía midiendo 420
+ * px con medio panel vacío debajo.
+ *
+ * `clamp` lo ata a la ventana REAL: nunca por debajo de 420 px —el suelo de
+ * legibilidad— y hasta 760 px en pantallas altas. */
+.chart.hero { height: clamp(420px, 56vh, 760px); }
+
+/* Y las nueve tarjetas de DARK POOL, compactas: el gráfico es lo que se mira,
+   las cifras acompañan. Mismo criterio que en las vistas de gráfico fijo. */
+.view[data-view="darkpool"] .kpi { padding: 6px 10px; gap: 1px; }
+.view[data-view="darkpool"] .kpi span { font-size: 9px; letter-spacing: .07em; }
+.view[data-view="darkpool"] .kpi b { font-size: 16px; line-height: 1.1; }
+.view[data-view="darkpool"] .kpi small { font-size: 9px; }
+@media (min-width: 1500px) {
+  /* Nueve en tres filas de tres son tres filas; nueve en cinco columnas son
+     dos, y la segunda no queda coja porque las cuatro restantes se estiran. */
+  .view[data-view="darkpool"] .grid.c3 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
 /* v1.51.0 · El relieve no puede heredar el alto CRECIDO del perfil de barras:
    con ciento sesenta strikes ese alto llega a miles de pixeles, la fuga se
    calculaba sobre el lienzo entero y salia fuera de la parte visible. Tiene

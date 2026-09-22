@@ -1,16 +1,126 @@
-# ITM QUANT MULTI ASSET · v1.60.0 — El transporte, de raíz
+# ITM QUANT MULTI ASSET · v1.61.0 — Los carriles, con sitio para leerse
 
-Release: `ITM_QUANT_v1.60.0_PRE_VPS` · Base: `v1.59.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.61.0_PRE_VPS` · Base: `v1.60.0` · Alcance: `MULTI_ASSET`
 
-**No se modifican fórmulas, pesos del Scanner ni autoridad direccional.** Call
-Wall / Put Wall y los bloques 3, 4, 5 y 7 de v1.59.0 quedan intactos.
-
-> **Este bloque NO se da por cerrado con esta entrega.** Se cierra cuando el
-> certificador LIVE, ejecutado en el Windows del operador contra la API real,
-> demuestre que desaparece la repetición de `connect timed out`. Lo que hay aquí
-> es la corrección y su regresión; la prueba es suya.
+**Ninguna matemática cambia.** Esta release reparte ALTO EN PANTALLA. El
+transporte de v1.60.0 y los bloques 3, 4, 5 y 7 de v1.59.0 quedan intactos.
 
 ---
+
+## 0 · LO QUE SE MIDIÓ, NO LO QUE SE SUPUSO
+
+Con Chromium sobre la terminal en marcha, ventana de 1600×1000, midiendo
+`getBoundingClientRect()` de cada carril del panel **NET DRIFT**:
+
+```
+ofDrift          660 px   ← su mínimo, DESBORDANDO el contenedor de 645
+ofDriftTotal       1 px
+ofDeltaMin         1 px
+ofDriftNotional   88 px
+ofDriftVolume      1 px
+```
+
+**Tres carriles de un píxel.** El dato estaba; la pantalla no lo tenía.
+
+Y en la cinta:
+
+```
+ofPrice          307 px   ← el gráfico principal, menos de la mitad del alto
+ofNet            110 px
+ofVolume          92 px
+ofTotal          110 px
+```
+
+---
+
+## 1 · LAS DOS CAUSAS
+
+### Causa 1 · cuatro filas declaradas para seis hijos
+
+```css
+.drift-stack { grid-template-rows: minmax(660px,6fr) .24fr .24fr minmax(88px,.30fr); }
+```
+
+Seis hijos —curva, total, delta/min, notional/min, volumen neto y la tabla— y
+**cuatro** filas. Los dos últimos caían en filas implícitas `auto` y, al ser
+lienzos sin alto intrínseco, se aplastaban a nada.
+
+Nadie lo vio porque **el CSS no falla**: reparte lo que hay y sigue.
+
+### Causa 2 · `[hidden]` había dejado de ocultar
+
+`[hidden]` es una regla del navegador con la especificidad más baja que existe.
+Cualquier clase propia que declare `display` la gana:
+
+```css
+.grid    { display: grid; }   ← gana
+[hidden] { display: none; }   ← pierde
+```
+
+Así que `<div class="grid c5" hidden>` **se veía**: los KPI de la cinta y los de
+Net Drift en pantalla a la vez, **doscientos píxeles** que le faltaban al
+gráfico. Se había parcheado antes pila por pila; ahora se cierra la causa para
+todo el documento.
+
+---
+
+## 2 · LO QUE CAMBIA
+
+```
+una fila declarada por cada hijo, en las dos pilas
+suelo en PÍXELES por carril          132 px · lo que hace falta para que se
+                                      lea la DIFERENCIA entre barras
+suelo del gráfico principal          420 px en la cinta · 660 px en Net Drift
+scroll cuando la ventana no da       aplastar era la opción anterior, y
+                                      producía carriles de un píxel
+[hidden]                             oculta pase lo que pase
+KPI en vistas de gráfico             compactos: la cifra entera, sin el aire
+DARK POOL                            clamp(420px, 56vh, 760px) y nueve
+                                      tarjetas en dos filas, no en tres
+placa de carril                      fondo propio y borde, para que el rótulo
+                                      se lea aunque le pase una barra por detrás
+```
+
+### Medido después, en la misma ventana
+
+```
+NET DRIFT   ofDrift 660 · total 132 · delta 132 · notional 132 · volumen 132
+CINTA       ofPrice 420 · neto 132 · volumen 132 · total 132
+            (el contenedor pasa de 645 a 829 px al recuperar los 200 de los KPI)
+```
+
+---
+
+## 3 · POR QUÉ ESTO NO SE HABÍA CAZADO
+
+Había tres pruebas defendiendo el alto del gráfico principal y **ninguna
+contaba las filas contra los hijos**. El suelo del gráfico se había subido tres
+veces —360 → 520 → 660— persiguiendo el síntoma: el gráfico se veía pequeño
+porque las otras filas se llevaban su fracción *y porque dos de ellas ni
+existían*. Subir el suelo del primero no podía arreglar a los que no tenían fila.
+
+`tests/test_v1610_carriles_con_sitio.py` · **14 casos**, y el que cierra el
+agujero cuenta los hijos del HTML contra las filas del CSS: si mañana alguien
+añade un carril y no toca la rejilla, falla.
+
+---
+
+## 4 · AUDITORÍA DEL MOTOR
+
+La auditoría de esta release está en `QUANT_ENGINE_AUDIT_v1.61.0.md`.
+
+---
+
+## 5 · LO QUE SIGUE
+
+El bloque de **transporte** de v1.60.0 sigue **abierto**: se cierra con el
+informe LIVE en Windows. Después, TRACE visual y GLOBAL/LOCAL.
+
+---
+
+# Historial · v1.60.0 — El transporte, de raíz
+
+Release: `ITM_QUANT_v1.60.0_PRE_VPS` · Base: `v1.59.0` · Alcance: `MULTI_ASSET`
 
 ## 0 · LO QUE EL REGISTRO DE WINDOWS ENSEÑABA
 

@@ -3787,8 +3787,26 @@
     "test_y_baja_sola_cuando_el_host_vuelve_a_conectar_bien",
     "test_y_en_rafaga_no_reintenta_ninguna_vez"
    ]
+  },
+  "tests/test_v1610_carriles_con_sitio.py": {
+   "casos": 14,
+   "tests": [
+    "test_cada_carril_de_barras_tiene_suelo_en_pixeles",
+    "test_cada_carril_lleva_su_nombre_en_una_placa",
+    "test_el_grafico_de_dark_pool_escala_con_la_ventana",
+    "test_el_grafico_principal_se_lleva_la_mayor_parte",
+    "test_el_html_no_ha_anadido_carriles_sin_fila",
+    "test_en_las_vistas_de_grafico_las_cifras_acompanan",
+    "test_hidden_gana_a_cualquier_display_propio",
+    "test_la_cinta_declara_una_fila_por_carril",
+    "test_la_pila_hace_scroll_en_vez_de_aplastar",
+    "test_la_placa_tiene_fondo_propio_y_borde",
+    "test_las_nueve_tarjetas_de_dark_pool_no_ocupan_tres_filas",
+    "test_los_dos_bloques_de_kpi_de_flujo_se_excluyen",
+    "test_net_drift_declara_una_fila_por_hijo"
+   ]
   }
  },
- "total_minimo": 3209,
- "version": "1.60.0"
+ "total_minimo": 3223,
+ "version": "1.61.0"
 }

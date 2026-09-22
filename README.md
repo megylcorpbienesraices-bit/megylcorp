@@ -1,5 +1,28 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.61.0 · Los carriles, con sitio para leerse
+
+Medido con el navegador sobre la terminal en marcha, no supuesto: en el panel de
+**Net Drift** tres carriles medían **un píxel de alto** —`TOTAL`, `DELTA / MIN` y
+`VOLUMEN NETO`— y la curva desbordaba su contenedor. El dato estaba; la pantalla
+no lo tenía.
+
+- **La rejilla declaraba cuatro filas para seis carriles.** Los dos últimos
+  caían en filas implícitas y, al ser lienzos sin alto propio, se aplastaban a
+  nada. El CSS no falla: reparte lo que hay y sigue, sin un aviso.
+- **`[hidden]` había dejado de ocultar.** Es la regla del navegador con menos
+  especificidad, y `.grid { display: grid }` le gana: los dos bloques de KPI de
+  FLUJO salían a la vez y se comían 200 px que le faltaban al gráfico.
+- **Ahora cada carril tiene su fila y su suelo en píxeles** (132 px), el gráfico
+  principal el suyo (420 px en la cinta, 660 px en Net Drift), y cuando la
+  ventana no da, la pila **se desplaza en vez de aplastar**.
+- **DARK POOL** deja los 420 px fijos por `clamp(420px, 56vh, 760px)`, y sus
+  nueve tarjetas pasan de tres filas a dos.
+
+El suelo del gráfico principal se había subido tres veces —360 → 520 → 660—
+persiguiendo el síntoma. Cuando el mismo número hay que subirlo tres veces, el
+número no es el problema.
+
 ## v1.60.0 · El transporte, de raíz
 
 `Quant Data connect timed out after 4.0s`, repetido en `net_drift`, `net_flow`,

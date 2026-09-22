@@ -1,14 +1,81 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.60.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.61.0
 
-Release: `ITM_QUANT_v1.60.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.61.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A21** es la de esta release.
+> Documento acumulativo. La sección **A22** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **3209 casos / 194 ficheros**
-- Particiones: 21 · `plan_sha256`: `4b8b1c35fbe083766c09d09567544f6543f7976c28220e48eeee1ebf20539f0f`
+- Inventario nominal: **3223 casos / 195 ficheros**
+- Particiones: 21 · `plan_sha256`: `ad5f220d1ce7c636f5e31a2a5dcb249910299a9a8c967e98c04b0df8b63d7799`
 - Resultado: **PASS**
+
+---
+
+## A22 · v1.61.0 · Los carriles, con sitio para leerse
+
+### La medición que abrió el caso
+
+Chromium sobre la terminal en marcha, ventana de 1600×1000,
+`getBoundingClientRect()` de cada carril. Panel **NET DRIFT**:
+
+| carril | antes | después |
+|---|---|---|
+| `ofDrift` (curva) | 660 px *(desbordando un contenedor de 645)* | **660 px** |
+| `ofDriftTotal` | **1 px** | **132 px** |
+| `ofDeltaMin` | **1 px** | **132 px** |
+| `ofDriftNotional` | 88 px | **132 px** |
+| `ofDriftVolume` | **1 px** | **132 px** |
+| contenedor | 645 px | **829 px** |
+
+Panel **CINTA**:
+
+| carril | antes | después |
+|---|---|---|
+| `ofPrice` | 307 px | **420 px** |
+| `ofNet` | 110 px | **132 px** |
+| `ofVolume` | 92 px | **132 px** |
+| `ofTotal` | 110 px | **132 px** |
+
+### Qué se certifica
+
+Catorce casos en `tests/test_v1610_carriles_con_sitio.py`.
+
+**Una fila por carril.** La cinta declara cinco y Net Drift seis. Y el caso que
+cierra el agujero de verdad: **los hijos del HTML se cuentan contra las filas
+del CSS**, así que si mañana se añade un carril y no se toca la rejilla, falla.
+Ésa era la prueba que no existía, y por eso tres carriles pudieron medir un
+píxel con tres pruebas vigilando el alto del gráfico.
+
+**Suelos en píxeles, no fracciones**, para cada carril y para el gráfico
+principal, que además tiene que llevarse más del doble que cualquier otro. Y
+`overflow-y: auto`: cuando la ventana no da, se desplaza en vez de aplastar.
+
+**`[hidden]` oculta**, con `!important`, porque es una regla del navegador con
+la especificidad más baja y cualquier clase con `display` la gana. Más los dos
+bloques de KPI de FLUJO, que se excluyen entre sí.
+
+**DARK POOL:** el gráfico escala con la ventana —`clamp(420px, 56vh, 760px)`,
+nunca por debajo de lo que ya tenía— y las nueve tarjetas bajan de tres filas a
+dos.
+
+**La placa del carril:** nombre con fondo propio y borde, para que no deje de
+leerse en cuanto le pase una barra por detrás.
+
+### Qué NO se certifica aquí
+
+- **Que la pantalla se parezca a la referencia del operador.** Lo medido es el
+  reparto de alto, con cifras antes y después. La apariencia final con datos
+  reales, en su monitor, la juzga él.
+- **Que los carriles tengan datos.** Esto les da sitio; que lleguen datos
+  depende del transporte, que sigue **abierto** hasta la certificación LIVE.
+- Ninguna magnitud: no se ha tocado una sola.
+
+### Entorno de ejecución
+
+Suite completa en el contenedor de desarrollo (**CPython 3.11.15**): 3172
+pasados, 51 saltados, 0 fallos. El intérprete **certificado** sigue siendo
+**CPython 3.13.12**.
 
 ---
 
