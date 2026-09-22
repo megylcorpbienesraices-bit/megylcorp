@@ -452,6 +452,9 @@ table.data th:first-child, table.data td:first-child { text-align: left; }
 table.data td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--panel-2); white-space: nowrap; }
 table.data tbody tr:hover { background: var(--panel-2); }
 table.data .pos { color: var(--pos); } table.data .neg { color: var(--neg); }
+/* WALL PROVISIONAL no es un error ni un acierto: es un dato incompleto,
+   y necesita su propio color para no leerse como ninguno de los dos. */
+table.data .warn { color: var(--warn); }
 .table-wrap { max-height: 340px; overflow: auto; }
 
 /* Nota de procedencia bajo una tabla: dice de dónde sale el número que está

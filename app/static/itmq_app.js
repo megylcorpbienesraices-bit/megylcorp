@@ -1890,6 +1890,69 @@
         : (q.remaining === null || q.remaining === undefined ? 'cuota —'
           : `cuota ${q.remaining}${q.limit ? '/' + q.limit : ''}`));
 
+    // v1.57.0 · MUROS · EL CÁLCULO Y SU VEREDICTO.
+    //
+    // El cálculo de los muros ya viajaba en el JSON del auditor y no se pintaba
+    // en ninguna parte, así que para comprobar una wall había que abrir la
+    // respuesta a mano. Un nivel que se dibuja sobre el gráfico de operativa y
+    // no se puede auditar desde la pantalla es una afirmación sin respaldo.
+    //
+    // Aquí van los cinco números que sostienen cada muro —strike, gamma, interés
+    // abierto, precio y hora de captura— más el vencimiento que los ata a una
+    // fecha, y el veredicto de los datos con los que se calculó.
+    const wc = (d.auditor || {}).wall_calculation || {};
+    const wcSides = wc.sides || {};
+    const wallRows = [];
+    for (const [kind, label] of [['call_wall', 'CALL WALL'], ['put_wall', 'PUT WALL']]) {
+      const w = wcSides[kind];
+      if (w) wallRows.push(Object.assign({ kind, label }, w));
+    }
+    fillTable('tblWallVerdict', wallRows, w => [
+      `<span class="${w.kind === 'call_wall' ? 'pos' : 'neg'}">${esc(w.label)}</span>`,
+      // CONFIRMADA en verde, PROVISIONAL en ámbar. Un muro provisional no es un
+      // error: es un muro cuya cadena no llegó entera, y se dice.
+      w.verdict === 'WALL_CONFIRMADA'
+        ? '<span class="pos">WALL CONFIRMADA</span>'
+        : (w.verdict === 'WALL_PROVISIONAL'
+          ? '<span class="warn">WALL PROVISIONAL</span>'
+          : `<span class="dim">${esc(w.verdict || 'SIN VEREDICTO')}</span>`),
+      Q.isNum(Q.num(w.selected_strike, NaN)) ? Q.num(w.selected_strike).toFixed(2) : '—',
+      Q.isNum(Q.num(w.gamma, NaN)) ? Q.num(w.gamma).toFixed(5) : '—',
+      Q.isNum(Q.num(w.open_interest, NaN)) ? Q.num(w.open_interest).toLocaleString('es-ES') : '—',
+      Q.isNum(Q.num(w.gex, NaN)) ? Q.num(w.gex).toLocaleString('es-ES', { maximumFractionDigits: 0 }) : '—',
+      Q.isNum(Q.num(w.spot_used, NaN)) ? Q.num(w.spot_used).toFixed(2) : '—',
+      w.price_as_of ? `<code class="mute">${esc(String(w.price_as_of).slice(0, 19))}</code>` : '<span class="warn">sin hora</span>',
+      w.expiry ? `<code class="mute">${esc(w.expiry)}</code>` : '<span class="warn">sin vencimiento</span>',
+      Q.isNum(Q.num(w.margin_over_runner_up_pct, NaN))
+        ? `${Q.num(w.margin_over_runner_up_pct).toFixed(1)} %${w.runner_up ? `<small class="dim"> sobre ${Q.num(w.runner_up.strike).toFixed(2)}</small>` : ''}`
+        : '<span class="dim">—</span>',
+    ], 'Sin cálculo de muros en este ciclo', true);
+    const wcNote = el('wallVerdictNote');
+    if (wcNote) {
+      const noCalc = (wc.not_calculated_as || []).join(' · ');
+      wcNote.innerHTML = wc.gex_formula
+        ? `<code class="mute">${esc(wc.gex_formula)}</code> · convención ${esc(wc.positioning_convention || '—')}`
+          + (noCalc ? `<br><span class="dim">NO se calcula como: ${esc(noCalc)}.</span>` : '')
+          + `<br><span class="dim">${esc(wc.wall_is || '')}</span>`
+        : 'El cálculo de muros no publicó su fórmula en este ciclo.';
+    }
+
+    fillTable('tblWallControls', (wc.controls || []), (c, i) => [
+      String((wc.controls || []).indexOf(c) + 1),
+      `<code class="mute">${esc(c.control)}</code>`,
+      c.ok ? '<span class="pos">CUMPLE</span>' : '<span class="neg">FALTA</span>',
+      esc(c.detail || '—'),
+    ], 'Los controles del contrato de muros no se publicaron en este ciclo', true);
+    const wcCtrl = el('wallControlsNote');
+    if (wcCtrl) {
+      const fallidos = wc.failed_controls || [];
+      wcCtrl.innerHTML = fallidos.length
+        ? `<span class="warn">WALL PROVISIONAL</span> · falta: <code class="mute">${esc(fallidos.join(' · '))}</code>`
+        : ((wc.controls || []).length
+          ? '<span class="pos">WALL CONFIRMADA</span> · los diez datos del contrato están presentes.'
+          : '—');
+    }
+
     // v1.46.0 · DARK POOL, carril por carril. Un 400 (hay que corregir el cuerpo),
     // un 5xx (hay que esperar al proveedor) y un mercado cerrado (no hay nada que
     // corregir) dejaban la sección igual de vacía y se veían igual. Aquí no.

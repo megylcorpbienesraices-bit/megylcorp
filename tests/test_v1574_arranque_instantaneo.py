@@ -318,8 +318,14 @@ def test_no_queda_la_nota_suelta_de_la_auditoria():
     """`AUDIT_FIX.md` era una nota de una pasada concreta, ya en el CHANGELOG."""
     import pathlib
     assert not pathlib.Path("AUDIT_FIX.md").exists()
-    changelog = pathlib.Path("CHANGELOG_v1.56.0.md").read_text("utf-8")
-    assert "df2ca9d" in changelog, "el contenido tiene que seguir estando en algún sitio"
+    # v1.57.0 · Se busca en TODOS los changelogs, no en uno por su nombre de
+    # versión: lo que esta prueba defiende es que el contenido no se perdió, y
+    # fijarlo a `CHANGELOG_v1.56.0.md` la rompía en el siguiente cambio de
+    # versión por un motivo que no tiene nada que ver con lo que comprueba.
+    changelogs = sorted(pathlib.Path(".").glob("CHANGELOG_v*.md"))
+    assert changelogs, "no queda ningún changelog en la raíz"
+    texto = "\n".join(c.read_text("utf-8") for c in changelogs)
+    assert "df2ca9d" in texto, "el contenido tiene que seguir estando en algún sitio"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

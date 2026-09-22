@@ -1,4 +1,4 @@
-# AUDITORÍA DEL MOTOR · ITM QUANT v1.56.0
+# AUDITORÍA DEL MOTOR · ITM QUANT v1.57.0
 
 ## Veredicto
 
@@ -164,3 +164,41 @@ que no tener diagnóstico.
 
 La regla: **el diagnóstico y la vista leen la misma fuente, siempre.** Si divergen,
 el diagnóstico deja de ser un instrumento y pasa a ser otra cosa que auditar.
+
+## 11 · v1.57.0 · Un factor contado dos veces no se ve en el resultado
+
+Call Wall y Put Wall se elegían con una media geométrica de dos evidencias: la
+exposición por strike **que publica el proveedor** y el interés abierto del
+strike.
+
+```
+score = 100 · exposición_lado^(1−w) · interés_abierto_lado^w      w = 0.5
+```
+
+El razonamiento parecía sólido —«un strike con exposición calculada pero sin
+libro detrás no es un muro»— y el defecto estaba un nivel por debajo: **el
+interés abierto ya es un factor de la exposición**.
+
+```
+Gamma Exposure = gamma × OI × multiplicador × precio² × 0.01
+                          ↑
+                    ya está aquí
+```
+
+Multiplicarlo otra vez lo cuenta dos veces. La consecuencia es un sesgo: el muro
+se desplaza hacia strikes con mucho libro abierto y gamma pequeña, que son
+precisamente los que menos cobertura obligan a ajustar. Y no hay forma de
+detectarlo mirando la salida, porque el resultado es un strike plausible con una
+puntuación alta.
+
+La regla: **cuando una magnitud derivada ya contiene un factor, ponderar por ese
+factor no añade evidencia; introduce un sesgo del que no queda rastro.** La única
+defensa es calcular la magnitud entera desde sus ingredientes —gamma y OI por
+contrato— y ordenar por ella.
+
+Lo que esta auditoría **no** puede afirmar: que el strike que sale ahora sea el
+que frene al precio. La fórmula mide dónde tendría que ajustar más el dealer si
+el precio llegara allí, bajo una convención de posicionamiento **declarada**
+(`CLIENTE_LARGO_OPCIONES__DEALER_CORTO_GAMMA`), no medida. El inventario real de
+clientes y dealers no lo publica ningún proveedor de los conectados. Una wall es
+una concentración de cobertura probable, no una barrera.

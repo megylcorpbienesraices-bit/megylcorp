@@ -1,4 +1,4 @@
-# ITM QUANT v1.56.0 · ESTADO POR MÓDULO
+# ITM QUANT v1.57.0 · ESTADO POR MÓDULO
 
 ## Los cinco niveles, y qué NO demuestra cada uno
 
@@ -166,7 +166,7 @@ Con Python 3.12.14 y Node 22.16.0 instalados:
 
 ```
 python scripts/package_release_artifact.py --check      # PACKAGING UNLOCKED
-python scripts/package_release_artifact.py --output ../ITM_QUANT_v1.56.0.zip
+python scripts/package_release_artifact.py --output ../ITM_QUANT_v1.57.0.zip
 ```
 
 Un ZIP producido con otra cadena de herramientas **no es** el certificado, por

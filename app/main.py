@@ -1631,11 +1631,32 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
 
     levels = payload.get("levels") or []
     spot = None
+    # v1.57.0 · EL PRECIO VIAJA CON SU HORA DE CAPTURA.
+    #
+    # La Gamma Exposure lleva el precio AL CUADRADO, así que un precio de hace
+    # cinco minutos no es «casi el mismo número»: es un muro medido sobre otro
+    # mercado. Sin la hora no había forma de saber cuál de los dos se estaba
+    # mirando, y el requisito de «misma hora para OI, gamma y precio» no se
+    # podía comprobar porque a una de las tres entradas le faltaba la hora.
+    price_as_of = None
+    price_age_s = None
     candles = payload.get("candles") or []
     if candles and isinstance(candles[-1], dict):
         spot = candles[-1].get("c")
+        price_as_of = candles[-1].get("t")
     if spot is None:
         spot = (payload.get("profiles") or {}).get("spot")
+        price_as_of = price_as_of or (payload.get("profiles") or {}).get("timestamp")
+    if price_as_of:
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            _t = _dt.fromisoformat(str(price_as_of).replace("Z", "+00:00"))
+            if _t.tzinfo is None:
+                _t = _t.replace(tzinfo=_tz.utc)
+            price_age_s = max(0.0, (_dt.now(_tz.utc) - _t).total_seconds())
+        except Exception as exc:
+            _obs_note("main:wall_price_age", exc, severity="OPTIONAL")
+            price_age_s = None
 
     previous = {lv.get("kind"): lv.get("price") for lv in levels if isinstance(lv, dict)}
     fallback = {"call_wall": previous.get("call_wall"),
@@ -1644,7 +1665,9 @@ def _resolve_walls(payload: dict, intel: dict, symbol: str) -> dict:
 
     hub = HUB.hub_snapshot(symbol, intel,
                            engine_heatmap=(payload.get("heatmap_history") or {}))
-    walls = WE.walls_from_hub(symbol, hub, spot=spot, fallback=fallback)
+    walls = WE.walls_from_hub(symbol, hub, spot=spot, fallback=fallback,
+                              price_as_of=price_as_of, price_age_s=price_age_s,
+                              price_source="SESSION_CANDLE_CLOSE")
     # v1.56.0 · CÓMO se calculó cada muro, con los números que lo sostienen.
     # Un muro dibujado es una afirmación sobre el mercado; si su único respaldo
     # es que hay una línea en el gráfico, no hay forma de discutirla ni de

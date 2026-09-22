@@ -1,6 +1,6 @@
 # ITM QUANT · MULTI ASSET
 
-## v1.56.0 · Dónde se rompe, y qué no se borra
+## v1.57.0 · Dónde se rompe, y qué no se borra
 
 - **El agresor: «no lo sé» no era suficiente.** v1.53.0 dejó de inventar el lado
   y las marcas salieron neutras — honesto y **no accionable**. Ahora se

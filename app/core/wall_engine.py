@@ -73,7 +73,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import data_lineage as DL
+from . import wall_gex as WG
 from .data_lineage import LINEAGE, DERIVED, DATA_OK, NO_PROVIDER_DATA, UNAVAILABLE
+from .obs import note as _obs_note
 
 # Cuánto tiene que mejorar un candidato para desbancar al muro vigente. Por debajo
 # de este margen la diferencia es ruido y cambiar la línea sólo despista.
@@ -347,11 +349,70 @@ def _apply_hysteresis(symbol: str, side: str, candidates: List[Dict[str, Any]],
     return kept, "se mantiene por histéresis", None
 
 
+def _publish_spec(symbol: str, side: str, spec: Dict[str, Any],
+                  contrato: Dict[str, Any]) -> Dict[str, Any]:
+    """El muro del contrato de GEX, con la forma que publica el Wall Engine.
+
+    Traduce, no recalcula. El strike, la gamma, el OI, el precio y la hora son
+    los que decidió `wall_gex`; aquí sólo se les pone el sobre que el resto de la
+    terminal ya consume, para que no existan dos formas de leer un muro.
+    """
+    mejor = _f(spec.get("gex")) or 0.0
+    pico = max([_f(r.get("gex")) or 0.0 for r in (spec.get("ranked") or [])] or [mejor])
+    return {
+        "ready": True, "side": side, "strike": spec.get("strike"),
+        # `score` sigue siendo la magnitud relativa dentro del lado —el ganador
+        # es 100— pero ahora dice DE QUÉ es porcentaje. Un número sin unidad en
+        # una pantalla de operativa se acaba leyendo como cualquier cosa.
+        "score": (round(100.0 * mejor / pico, 4) if pico > 0 else None),
+        "score_metric": "GEX_NORMALIZADO_DEL_LADO",
+        "exposure": spec.get("gex"),
+        "gex": spec.get("gex"), "gamma": spec.get("gamma"),
+        "oi": spec.get("open_interest"), "open_interest": spec.get("open_interest"),
+        "iv": spec.get("iv"), "delta": spec.get("delta"),
+        "spot": spec.get("spot"), "price_as_of": spec.get("price_as_of"),
+        "expiry": spec.get("expiry"), "multiplier": spec.get("multiplier"),
+        "contracts": spec.get("contracts"),
+        "distance_pct": spec.get("distance_pct"), "position": spec.get("position"),
+        "crossed": spec.get("crossed"),
+        "runner_up": spec.get("runner_up"),
+        "margin_over_runner_up_pct": spec.get("margin_over_runner_up_pct"),
+        "verdict": spec.get("verdict"),
+        "failed_controls": contrato.get("failed_controls") or [],
+        "method": WG.FORMULA, "chain_method": WG.FORMULA,
+        "positioning_convention": spec.get("positioning_convention"),
+        "authority": "ITMQ_WALLS_GEX_V1",
+        "oi_available": spec.get("open_interest") is not None,
+        "oi_missing": spec.get("open_interest") is None,
+        "oi_missing_strikes": 0,
+        "source_mode": DERIVED, "provider": DL.ITM_QUANT,
+        "fallback_used": False,
+        "change_reason": ("strike de mayor Gamma Exposure del lado "
+                          f"({spec.get('verdict')})"),
+        "retired": None,
+        "candidates": [{"strike": r.get("strike"), "exposure": r.get("gex"),
+                        "oi": r.get("open_interest"), "gamma": r.get("gamma"),
+                        "score": (round(100.0 * (_f(r.get("gex")) or 0.0) / pico, 4)
+                                  if pico > 0 else None)}
+                       for r in (spec.get("ranked") or [])],
+        "updated_at": spec.get("updated_at") or _now(),
+        "label": spec.get("label"),
+        "note": contrato.get("note"),
+    }
+
+
 def resolve_walls(symbol: str, *, exposure_rows: Sequence[Dict[str, Any]],
                   oi_rows: Sequence[Dict[str, Any]] | None = None,
                   spot: Optional[float] = None,
                   fallback: Optional[Dict[str, Any]] = None,
-                  provider_direct: bool = True) -> Dict[str, Any]:
+                  provider_direct: bool = True,
+                  contract_rows: Sequence[Dict[str, Any]] | None = None,
+                  price_as_of: Optional[str] = None,
+                  expiry: Optional[str] = None,
+                  expiry_policy: str = WG.NEAREST,
+                  multiplier: float = WG.MULTIPLIER_DEFAULT,
+                  ages: Optional[Dict[str, Any]] = None,
+                  sources: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """LA autoridad de Call Wall y Put Wall. Ninguna sección calcula otra cosa.
 
     `fallback` admite los muros del cálculo propio antiguo (`structural_walls`)
@@ -368,7 +429,66 @@ def resolve_walls(symbol: str, *, exposure_rows: Sequence[Dict[str, Any]],
         "contract": "ITMQ_WALLS_V1",
     }
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # VÍA PRINCIPAL · el contrato de Gamma Exposure, con su veredicto
+    # ═══════════════════════════════════════════════════════════════════════
+    #
+    # v1.57.0 · UN MURO ES EL STRIKE DE MAYOR GAMMA EXPOSURE DE SU LADO.
+    #
+    #     GEX por strike = gamma × OI × multiplicador × precio² × 0.01
+    #
+    # Hasta aquí el muro se elegía con una media geométrica de la exposición que
+    # publica el proveedor y el interés abierto. Ese método tenía un defecto que
+    # no se ve en el resultado: el OI ya va DENTRO de la fórmula de exposición,
+    # así que volver a multiplicar por él lo cuenta DOS VECES y desplaza el muro
+    # hacia strikes con mucho libro y gamma pequeña.
+    #
+    # Con las griegas por contrato —gamma, OI, IV y delta, que Quant Data publica
+    # por contrato— la exposición se calcula entera y el muro es, literalmente,
+    # su máximo por lado. Ni OI solo, ni volumen, ni gamma neta, ni Max Pain.
+    #
+    # Y con un vencimiento DECLARADO. Mezclar vencimientos es legítimo si se
+    # dice; hacerlo en silencio da un nivel sin dueño al que nadie puede poner
+    # fecha.
+    #
+    # La vía anterior no se borra: sostiene la pantalla cuando el proveedor no
+    # publica griegas por contrato, y entra ETIQUETADA como respaldo.
+    contrato: Dict[str, Any] = {}
+    if contract_rows:
+        try:
+            contrato = WG.walls(sym, contract_rows=contract_rows, spot=px,
+                                price_as_of=price_as_of, expiry=expiry,
+                                expiry_policy=expiry_policy, multiplier=multiplier,
+                                ages=ages, sources=sources,
+                                provider_exposure=exposure_rows)
+        except Exception as exc:   # noqa: BLE001 — se degrada a la vía anterior
+            _obs_note("wall_engine:gex_contract", exc, severity="DEGRADED")
+            contrato = {}
+    if contrato:
+        out["gex_contract"] = {k: v for k, v in contrato.items()
+                               if k not in (CALL_WALL, PUT_WALL)}
+        out["verdict"] = contrato.get("verdict")
+        out["expiry"] = contrato.get("expiry")
+        out["formula"] = WG.FORMULA
+        out["positioning_convention"] = contrato.get("positioning_convention")
+
     for side, metric in ((CALL_WALL, "ITMQ_CALL_WALL"), (PUT_WALL, "ITMQ_PUT_WALL")):
+        spec = (contrato.get(side) or {}) if contrato else {}
+        if spec.get("ready"):
+            wall = _publish_spec(sym, side, spec, contrato)
+            WALLS.set(sym, side, {"strike": wall["strike"], "score": wall["score"],
+                                  "updated_at": wall["updated_at"]})
+            out[side] = wall
+            LINEAGE.record(metric, sym, source_mode=DERIVED, state=DATA_OK,
+                           provider=DL.ITM_QUANT,
+                           normalized_value=wall.get("score"),
+                           final_value=wall.get("strike"),
+                           derivation=WG.FORMULA,
+                           rows=len(spec.get("ranked") or []),
+                           detail=f"{wall.get('verdict')} · vencimiento "
+                                  f"{spec.get('expiry')}")
+            continue
+
         cand = build_candidates(sym, exposure_rows, oi_rows, px, side)
         if not cand.get("ready"):
             used = _fallback_wall(sym, side, fallback, px)
@@ -478,18 +598,59 @@ def _fallback_wall(symbol: str, side: str, fallback: Optional[Dict[str, Any]],
 
 
 def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = None,
-                   fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   fallback: Optional[Dict[str, Any]] = None,
+                   price_as_of: Optional[str] = None,
+                   price_age_s: Optional[float] = None,
+                   price_source: Optional[str] = None,
+                   expiry: Optional[str] = None,
+                   expiry_policy: str = WG.NEAREST) -> Dict[str, Any]:
     """Entrada canónica: Data Hub → Wall Engine.
 
     Es la única función que las secciones deben llamar. Recibe el MISMO snapshot
     del Hub que alimenta a la interfaz, así que no hay forma de que TRACE y FLUJO
     midan sobre entradas distintas.
+
+    v1.57.0 · Pasa también las GRIEGAS POR CONTRATO, que son las que permiten
+    calcular la Gamma Exposure entera —gamma × OI × multiplicador × precio² ×
+    0.01— en vez de puntuar la exposición ya agregada del proveedor. Y con ellas
+    van las dos cosas sin las que el número no se puede auditar: la EDAD de cada
+    entrada y su FUENTE, que es lo que decide si OI, gamma y precio describen el
+    mismo instante del mercado o tres.
     """
     h = hub if isinstance(hub, dict) else {}
     exposure = (h.get("exposure_by_strike") or {}).get("rows") or []
     oi = (h.get("open_interest") or {}).get("by_strike") or []
+    greeks = h.get("contract_greeks") or {}
+    contract_rows = greeks.get("rows") or []
+    lin = greeks.get("lineage") or {}
+    fuente_griegas = greeks.get("source") or "QUANTDATA_CONTRACT_GREEKS"
+    edades: Dict[str, Any] = {}
+    if lin.get("age_seconds") is not None:
+        # Gamma y OI salen de la MISMA lectura por contrato, así que comparten
+        # edad y fuente por construcción. Es la diferencia con haberlos cruzado
+        # de dos endpoints distintos, donde el desfase existe y no se ve.
+        edades["gamma"] = lin.get("age_seconds")
+        edades["open_interest"] = lin.get("age_seconds")
+    if price_age_s is not None:
+        edades["price"] = price_age_s
+    # El vencimiento operativo es el que ya resolvió la terminal. Que el muro
+    # eligiera el suyo por su cuenta permitiría una wall con fecha distinta a la
+    # de la cadena que el operador está mirando.
+    pedido = expiry
+    if pedido is None:
+        try:
+            from ..providers.quantdata.shared import EXPIRY_SELECTION
+            pedido = EXPIRY_SELECTION.principal(str(symbol or "").upper())
+        except Exception as exc:   # noqa: BLE001
+            _obs_note("wall_engine:expiry_selection", exc, severity="DEGRADED")
+            pedido = None
     return resolve_walls(symbol, exposure_rows=exposure, oi_rows=oi, spot=spot,
-                         fallback=fallback)
+                         fallback=fallback, contract_rows=contract_rows,
+                         price_as_of=price_as_of, expiry=pedido,
+                         expiry_policy=expiry_policy, ages=edades,
+                         sources={"gamma": fuente_griegas,
+                                  "open_interest": fuente_griegas,
+                                  "price": price_source or "SESSION_PRICE_PIPELINE"})
 
 
 def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -581,10 +742,33 @@ def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> D
         lados[side] = {
             "selected_strike": muro.get("strike"),
             "score": muro.get("score"),
+            "score_metric": muro.get("score_metric"),
             "exposure": muro.get("exposure"),
             "open_interest": muro.get("oi"),
             "distance_pct": muro.get("distance_pct"),
             "method": muro.get("method"),
+            # v1.57.0 · LOS CINCO NÚMEROS QUE SOSTIENEN EL MURO, JUNTOS.
+            #
+            # strike, gamma, interés abierto, precio y hora. Repartidos por
+            # cuatro bloques distintos no se puede comprobar una wall: hay que
+            # poder leer de un tirón «este strike, con esta gamma y este OI,
+            # con el subyacente en este precio, a esta hora».
+            "verdict": muro.get("verdict"),
+            "gex": muro.get("gex"),
+            "gamma": muro.get("gamma"),
+            "iv": muro.get("iv"),
+            "delta": muro.get("delta"),
+            "spot_used": muro.get("spot"),
+            "price_as_of": muro.get("price_as_of"),
+            "expiry": muro.get("expiry"),
+            "multiplier": muro.get("multiplier"),
+            "contracts": muro.get("contracts"),
+            "position": muro.get("position"),
+            "crossed": muro.get("crossed"),
+            "runner_up": muro.get("runner_up"),
+            "margin_over_runner_up_pct": muro.get("margin_over_runner_up_pct"),
+            "positioning_convention": muro.get("positioning_convention"),
+            "authority": muro.get("authority") or "ITMQ_WALL_ENGINE",
             # Cómo se puntuó la cadena frente a cómo se puntuó ESTE strike, y
             # cuántos strikes del lado no traían OI del proveedor. Sin esto el
             # hueco sólo se podía deducir de un `open_interest: null`.
@@ -600,10 +784,39 @@ def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> D
             "candidates_considered": len(candidatos),
         }
 
+    contrato = w.get("gex_contract") or {}
     return {
         "symbol": w.get("symbol"),
         "spot": w.get("spot"),
         "snapshotTime": w.get("timestamp") or (exposicion.get("timestamp")),
+        # v1.57.0 · EL VEREDICTO DE LOS DATOS, con los diez controles a la vista.
+        #
+        # CONFIRMADA no califica al muro: califica a la cadena con la que se
+        # calculó. Un muro provisional se sigue pudiendo operar; lo que no se
+        # puede es presentarlo como si la cadena estuviera completa.
+        "verdict": w.get("verdict") or contrato.get("verdict"),
+        "failed_controls": contrato.get("failed_controls") or [],
+        "controls": contrato.get("controls") or [],
+        "gex_formula": contrato.get("formula") or WG.FORMULA,
+        "expiry": w.get("expiry") or contrato.get("expiry"),
+        "expiry_reason": contrato.get("expiry_reason"),
+        "expiry_policy": contrato.get("expiry_policy"),
+        "expiries_available": contrato.get("expiries_available"),
+        "positioning_convention": (w.get("positioning_convention")
+                                   or contrato.get("positioning_convention")),
+        "sides_kept_separate": contrato.get("sides_kept_separate"),
+        "chain": contrato.get("chain"),
+        "contracts_used": contrato.get("contracts_used"),
+        "provider_crosscheck": contrato.get("provider_crosscheck"),
+        "not_calculated_as": [
+            "el strike con mayor interés abierto",
+            "el strike con mayor volumen",
+            "la gamma neta total",
+            "el Max Pain",
+            "una mezcla de vencimientos sin declararla",
+        ],
+        "wall_is": ("una concentración de cobertura probable, no una barrera "
+                    "garantizada"),
         "representationMode": "STRIKE_EXPOSURE_BY_SIDE",
         "expirations": exposicion.get("expirations") or exposicion.get("expiration_scope"),
         "authority": "ITMQ_WALL_ENGINE",

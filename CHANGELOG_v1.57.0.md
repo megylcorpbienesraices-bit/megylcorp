@@ -1,4 +1,280 @@
-# ITM QUANT MULTI ASSET · v1.56.0 — Cierre integral por gates
+# ITM QUANT MULTI ASSET · v1.57.0 — Los muros, con su fórmula y su veredicto
+
+Release: `ITM_QUANT_v1.57.0_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+
+## CAMBIO DE FÓRMULA DECLARADO
+
+**Una fórmula sí cambia**, y con ella un número en pantalla: el strike de Call
+Wall y Put Wall. El método anterior —media geométrica de la exposición agregada
+del proveedor y el interés abierto— y el nuevo —máximo de Gamma Exposure del
+lado, `gamma × OI × multiplicador × precio² × 0.01`— **no coinciden**, y el
+motivo está en la sección 1.
+
+Qué **no** cambia, para que el alcance quede acotado en vez de quedar a la
+imaginación del lector:
+
+* no se modifican los **pesos del Scanner**;
+* no se modifica la **autoridad direccional** ni ninguna de sus componentes;
+* no se toca Gamma, Delta, GEX, DEX, VEX, CHEX, Vanna, Charm ni el cálculo de
+  griegas por contrato: el muro CONSUME esas magnitudes, no las redefine;
+* no cambia el Max Pain, ni el Zero Gamma, ni los centroides de delta y gamma.
+
+La auditoría del motor de esta release está en `QUANT_ENGINE_AUDIT_v1.57.0.md`.
+
+El changelog de v1.56.0 vive en el historial de git (`CHANGELOG_v1.56.0.md`, en
+`fe8534c` y anteriores).
+
+---
+
+## 1 · CALL WALL Y PUT WALL · el contrato, entero
+
+### La fórmula, y sólo la fórmula
+
+```
+Gamma Exposure por strike = gamma × OI × multiplicador × precio² × 0.01
+
+Call Wall = strike con MAYOR Gamma Exposure de CALLS
+Put Wall  = strike con MAYOR Gamma Exposure de PUTS
+```
+
+Los dos lados se mantienen **separados de principio a fin**. No hay un momento
+del cálculo en que se sumen, se resten o se comparen entre sí.
+
+### Qué se hacía antes, y por qué era otro número
+
+El muro se elegía con una **media geométrica** de la exposición ya agregada que
+publica el proveedor y el interés abierto del strike:
+
+```
+score = 100 · exposición_lado^(1−w) · interés_abierto_lado^w      w = 0.5
+```
+
+El defecto no se ve en el resultado, y eso es lo peor que puede tener un defecto:
+**el OI ya va DENTRO de la fórmula de exposición**. Multiplicar otra vez por él lo
+cuenta dos veces y desplaza el muro hacia strikes con mucho libro abierto y gamma
+pequeña. Daba un número grande, plausible y en el strike equivocado.
+
+Con las griegas **por contrato** —gamma, OI, IV y delta, que Quant Data publica
+por contrato— la exposición se calcula entera y el muro es, literalmente, su
+máximo por lado.
+
+### Cómo NO se calcula
+
+Cinco métodos que se parecen y dan otra respuesta. Cada uno tiene una prueba
+construida para que el método equivocado **gane** si alguien lo reintroduce: la
+cadena de prueba pone el mayor OI, el mayor volumen, el neto más grande y el
+centro de masa del OI en strikes DISTINTOS al muro.
+
+```
+NO es el strike con mayor OI          el OI va dentro de la fórmula
+NO es el strike con mayor volumen     el volumen es rotación, no libro abierto
+NO es la gamma NETA                   un strike con mucha call y mucha put gamma
+                                      tiene neto pequeño, y es donde más cobertura hay
+NO es el Max Pain                     otra pregunta y otro número
+NO se mezclan vencimientos            mezclar es legítimo si se declara; en
+  sin declararlo                      silencio da un nivel sin dueño
+```
+
+### Un contrato, una sola vez
+
+Las griegas por contrato llegan dentro de las filas de order flow, que son
+**operaciones**. Cien prints del mismo contrato sumados darían cien veces su
+interés abierto: un muro de la nada con un número grande y creíble. El OI y la
+gamma son propiedades DEL CONTRATO, así que se deduplica por
+`(vencimiento, strike, tipo)`.
+
+### El vencimiento se elige y se dice
+
+El muro usa el vencimiento operativo que ya resolvió la terminal
+(`EXPIRY_SELECTION`), no uno propio: una wall con fecha distinta a la de la
+cadena que el operador mira es una wall de otro mercado. Si ese vencimiento no
+está en la cadena se cae a la política declarada —más cercano, o viernes
+semanal— y **se dice cuál se usó y por qué**, en vez de dejar la pantalla sin
+muros por un desajuste de fechas.
+
+### WALL CONFIRMADA · WALL PROVISIONAL
+
+El veredicto **no califica al muro: califica a los datos** con los que se
+calculó. Los diez controles, uno a uno, con su evidencia:
+
+```
+ 1  CADENA_COMPLETA               sin huecos en la escalera de strikes
+ 2  VENCIMIENTO_DEFINIDO          uno, declarado, y no mezclado
+ 3  STRIKES_FUERA_DEL_DINERO      cobertura a los dos lados del precio
+ 4  OI_POR_STRIKE_Y_LADO          calls y puts por separado
+ 5  GAMMA_VALIDA_POR_CONTRATO     gamma finita en cada contrato
+ 6  PRECIO_CON_HORA               con su hora de captura
+ 7  IV_DELTA_MULTIPLICADOR        para poder validar la gamma
+ 8  CONVENCION_DE_POSICIONAMIENTO declarada, no supuesta
+ 9  SIN_DATOS_VIEJOS_MEZCLADOS    nada por encima del máximo de edad
+10  MISMA_HORA_MISMA_FUENTE       OI, gamma y precio del mismo instante
+```
+
+Los diez pasan → `WALL CONFIRMADA`. Falta uno → `WALL PROVISIONAL`, **y se
+nombra cuál**. Un muro provisional se sigue publicando y se sigue pudiendo
+operar; lo que no se hace es presentarlo como si la cadena estuviera completa.
+
+### El precio viaja con su hora
+
+La Gamma Exposure lleva el precio **al cuadrado**, así que un precio de hace
+cinco minutos no es «casi el mismo número»: es un muro medido sobre otro
+mercado. Sin la hora, el requisito de «misma hora para OI, gamma y precio» no se
+podía comprobar porque a una de las tres entradas le faltaba la hora.
+
+### Se puede ver desde la pantalla
+
+El cálculo de los muros ya viajaba en el JSON del Auditor y **no se pintaba en
+ninguna parte**: para comprobar una wall había que abrir la respuesta a mano. Dos
+paneles nuevos en AUDITOR:
+
+* **MUROS · CÁLCULO Y VEREDICTO** — los cinco números que sostienen cada muro
+  (strike, gamma, OI, precio, hora), el vencimiento, el GEX, el margen sobre el
+  siguiente strike y el veredicto.
+* **MUROS · LOS DIEZ DATOS QUE EXIGE EL CONTRATO** — control a control, con el
+  detalle de qué falta cuando falta.
+
+### Lo que un muro no es
+
+Una wall es una **concentración de cobertura probable, no una barrera
+garantizada**. La fórmula dice dónde tendría que ajustar más el dealer si el
+precio llegara allí; la reacción real depende además de la posición de clientes y
+dealers, que el proveedor no publica. Por eso la convención de posicionamiento se
+**declara** en el resultado —`CLIENTE_LARGO_OPCIONES__DEALER_CORTO_GAMMA`— y el
+control 8 dice explícitamente `measured_dealer_inventory: false`.
+
+### La vía anterior no se borra
+
+Sostiene la pantalla cuando el proveedor no publica griegas por contrato, y entra
+**etiquetada** como respaldo: `fallback_used`, con su método propio y sin
+veredicto. Nunca disfrazada del resultado principal.
+
+---
+
+## 2 · PLAZOS · cinco segundos apagaban media pantalla
+
+El registro del motor, media hora seguida, con la cuota en **7 de 240**:
+
+```
+degradado en data_hub:dark_flow:late          [DEGRADED]: Quant Data request timed out
+degradado en data_hub:gamma:late              [DEGRADED]: Quant Data request timed out
+degradado en data_hub:max_pain:late           [DEGRADED]: Quant Data request timed out
+degradado en data_hub:interval_map_delta:late [DEGRADED]: Quant Data request timed out
+```
+
+Y en pantalla: los dos carriles de dark pool en `STALE` con «el canal tardó más
+de 6.0 s», media docena de herramientas en `DEGRADADO`, y la cobertura por canal
+entre el **27 %** y el **62 %**. El Auditor decía la verdad —los canales no
+respondían— pero el culpable no era ninguno de los que señalaba la pantalla: la
+cuota estaba intacta, la autorización era correcta y el proveedor contestaba.
+
+### La cadena
+
+El instalador reparte `QUANTDATA_TIMEOUT_SECONDS=5`, y ése era el plazo de
+**todas** las peticiones, de las treinta y seis herramientas y de los dos
+carriles. El plazo del canal se calculaba como ese valor **+ 1**: los `6.0 s`
+exactos que enseñaba la pantalla no eran una coincidencia, eran aritmética.
+
+Los endpoints pesados del proveedor —`interval-map`, `max-pain-over-time`,
+exposición por vencimiento, `dark-flow`— no contestan en cinco segundos. Morían
+por plazo en cada ciclo.
+
+Y no había salida. `record_failure` no toca las latencias medidas, y eso es
+correcto para un 500 o un 404: no dicen nada sobre cuánto tarda el endpoint
+cuando funciona. Pero un **timeout sí dice algo**, y era justo lo que se tiraba.
+Un endpoint que necesita doce segundos, llamado con cinco, no dejaba NUNCA una
+muestra, así que nunca alcanzaba las ocho que hacen falta para calibrar, así que
+se le seguía llamando con cinco. Para siempre. El techo de veinte segundos que
+`endpoint_runtime` publica era **inalcanzable por construcción**, y en pantalla
+se leía como un proveedor caído.
+
+Encima el plazo calibrado no llegaba a la petición. `QuantDataClient` se
+construía con un plazo fijo y `post()` no aceptaba otro, así que el plazo por
+endpoint sólo gobernaba el reloj del **ciclo**. Cuando el calibrado bajaba del
+configurado —un endpoint rápido, p95 de 200 ms— el ciclo se rendía a los dos
+segundos, la petición huérfana seguía viva ocupando conexión y cuota hasta los
+cinco, y al morir soltaba un **segundo** aviso `DEGRADED` por el mismo hecho. De
+ahí los `:late` del registro: una incidencia contada dos veces.
+
+### Lo que cambia
+
+```
+plazo de la petición    lo pasa el llamador · QuantDataClient.post(..., timeout=)
+plazo del ciclo         plazo de la petición + CHANNEL_SLACK_S
+autoridad del plazo     shared.ENDPOINT_RUNTIME, para los DOS carriles
+un timeout              cota inferior de latencia: el plazo siguiente SUBE
+plazo repartido         5 s → 12 s (12 + 1 caben en el ciclo de 15 s del motor)
+```
+
+Un timeout no dice cuánto tarda el endpoint; dice que tarda **más** que el
+plazo. Eso es una cota inferior y como tal se guarda: el plazo sube —acotado por
+el techo de 20 s— hasta que el endpoint contesta y sus latencias reales lo
+vuelven a bajar. Lo que **no** hace es llamar para siempre: el timeout sigue
+contando para el cortacircuitos, que abre a los cuatro fallos seguidos.
+
+Eso arregla también las instalaciones que ya tienen el `5` escrito en su `.env`:
+el plazo se corrige solo, sin que el operador toque un fichero.
+
+El carril del **motor** entra en el mismo régimen. Era el que más `:late`
+acumulaba —`gamma`, `delta`, `max_pain`, `iv_rank`— y no tenía plazo medido
+porque el registro vivía en el carril de páginas. Con una trampa que costaba
+caro: en ese carril `ready` no significa «respondió», porque puede venir del
+último valor bueno. Anotar eso como éxito metía una latencia de microsegundos en
+la calibración y hundía el plazo del endpoint **justo cuando va lento**. Sólo se
+anota éxito cuando la procedencia es `LIVE`.
+
+El aviso `:late` deja de ser una degradación: el ciclo ya contó ese fallo al
+agotarse el plazo del canal. El texto del error se conserva —es donde se ve qué
+plazo expiró— al nivel de lo esperado, no al de lo averiado.
+
+### Dos rojos que venían de antes
+
+`F821` en el gate de release, los dos silenciosos porque `from __future__ import
+annotations` no evalúa las anotaciones: `List` anotado y nunca importado en
+`intelligence.py`, y `FaltaRequisito` importado dentro de **otra** prueba, así
+que el `except` que la prueba existe para comprobar habría dado `NameError` justo
+al cumplirse.
+
+### Verificación
+
+```
+suite            2950 passed, 51 skipped, 0 failed
+ruff del gate    E9,F63,F7,F82 → All checks passed (venía con 2 F821)
+arranque en frío 0 degradaciones
+smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health → HTTP 200
+```
+
+24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
+**3001 casos / 189 ficheros**.
+
+## Verificación de v1.57.0
+
+```
+suite            2987 passed, 51 skipped, 0 failed
+ruff del gate    E9,F63,F7,F82 -> All checks passed
+eslint           no-undef limpio · sintaxis OK (5 módulos)
+arranque en frío 0 degradaciones
+smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health -> HTTP 200
+versión activa   1.57.0 en VERSION.txt, marcador, rust, frontend y documentos
+```
+
+37 regresiones nuevas en `tests/test_v1570_contrato_de_muros.py` —una por cada
+regla del contrato y una por cada método prohibido— y 24 en
+`tests/test_v1581_plazo_del_transporte.py`. Inventario: **3038 casos / 190
+ficheros**.
+
+Lo que esta release **no** demuestra: que los muros que salen ahora sean los que
+frenen al precio, y que los endpoints lentos del proveedor contesten dentro del
+plazo nuevo. Lo primero depende del posicionamiento real de clientes y dealers,
+que ningún proveedor conectado publica; lo segundo exige la API real, y este
+entorno no tiene credenciales ni salida a `quantdata.us`.
+
+---
+
+# Historial · v1.56.0 — Cierre integral por gates
+
+> Incorporado al renumerar: la raíz sólo admite el changelog de la
+> release vigente, así que este documento es acumulativo. El título
+> original era: ITM QUANT MULTI ASSET · v1.56.0 — Cierre integral por gates
 
 Release: `ITM_QUANT_v1.56.0_PRE_VPS` · Base: `v1.55.0` · Alcance: `MULTI_ASSET`
 
@@ -621,99 +897,3 @@ smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/sta
 ```
 
 61 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
-
-## REVISIÓN SOBRE `fe8534c` · Cinco segundos apagaban media pantalla
-
-El registro del motor, media hora seguida, con la cuota en **7 de 240**:
-
-```
-degradado en data_hub:dark_flow:late          [DEGRADED]: Quant Data request timed out
-degradado en data_hub:gamma:late              [DEGRADED]: Quant Data request timed out
-degradado en data_hub:max_pain:late           [DEGRADED]: Quant Data request timed out
-degradado en data_hub:interval_map_delta:late [DEGRADED]: Quant Data request timed out
-```
-
-Y en pantalla: los dos carriles de dark pool en `STALE` con «el canal tardó más
-de 6.0 s», media docena de herramientas en `DEGRADADO`, y la cobertura por canal
-entre el **27 %** y el **62 %**. El Auditor decía la verdad —los canales no
-respondían— pero el culpable no era ninguno de los que señalaba la pantalla: la
-cuota estaba intacta, la autorización era correcta y el proveedor contestaba.
-
-### La cadena
-
-El instalador reparte `QUANTDATA_TIMEOUT_SECONDS=5`, y ése era el plazo de
-**todas** las peticiones, de las treinta y seis herramientas y de los dos
-carriles. El plazo del canal se calculaba como ese valor **+ 1**: los `6.0 s`
-exactos que enseñaba la pantalla no eran una coincidencia, eran aritmética.
-
-Los endpoints pesados del proveedor —`interval-map`, `max-pain-over-time`,
-exposición por vencimiento, `dark-flow`— no contestan en cinco segundos. Morían
-por plazo en cada ciclo.
-
-Y no había salida. `record_failure` no toca las latencias medidas, y eso es
-correcto para un 500 o un 404: no dicen nada sobre cuánto tarda el endpoint
-cuando funciona. Pero un **timeout sí dice algo**, y era justo lo que se tiraba.
-Un endpoint que necesita doce segundos, llamado con cinco, no dejaba NUNCA una
-muestra, así que nunca alcanzaba las ocho que hacen falta para calibrar, así que
-se le seguía llamando con cinco. Para siempre. El techo de veinte segundos que
-`endpoint_runtime` publica era **inalcanzable por construcción**, y en pantalla
-se leía como un proveedor caído.
-
-Encima el plazo calibrado no llegaba a la petición. `QuantDataClient` se
-construía con un plazo fijo y `post()` no aceptaba otro, así que el plazo por
-endpoint sólo gobernaba el reloj del **ciclo**. Cuando el calibrado bajaba del
-configurado —un endpoint rápido, p95 de 200 ms— el ciclo se rendía a los dos
-segundos, la petición huérfana seguía viva ocupando conexión y cuota hasta los
-cinco, y al morir soltaba un **segundo** aviso `DEGRADED` por el mismo hecho. De
-ahí los `:late` del registro: una incidencia contada dos veces.
-
-### Lo que cambia
-
-```
-plazo de la petición    lo pasa el llamador · QuantDataClient.post(..., timeout=)
-plazo del ciclo         plazo de la petición + CHANNEL_SLACK_S
-autoridad del plazo     shared.ENDPOINT_RUNTIME, para los DOS carriles
-un timeout              cota inferior de latencia: el plazo siguiente SUBE
-plazo repartido         5 s → 12 s (12 + 1 caben en el ciclo de 15 s del motor)
-```
-
-Un timeout no dice cuánto tarda el endpoint; dice que tarda **más** que el
-plazo. Eso es una cota inferior y como tal se guarda: el plazo sube —acotado por
-el techo de 20 s— hasta que el endpoint contesta y sus latencias reales lo
-vuelven a bajar. Lo que **no** hace es llamar para siempre: el timeout sigue
-contando para el cortacircuitos, que abre a los cuatro fallos seguidos.
-
-Eso arregla también las instalaciones que ya tienen el `5` escrito en su `.env`:
-el plazo se corrige solo, sin que el operador toque un fichero.
-
-El carril del **motor** entra en el mismo régimen. Era el que más `:late`
-acumulaba —`gamma`, `delta`, `max_pain`, `iv_rank`— y no tenía plazo medido
-porque el registro vivía en el carril de páginas. Con una trampa que costaba
-caro: en ese carril `ready` no significa «respondió», porque puede venir del
-último valor bueno. Anotar eso como éxito metía una latencia de microsegundos en
-la calibración y hundía el plazo del endpoint **justo cuando va lento**. Sólo se
-anota éxito cuando la procedencia es `LIVE`.
-
-El aviso `:late` deja de ser una degradación: el ciclo ya contó ese fallo al
-agotarse el plazo del canal. El texto del error se conserva —es donde se ve qué
-plazo expiró— al nivel de lo esperado, no al de lo averiado.
-
-### Dos rojos que venían de antes
-
-`F821` en el gate de release, los dos silenciosos porque `from __future__ import
-annotations` no evalúa las anotaciones: `List` anotado y nunca importado en
-`intelligence.py`, y `FaltaRequisito` importado dentro de **otra** prueba, así
-que el `except` que la prueba existe para comprobar habría dado `NameError` justo
-al cumplirse.
-
-### Verificación
-
-```
-suite            2950 passed, 51 skipped, 0 failed
-ruff del gate    E9,F63,F7,F82 → All checks passed (venía con 2 F821)
-arranque en frío 0 degradaciones
-smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health → HTTP 200
-```
-
-24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
-**3001 casos / 189 ficheros**.
