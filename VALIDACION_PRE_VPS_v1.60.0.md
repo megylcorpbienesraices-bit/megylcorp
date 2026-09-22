@@ -1,14 +1,89 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.59.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.60.0
 
-Release: `ITM_QUANT_v1.59.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.60.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A20** es la de esta release.
+> Documento acumulativo. La sección **A21** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **3171 casos / 193 ficheros**
-- Particiones: 21 · `plan_sha256`: `a4870fa16f26f56f822635a23b8692a07ecd08610dd84dd1ea48de3a7547b321`
+- Inventario nominal: **3209 casos / 194 ficheros**
+- Particiones: 21 · `plan_sha256`: `4b8b1c35fbe083766c09d09567544f6543f7976c28220e48eeee1ebf20539f0f`
 - Resultado: **PASS**
+
+---
+
+## A21 · v1.60.0 · El transporte, de raíz
+
+### Qué se certifica AQUÍ
+
+Treinta y ocho casos en `tests/test_v1600_transporte_de_conexion.py`.
+
+**El pool.** Los dos carriles comparten el cliente del host —dos pools contra el
+mismo host eran el doble de handshakes—; con refcuenta, así que el primero en
+parar no deja al otro sin transporte; el pool se dimensiona **desde** el techo de
+concurrencia; y el keep-alive sobrevive al ciclo, que es la causa directa de que
+cada ciclo volviera a pagar el handshake.
+
+**Las cuatro fases.** La petición lleva los cuatro plazos; cada timeout dice su
+fase (`CONNECT` / `POOL` / `READ` / `WRITE`); un pool lleno es congestión nuestra
+y **no** abre el circuito del host; la lectura sigue siendo del endpoint y la
+conexión del host, aunque el `Deadline` traiga otra cosa.
+
+**La salida de la trampa.** Sin muestras manda el warm start; con handshakes
+medidos manda el p95; un plazo agotado **sube** el siguiente; la escalada tiene
+techo y **baja sola** cuando el host vuelve a conectar bien; y el plazo nunca sale
+del suelo ni del techo.
+
+**El cortocircuitos de transporte.** Se abre con fallos de host, falla rápido sin
+tocar la red, se reabre dejando pasar una de prueba, y un fallo que no es del
+host no lo abre.
+
+**El reintento y sus cuatro condiciones:** uno, con backoff y jitter; nunca en
+ráfaga; presupuesto del **host** por ciclo, que se agota y se repone; y no se
+concede si no cabe en lo que queda de ciclo ni con el circuito abierto.
+
+**La telemetría:** la traza separa pool, socket, TLS y lectura; una conexión
+reutilizada se declara como tal y no inventa un tiempo de handshake que no hubo;
+y el host publica `reuse_pct`.
+
+**Los dos escenarios que el operador pidió por su nombre:**
+
+* **estampida de conexión** — ocho herramientas a la vez, **un solo handshake**,
+  siete reutilizaciones, cero timeouts de conexión;
+* **recuperación** — tras una tanda de fallos el host vuelve, el circuito se
+  cierra y los fallos consecutivos se ponen a cero.
+
+**Y el LKG:** un fallo de conexión se clasifica como `TRANSIENT` —nunca como
+herramienta inexistente ni cuerpo inválido—, así que no invalida la ruta ni tira
+el último dato bueno; y no infla el plazo de lectura del endpoint.
+
+### Una contradicción corregida en el propio certificador
+
+Dos afirmaciones del informe LIVE se pedían a la vez y **no pueden pasar las
+dos**: «las conexiones se reutilizan» y «el plazo de conexión lo gobierna el p95
+medido». Si el keep-alive funciona, casi no hay handshakes, y sin handshakes no
+hay p95. Se reformuló a lo que de verdad hay que descartar: que el plazo esté
+**escalando**. `WARM_START` con pocos handshakes es la prueba del arreglo, no un
+fallo.
+
+### Qué NO se certifica aquí, y queda ABIERTO
+
+**El bloque de transporte no está cerrado con esta entrega.** La estampida real,
+el enlace real y el antivirus real sólo se miden en el Windows del operador. El
+certificador trae siete afirmaciones nuevas (8 a 14) para eso:
+
+```
+py -3.13 scripts\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12
+```
+
+Se cierra cuando ese informe demuestre que desaparece la repetición de
+`connect timed out` y que el sistema se recupera. Hasta entonces, abierto.
+
+### Entorno de ejecución
+
+Suite completa en el contenedor de desarrollo (**CPython 3.11.15**): 3158
+pasados, 51 saltados, 0 fallos. El intérprete **certificado** sigue siendo
+**CPython 3.13.12** (`.python-runtime.json`); esta corrida no lo sustituye.
 
 ---
 

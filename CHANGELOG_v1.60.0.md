@@ -1,12 +1,184 @@
-# ITM QUANT MULTI ASSET · v1.59.0 — Cuatro cajones genéricos, abiertos uno a uno
+# ITM QUANT MULTI ASSET · v1.60.0 — El transporte, de raíz
 
-Release: `ITM_QUANT_v1.59.0_PRE_VPS` · Base: `v1.58.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.60.0_PRE_VPS` · Base: `v1.59.0` · Alcance: `MULTI_ASSET`
 
-**No se modifican fórmulas, pesos del Scanner ni autoridad direccional.** La
-metodología de Call Wall y Put Wall de v1.57.2 queda intacta, y el Quant Data
-Interval Map sigue siendo la autoridad del campo de TRACE.
+**No se modifican fórmulas, pesos del Scanner ni autoridad direccional.** Call
+Wall / Put Wall y los bloques 3, 4, 5 y 7 de v1.59.0 quedan intactos.
+
+> **Este bloque NO se da por cerrado con esta entrega.** Se cierra cuando el
+> certificador LIVE, ejecutado en el Windows del operador contra la API real,
+> demuestre que desaparece la repetición de `connect timed out`. Lo que hay aquí
+> es la corrección y su regresión; la prueba es suya.
 
 ---
+
+## 0 · LO QUE EL REGISTRO DE WINDOWS ENSEÑABA
+
+Con v1.58.0 instalada y la cuota intacta:
+
+```
+Quant Data connect timed out after 4.0s   net_drift
+Quant Data connect timed out after 4.0s   net_flow
+Quant Data connect timed out after 4.0s   dark_flow
+Quant Data connect timed out after 4.0s   gamma
+```
+
+Cuatro endpoints que **no comparten nada salvo el host**, muriendo al mismo
+plazo exacto, ciclo tras ciclo. Cuando el fallo es idéntico en cosas que sólo
+comparten el destino, el defecto no está en el endpoint: está en el transporte.
+
+v1.58.0 separó lectura de conexión y calibró la **lectura** con el p95 por
+endpoint. Eso arregló los cortes a 5.0 s. Y dejó el otro lado intacto: la
+conexión seguía siendo una constante aplicada por petición, sin medir nada.
+
+---
+
+## 1 · LA CADENA, ENTERA
+
+### Causa 1 · dos pools contra el mismo host
+
+El carril del motor y el de páginas construían cada uno su
+`httpx.AsyncClient`. Dos juegos de conexiones, y ninguno podía aprovechar lo que
+el otro tenía abierto.
+
+### Causa 2 · keep-alive más corto que el ciclo
+
+```
+httpx keepalive_expiry por defecto    5 s
+ciclo del carril de páginas          15 s
+```
+
+Cada ciclo encontraba **todas** las conexiones caducadas. Un handshake TCP + TLS
+por herramienta y por ciclo.
+
+### Causa 3 · y todos a la vez
+
+Con el lote saliendo junto, eso es una **estampida de conexión**: seis u ocho
+handshakes simultáneos contra el mismo host, compitiendo por el mismo enlace.
+Con antivirus o proxy corporativo de por medio, el handshake TLS se va por
+encima de los cuatro segundos sin que el proveedor tenga nada que ver.
+
+### Causa 4 · y aprender era imposible por construcción
+
+La misma trampa que v1.58.1 cerró para la lectura, intacta para la conexión:
+
+```
+plazo corto → el handshake no completa → no hay muestra
+            → no hay p95 → el plazo sigue corto → …
+```
+
+El sistema no podía salir de ahí ni con una hora de tráfico.
+
+---
+
+## 2 · LO QUE CAMBIA · `app/core/transport_runtime.py` (NUEVO)
+
+```
+pool            UNO por host, compartido por los dos carriles, con refcuenta
+keep-alive      90 s · sobrevive al ciclo, así el handshake se paga UNA vez
+connect         p95 del handshake MEDIDO, a nivel de HOST · suelo 3 s · techo 15 s
+escalada        al agotarse un plazo, el siguiente sube ×1,6 — la salida de la trampa
+fases           connect · read · write · pool, con nombre propio cada una
+breaker         de TRANSPORTE, por host, separado del de endpoint
+retry           UNO de conexión · presupuesto por ciclo · backoff+jitter · NUNCA en ráfaga
+telemetría      pool_wait_ms · connect_ms · tls_ms · write_ms · read_ms · reuse_pct
+```
+
+### Las dos autoridades, y por qué no pueden ser la misma
+
+```
+CONEXIÓN  →  del HOST      un handshake no pertenece a ninguna herramienta
+LECTURA   →  del ENDPOINT  una respuesta lenta no dice nada sobre la red
+```
+
+Medir la conexión por endpoint reparte treinta y seis veces la misma muestra y
+hace falta treinta y seis veces más tráfico para aprender lo mismo.
+
+### El pool se dimensiona DESDE el techo de concurrencia
+
+Un pool más pequeño que el techo convierte concurrencia en espera de pool, y esa
+espera **se lee como lentitud del proveedor sin serlo**. Uno mucho mayor devuelve
+la estampida por el otro lado.
+
+### Las cuatro fases, con su remedio
+
+```
+CONNECT_TIMEOUT  no se alcanzó al host      red/DNS/TLS · afecta a las 36 a la vez
+POOL_TIMEOUT     nuestro pool lleno         congestión PROPIA · subir el plazo del
+                                            proveedor no la toca
+READ_TIMEOUT     conectó y no contestó      el endpoint tarda: su p95 manda
+WRITE_TIMEOUT    no se pudo enviar          enlace de subida
+```
+
+Antes los cuatro llegaban como «timeout» y el remedio se adivinaba.
+
+---
+
+## 3 · POR QUÉ EL NÚMERO TAMBIÉN CAMBIA, Y POR QUÉ NO ES EL ARREGLO
+
+El warm start de conexión pasa de **4.0 s a 8.0 s**. No porque ocho funcione
+mejor que cuatro, sino porque el razonamiento que sostenía el cuatro —«si la
+conexión no se establece en cuatro segundos, no va a establecerse»— **es falso
+con la evidencia delante**: un handshake TLS con inspección de por medio tarda
+más. Un supuesto que el campo contradice se corrige.
+
+Pero subir el número no arregla nada por sí solo. **Con el pool compartido y el
+keep-alive largo, el handshake deja de ocurrir en cada ciclo**: se paga una vez y
+se reutiliza. Ésa es la diferencia entre no cortar la conexión y no tener que
+abrirla.
+
+La medida que lo demuestra es `reuse_pct`, y está en el informe LIVE. En el
+ensayo en seco contra un proveedor local: **13 peticiones, 1 handshake, 92 % de
+reutilización**.
+
+Y el `4.0` fijo **ya no existe en ningún sitio**:
+`endpoint_runtime.CONNECT_TIMEOUT_S` se lee del transporte, para que no haya dos
+números distintos diciendo ser el mismo plazo.
+
+---
+
+## 4 · REGRESIÓN
+
+`tests/test_v1600_transporte_de_conexion.py` · **38 casos**, entre ellos los dos
+que el operador pidió por su nombre:
+
+* **estampida de conexión** — ocho herramientas salen a la vez y se paga **un
+  solo handshake**; las otras siete reutilizan;
+* **recuperación** — tras una tanda de fallos el host vuelve, el circuito se
+  cierra y el contador de fallos consecutivos se pone a cero.
+
+Y los que atan lo que no se puede volver a perder: el pool es del host y no del
+carril; el primero en parar no deja al otro sin transporte; el keep-alive
+sobrevive al ciclo; cada timeout dice su fase; un pool lleno no abre el circuito
+del host; un plazo agotado SUBE el siguiente y tiene techo, y baja solo; el
+reintento respeta las cuatro condiciones; **un fallo de conexión no borra el
+último dato bueno** y no infla el plazo de lectura del endpoint.
+
+---
+
+## 5 · AUDITORÍA DEL MOTOR
+
+La auditoría de esta release, con lo que **no** afirma, está en
+`QUANT_ENGINE_AUDIT_v1.60.0.md`.
+
+---
+
+## 6 · LO QUE FALTA PARA DAR ESTO POR CERRADO
+
+La certificación LIVE en Windows. El certificador trae siete afirmaciones nuevas
+(8 a 14) que sólo se pueden medir contra la red real:
+
+```
+py -3.13 scripts\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12
+```
+
+Devuelve `CERTIFICACION_LIVE_TRANSPORTE.json` y `.md`.
+
+---
+
+# Historial · v1.59.0 — Cuatro cajones genéricos, abiertos uno a uno
+
+Release: `ITM_QUANT_v1.59.0_PRE_VPS` · Base: `v1.58.0` · Alcance: `MULTI_ASSET`
 
 ## 0 · POR QUÉ ESTOS CUATRO Y POR QUÉ JUNTOS
 

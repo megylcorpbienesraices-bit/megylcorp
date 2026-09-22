@@ -56,6 +56,7 @@ import pytest
 from app.core import endpoint_runtime as ER
 from app.core import obs
 from app.core.data_hub_runtime import CHANNEL_SLACK_S, ChannelIsolator
+from app.core import transport_runtime as TR
 from app.core.endpoint_runtime import OPEN, EndpointRegistry, EndpointRuntime
 from app.providers.quantdata.client import (
     QuantDataClient, QuantDataError, QuantDataTimeout,
@@ -89,7 +90,8 @@ class _Transporte:
         self.revienta = revienta
         self.plazos: list[object] = []
 
-    async def post(self, path, json=None, timeout=None):   # noqa: A002
+    async def post(self, path, json=None, timeout=None, extensions=None):  # noqa: A002
+        # v1.60.0 · el transporte real mide con el `trace` de httpcore.
         self.plazos.append(timeout)
         if self.revienta is not None:
             raise self.revienta
@@ -126,8 +128,12 @@ def test_sin_plazo_explicito_manda_el_warm_start_de_las_settings():
     asyncio.run(cliente.post("/v1/options/tool/net-flow", {}))
 
     assert transporte.ultimo_plazo_s == pytest.approx(7.5)
-    # Y la conexión NO hereda el plazo de lectura: es un campo aparte.
-    assert transporte.plazos[-1].connect == pytest.approx(3.0)
+    # Y la conexión NO hereda el plazo de lectura: es un campo aparte, y desde
+    # v1.60.0 lo gobierna el HOST —un handshake no es de ninguna herramienta—.
+    enviado = transporte.plazos[-1]
+    assert enviado.connect != pytest.approx(7.5)
+    assert enviado.connect == pytest.approx(
+        TR.TRANSPORT.host(_settings().base_url).connect_timeout())
 
 
 def test_un_plazo_agotado_dice_QUE_plazo_expiro():
@@ -288,7 +294,11 @@ def test_la_holgura_del_ciclo_es_positiva():
 
 def test_el_carril_de_paginas_da_la_holgura_al_ciclo_no_a_la_peticion():
     src = _texto("app/providers/quantdata/intelligence.py")
-    assert "_client.post(path, body, timeout=_plazo)" in src
+    # v1.60.0 · la llamada lleva además el estado de RÁFAGA y lo que queda de
+    # ciclo, que son las dos condiciones con las que el transporte decide si
+    # concede el reintento de conexión. El plazo sigue siendo el del endpoint.
+    assert "_client.post(" in src and "timeout=_plazo," in src
+    assert "burst=(time.monotonic() < self._burst_until)" in src
     # v1.58.0 · el plazo del ciclo se mide sobre el TOTAL de la petición
     # (conexión + lectura), que es lo que puede vivir de verdad.
     assert "timeout_s=_plazo.total + CHANNEL_SLACK_S," in src

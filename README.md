@@ -1,5 +1,36 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.60.0 · El transporte, de raíz
+
+`Quant Data connect timed out after 4.0s`, repetido en `net_drift`, `net_flow`,
+`dark_flow` y `gamma`. Cuatro endpoints que no comparten nada salvo el **host**,
+muriendo al mismo plazo exacto, ciclo tras ciclo. Cuando el fallo es idéntico en
+cosas que sólo comparten el destino, el defecto es del transporte.
+
+- **Dos pools eran el doble de handshakes.** Cada carril construía su propio
+  `httpx.AsyncClient`. Ahora hay **uno por host**, compartido, con refcuenta.
+- **El keep-alive caducaba antes que el ciclo** —5 s por defecto contra ciclos de
+  15 s—, así que cada ciclo volvía a abrir una conexión por herramienta, y todas
+  a la vez: una **estampida de conexión** contra el mismo host. Ahora 90 s: el
+  handshake se paga una vez y se reutiliza.
+- **El plazo de conexión lo gobierna el p95 del handshake medido, por HOST**, no
+  una constante por petición: un handshake no pertenece a ninguna herramienta.
+  La **lectura** sigue gobernada por el p95 **por endpoint**.
+- **Y un plazo agotado ahora SUBE el siguiente.** Sin eso el bucle no tenía
+  salida: plazo corto → el handshake no completa → no hay muestra → no hay p95 →
+  el plazo sigue corto.
+- **Cuatro fases con nombre propio** —`CONNECT`, `POOL`, `READ`, `WRITE`—, un
+  cortocircuitos de transporte por host, **un** reintento de conexión con
+  presupuesto y jitter que nunca se concede en ráfaga, y telemetría de
+  `pool_wait_ms`, `connect_ms`, `tls_ms`, `read_ms` y `reuse_pct`.
+
+El warm start pasa de 4 s a 8 s porque el razonamiento que sostenía el cuatro es
+falso con la evidencia delante — pero **subir el número no es el arreglo**: lo
+que quita los timeouts es que el handshake deje de ocurrir en cada ciclo.
+
+> Este bloque queda **abierto** hasta que el certificador LIVE, en el Windows del
+> operador, demuestre que la repetición desaparece.
+
 ## v1.59.0 · Cuatro cajones genéricos, abiertos uno a uno
 
 Ninguna fórmula cambia. Lo que cambia son los cuatro sitios donde una respuesta

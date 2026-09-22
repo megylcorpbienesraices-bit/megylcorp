@@ -1,42 +1,45 @@
 {
-  "version": "1.59.0",
-  "release": "ITM_QUANT_v1.59.0_PRE_VPS",
+  "version": "1.60.0",
+  "release": "ITM_QUANT_v1.60.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.58.0",
-  "focus": "CUATRO CAJONES GENERICOS ABIERTOS UNO A UNO: la criticidad pasa a ser del PAR (dato, consumidor) y la severidad se deriva de quien lo exige; las Walls se calculan sobre un snapshot coherente que sobrevive a un ciclo perdido y nombra el ingrediente que falta; Dark Pool separa el refresco de AHORA del ultimo valor bueno en campos distintos; y el programador declara nueve estados reales con la anomalia NUNCA_LLAMADA fuera de ellos. La formula de Call Wall / Put Wall no se toca.",
+  "base_version": "1.59.0",
+  "focus": "TRANSPORTE QUANT DATA, DE RAIZ: `connect timed out after 4.0s` repetido en net_drift, net_flow, dark_flow y gamma no era de los endpoints sino del HOST. Un solo pool compartido por los dos carriles con keep-alive que sobrevive al ciclo, plazo de conexion gobernado por el p95 del handshake MEDIDO a nivel de host con escalada al agotarse, cuatro fases separadas (connect/read/write/pool), cortacircuitos de transporte, un reintento con presupuesto y jitter nunca durante rafaga, y telemetria de pool/connect/tls/read. Walls y los bloques 3/4/5/7 de v1.59.0 NO se tocan.",
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "consumer_contracts (NUEVO): siete consumidores declaran de que dependen y con que nivel. `severity_for` DERIVA la severidad de un fallo de si alguien lo exige, en vez de etiquetar el endpoint. Cuarto estado `UNKNOWN`: lo que no se ha medido no se declara bloqueado.",
-    "wall_snapshot (NUEVO): los seis ingredientes en un objeto coherente, con tres salidas -COMPLETO, LKG con su edad, NO_CALCULABLE con el nombre de lo que falta-. Ninguna es una caja vacia. La formula sigue entera en wall_gex.",
-    "wall_engine.walls_from_hub: arma y resuelve el snapshot antes de calcular, y publica `snapshot_state`, `verdict_label` y `from_lkg` por lado. Cuando sirve el LKG sirve su PRECIO tambien: tomar las filas de hace cuarenta segundos con el spot de ahora seria medir dos mercados, y el precio entra al cuadrado.",
-    "scheduler_states (NUEVO): nueve estados reales -SCHEDULED, WAITING_RATE_LIMIT, WAITING_DEPENDENCY, COOLDOWN, RUNNING, LIVE, NO_DATA, STALE, PROVIDER_ERROR- y la anomalia NUNCA_LLAMADA aparte. Exigible y sin un solo intento ya no se lee como NO_DATA: ese silencio era nuestro, no del proveedor.",
-    "dark_pool_state.lane_state: `current_status`, `current_rows`, `lkg_rows`, `lkg_age`, `last_success_at` y `serving`. Un timeout con cien filas del ciclo anterior deja de obligar a elegir entre tirar el dato o esconder el fallo.",
-    "quantdata.intelligence.coverage: publica `consumers` (quien se queda sin que) y `scheduler_states` (los nueve estados con sus anomalias), y cada herramienta lleva su `lifecycle`, su `anomaly` y su `criticality`.",
-    "quantdata.intelligence: una herramienta con dato anterior publicado y el ultimo intento fallido dejaba de poder decir LIVE. Eso era servir el ciclo anterior con la etiqueta del actual.",
-    "quantdata.intelligence: conjunto EN VUELO por clave, que es lo que hace que `RUNNING` sea un estado medido y no una deduccion del intento anterior."
+    "transport_runtime (NUEVO): el transporte es del HOST. Un `httpx.AsyncClient` por host para todo el proceso, con refcuenta, en vez de uno por carril: dos pools contra el mismo host eran el doble de handshakes y ninguno aprovechaba lo que el otro tenia abierto.",
+    "keep-alive 90 s frente a los 5 s por defecto de httpx: con ciclos de 15 s TODAS las conexiones estaban caducadas al empezar cada ciclo, asi que cada ciclo pagaba un handshake TCP+TLS por herramienta, y todos a la vez. Esa es la estampida de conexion que producia los timeouts.",
+    "el plazo de CONEXION lo gobierna el p95 del handshake MEDIDO por host, no una constante por peticion. La LECTURA sigue gobernada por el p95 POR ENDPOINT: un handshake no pertenece a ninguna herramienta y una respuesta lenta no dice nada sobre la red.",
+    "escalada al agotarse el plazo de conexion: sin ella, plazo corto -> el handshake no completa -> no hay muestra -> no hay p95 -> el plazo sigue corto, para siempre. Es la misma trampa que v1.58.1 cerro para la lectura, que seguia abierta para la conexion.",
+    "cuatro fases con nombre propio: CONNECT_TIMEOUT, POOL_TIMEOUT, READ_TIMEOUT y WRITE_TIMEOUT. Un pool lleno es congestion NUESTRA y no abre el circuito del host; antes los cuatro llegaban como «timeout» y el remedio se adivinaba.",
+    "pool dimensionado DESDE el techo de concurrencia: menos convertiria concurrencia en espera de pool -que se lee como lentitud del proveedor sin serlo- y mucho mas devolveria la estampida por el otro lado.",
+    "cortacircuitos DE TRANSPORTE por host, separado del de endpoint: lo que impide LLEGAR afecta a las 36 herramientas a la vez. Se falla rapido para que quien llama sirva su ultimo valor bueno.",
+    "un reintento de CONEXION como maximo, con presupuesto por ciclo y por HOST, backoff con jitter, y NUNCA durante una rafaga: un reintento por peticion multiplicaria por dos la estampida que causa el fallo.",
+    "telemetria por peticion con el `trace` de httpcore: pool_wait_ms, connect_ms, tls_ms, write_ms, read_ms, request_ms y si la conexion se REUTILIZO. `reuse_pct` por host es la cifra que demuestra que el arreglo no fue subir el plazo.",
+    "endpoint_runtime.CONNECT_TIMEOUT_S deja de ser una constante propia y se lee del transporte: el 4.0 fijo ya no existe en ningun sitio como autoridad. El warm start pasa a 8.0 s porque el razonamiento que sostenia el 4.0 es falso con la evidencia delante, NO porque subirlo sea el arreglo.",
+    "Deadline pasa de dos fases a cuatro (connect/read/write/pool) con `with_transport`, que es como el plazo del endpoint recibe lo que decide el transporte sin que ninguno pise la autoridad del otro."
   ],
   "tests": {
-    "collected": 3171,
-    "passed": 3120,
+    "collected": 3209,
+    "passed": 3158,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 193,
+    "files": 194,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "a4870fa16f26f56f822635a23b8692a07ecd08610dd84dd1ea48de3a7547b321",
+    "plan_sha256": "4b8b1c35fbe083766c09d09567544f6543f7976c28220e48eeee1ebf20539f0f",
     "run_observed": {
-      "passed": 3120,
+      "passed": 3158,
       "skipped": 51,
       "failed": 0,
-      "collected": 3171,
+      "collected": 3209,
       "interprete": "CPython 3.11.15 (el del contenedor de desarrollo)",
       "skips_desglosados": {
         "live_con_credenciales": 45,
         "pyzmq_ausente_en_el_contenedor": 2,
         "universo_retirado_en_v1.58.0_con_regla_cubierta_en_otro_fichero": 4
       },
-      "note": "ejecucion completa: 3120 pasados, 51 saltados, 0 fallos. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 51 reales son 45 que exigen ITMQ_LIVE_TESTS=1 con la terminal levantada y QUANTDATA_API_KEY, 2 por pyzmq ausente en este contenedor y 4 de activos retirados del universo en v1.58.0 cuya regla cubre test_v1580_contrato_del_universo.py. El interprete CERTIFICADO sigue siendo CPython 3.13.12 (.python-runtime.json): esta corrida es del contenedor de desarrollo y no lo sustituye."
+      "note": "`skipped` del contrato es 0 porque ningun salto se presenta como auditado. El interprete CERTIFICADO sigue siendo CPython 3.13.12 (.python-runtime.json); esta corrida es del contenedor de desarrollo y no lo sustituye."
     }
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
@@ -185,22 +188,20 @@
     "anterior": "3.12.14 (source-only; sin instalador de Windows desde 3.12.10)"
   },
   "live_certification": {
+    "required": true,
     "script": "scripts/certificar_transporte_live.py",
-    "entrypoint_windows": "CERTIFICAR_TRANSPORTE.bat",
-    "status": "PENDIENTE_DE_EJECUCION_EN_WINDOWS",
-    "note": "Las siete afirmaciones del transporte solo se cierran con trafico real. La suite de caos demuestra la conducta del codigo, no la del proveedor, y no las sustituye.",
-    "assertions": [
-      "SIN_MUERTE_SISTEMATICA_EN_5S",
-      "SIN_AVALANCHA_DE_PESADOS",
-      "RECUPERACION_TRAS_TIMEOUT",
-      "UN_FALLO_NO_BLOQUEA_A_LOS_DEMAS",
-      "SIN_CONTAMINACION_ENTRE_ACTIVOS",
-      "EL_PLAZO_LO_FIJA_EL_p95_MEDIDO",
-      "COLA_PROPIA_SEPARADA_DE_LA_LATENCIA_DEL_PROVEEDOR"
+    "why": "El bloque de transporte NO se da por cerrado con sinteticos. La estampida de conexion, el keep-alive y la desaparicion del `connect timed out` solo se pueden demostrar contra la red real del operador, en Windows, con sus credenciales y su enlace.",
+    "artefactos": [
+      "CERTIFICACION_LIVE_TRANSPORTE.json",
+      "CERTIFICACION_LIVE_TRANSPORTE.md"
     ]
   },
   "gate_observed": {
     "guards_pass": [
+      "VERSION SYNC",
+      "RELEASE TRACEABILITY",
+      "ARTIFACT CLEANLINESS",
+      "SECRET FILE",
       "WINDOWS RUNTIME",
       "DEPLOYMENT CONTRACT",
       "LOCKS",
@@ -215,7 +216,14 @@
       "JAVASCRIPT 26/26",
       "CARGO CHECK --locked (causality_engine + wasm_bridge)"
     ],
-    "detenido_en": "particion pytest 2/21. El gate exige CERO saltos y este contenedor no tiene pyzmq ni credenciales del proveedor: la particion 2 pasa 149/149 y salta 2 por `No module named 'zmq'`. Es una limitacion del entorno, no un fallo de la suite: la corrida completa da 0 fallos.",
+    "detenido_en": "particion pytest 2/21. El gate exige CERO saltos y este contenedor no tiene pyzmq ni credenciales del proveedor: la particion pasa 149/149 y salta 2 por `No module named 'zmq'`. Limitacion del entorno, no de la suite: la corrida completa da 0 fallos.",
     "que_falta_para_PASS": "ejecutar el gate en el entorno certificado (CPython 3.13.12 con los locks instalados, pyzmq incluido) y con QUANTDATA_API_KEY + ITMQ_LIVE_TESTS=1 con la terminal levantada."
+  },
+  "bloque_abierto": {
+    "nombre": "TRANSPORTE_QUANT_DATA",
+    "estado": "ABIERTO_HASTA_CERTIFICACION_LIVE",
+    "criterio_de_cierre": "el informe LIVE en Windows tiene que demostrar que desaparece la repeticion sistematica de `connect timed out` y que el sistema se recupera. Afirmaciones 8 a 14 del certificador.",
+    "comando": "py -3.13 scripts\\\\certificar_transporte_live.py --symbols DIA,SPY,QQQ --cycles 12",
+    "ensayo_en_seco": "contra un proveedor local: 13 peticiones, 1 handshake, 92,31 % de reutilizacion de conexion, 0 timeouts de conexion. No sustituye a la medicion en la red del operador."
   }
 }

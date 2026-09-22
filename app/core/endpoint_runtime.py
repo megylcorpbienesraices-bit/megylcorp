@@ -96,12 +96,20 @@ WARM_START_READ_S = 12.0
 #: Plazo de CONEXIÓN, independiente del de lectura.
 #:
 #: Son dos fallos distintos y cada uno tiene su escala: establecer la conexión es
-#: un ida y vuelta de red —si no ocurre en cuatro segundos, no va a ocurrir— y
-#: leer la respuesta depende de cuánto tarde el proveedor en calcularla. Un solo
-#: número para los dos obliga a elegir: con cinco segundos se corta al endpoint
-#: que iba a responder en nueve; con doce se esperan doce a un host que no
-#: resuelve.
-CONNECT_TIMEOUT_S = 4.0
+#: un ida y vuelta de red y leer la respuesta depende de cuánto tarde el
+#: proveedor en calcularla. Un solo número para los dos obliga a elegir: con
+#: cinco segundos se corta al endpoint que iba a responder en nueve; con doce se
+#: esperan doce a un host que no está.
+#:
+#: v1.60.0 · ESTE MÓDULO YA NO ES SU AUTORIDAD. El plazo de conexión lo gobierna
+#: el HOST —`transport_runtime`—, con el p95 del handshake MEDIDO y escalada
+#: cuando se agota. Aquí queda sólo el valor de arranque, y se lee de allí para
+#: que no haya dos números distintos diciendo ser el mismo plazo. El 4.0 fijo
+#: que produjo `connect timed out after 4.0s` en cuatro endpoints a la vez ya no
+#: existe en ningún sitio.
+from .transport_runtime import CONNECT_WARM_START_S as _CONNECT_WARM_START
+
+CONNECT_TIMEOUT_S = _CONNECT_WARM_START
 
 #: Peso de la última muestra en la EWMA. La EWMA NO fija el plazo: sirve para
 #: detectar que un endpoint se está degradando antes de que el p95 lo note.
@@ -131,18 +139,36 @@ OPEN_SECONDS_MAX = 600.0
 
 
 class Deadline:
-    """Plazo de una petición, con la conexión separada de la lectura.
+    """Plazo de una petición, con sus CUATRO fases separadas.
 
-    Viaja como objeto y no como número porque son dos plazos con dos causas: uno
-    mide alcanzar al proveedor, el otro mide que conteste. Aplanarlos a un solo
-    float es el defecto que este módulo existe para cerrar.
+    Viaja como objeto y no como número porque son cuatro plazos con cuatro
+    causas distintas, y cada una se arregla al revés que las otras:
+
+        connect  alcanzar al host      → red, DNS, TLS. Autoridad: el HOST
+        read     que el proveedor
+                 termine de contestar  → cálculo del endpoint. Autoridad: el p95
+                                          POR ENDPOINT
+        write    terminar de enviar    → enlace de subida
+        pool     encontrar hueco en
+                 NUESTRO pool          → congestión PROPIA, nunca del proveedor
+
+    `connect` y `read` no comparten autoridad a propósito: un handshake no
+    pertenece a ninguna herramienta —es del host— y una respuesta lenta no dice
+    nada sobre la red. v1.60.0.
+
+    `write` y `pool` admiten `None`: entonces los pone el transporte, que es
+    quien conoce el tamaño del pool.
     """
 
-    __slots__ = ("connect", "read", "source")
+    __slots__ = ("connect", "read", "write", "pool", "source")
 
-    def __init__(self, *, connect: float, read: float, source: str = "") -> None:
+    def __init__(self, *, connect: float, read: float, source: str = "",
+                 write: Optional[float] = None,
+                 pool: Optional[float] = None) -> None:
         self.connect = max(0.5, float(connect))
         self.read = max(TIMEOUT_FLOOR_S, float(read))
+        self.write = (None if write is None else max(0.5, float(write)))
+        self.pool = (None if pool is None else max(0.5, float(pool)))
         self.source = str(source)
 
     @property
@@ -150,8 +176,19 @@ class Deadline:
         """Lo máximo que puede vivir la petición: conectar y después leer."""
         return self.connect + self.read
 
+    def with_transport(self, *, connect: float, write: Optional[float] = None,
+                       pool: Optional[float] = None,
+                       source: str = "") -> "Deadline":
+        """El mismo plazo de LECTURA, con las fases que decide el transporte."""
+        return Deadline(connect=connect, read=self.read,
+                        write=(self.write if write is None else write),
+                        pool=(self.pool if pool is None else pool),
+                        source=(source or self.source))
+
     def as_dict(self) -> Dict[str, Any]:
         return {"connect_s": round(self.connect, 3), "read_s": round(self.read, 3),
+                "write_s": (None if self.write is None else round(self.write, 3)),
+                "pool_s": (None if self.pool is None else round(self.pool, 3)),
                 "total_s": round(self.total, 3), "source": self.source}
 
     def __repr__(self) -> str:   # pragma: no cover - diagnóstico

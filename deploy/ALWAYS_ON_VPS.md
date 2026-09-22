@@ -1,4 +1,4 @@
-# ITM QUANT v1.59.0 — ALWAYS-ON VPS
+# ITM QUANT v1.60.0 — ALWAYS-ON VPS
 
 El navegador es solo la interfaz. El proceso `run_always_on.py` / contenedor mantiene proveedores, cálculo cuantitativo, persistencia, sesión actual y paquetes históricos READY aunque no haya ningún navegador abierto.
 

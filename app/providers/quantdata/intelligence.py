@@ -33,6 +33,7 @@ from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
 from ...core.obs import note as _obs_note, expected as _obs_expected
 from ...core.obs import get_logger as _get_logger
 from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
+from ...core.transport_runtime import TRANSPORT, READ as FASE_LECTURA
 from ...core import consumer_contracts as CC
 from ...core import scheduler_states as SS
 from ...core.wall_snapshot import SNAPSHOTS as WALL_SNAPSHOTS, LKG_FRESCO_S as _WALL_FRESCO_S
@@ -353,6 +354,10 @@ class QuantDataIntelligence:
             # Nuevo ciclo: cada endpoint recupera su reintento y se fija cuándo
             # termina el turno, que es lo que acota el presupuesto.
             ENDPOINT_RUNTIME.start_cycle()
+            # v1.60.0 · Y el presupuesto de reintentos de CONEXIÓN, que es del
+            # HOST y no del endpoint: un reintento por petición multiplicaría
+            # por dos la estampida de conexión que causa el fallo.
+            TRANSPORT.start_cycle()
             self._cycle_ends_at = time.monotonic() + (
                 BURST_CYCLE_SECONDS if self._bursting() else CADENCE["FAST"])
             due = [t for t in self.catalog.values() if self._due(t, now)]
@@ -669,7 +674,16 @@ class QuantDataIntelligence:
                 turno = await GOVERNOR.acquire(tool.key, weight=_peso,
                                                budget_s=_plazo.total)
                 try:
-                    respuesta = await _client.post(path, body, timeout=_plazo)
+                    # v1.60.0 · El transporte necesita dos cosas de aquí para
+                    # decidir si concede el reintento de CONEXIÓN: si estamos en
+                    # RÁFAGA —durante la cual no se concede ninguno, porque la
+                    # ráfaga ya está usando el enlace entero y reintentar agrava
+                    # la estampida— y cuánto queda de ciclo, porque reintentar
+                    # para morir igual no ayuda a nadie.
+                    respuesta = await _client.post(
+                        path, body, timeout=_plazo,
+                        burst=(time.monotonic() < self._burst_until),
+                        cycle_left_s=max(0.0, self._cycle_ends_at - time.monotonic()))
                 except QuantDataTimeout:
                     turno.done("TIMEOUT")
                     raise
@@ -677,6 +691,12 @@ class QuantDataIntelligence:
                     turno.done("ERROR")
                     raise
                 fila = turno.done("OK")
+                # v1.60.0 · Y con el desglose del TRANSPORTE: `pool_wait_ms`,
+                # `connect_ms`, `tls_ms`, `write_ms`, `read_ms` y si la conexión
+                # se REUTILIZÓ. Sin esa última cifra no hay forma de demostrar
+                # que el keep-alive está funcionando, que es lo que hace que el
+                # handshake deje de ocurrir en cada ciclo.
+                fila = {**fila, **(respuesta.transport or {})}
                 self._timings[tool.key] = fila
                 # La latencia que calibra el plazo es la de la PETICIÓN, sin la
                 # cola: sumarle nuestra espera haría que el plazo persiguiera
@@ -738,7 +758,7 @@ class QuantDataIntelligence:
                 # en calcular: subir la lectura por eso sería perseguir el
                 # síntoma equivocado.
                 self._fail_class[tool.key] = "TIMEOUT"
-                if str(getattr(exc, "phase", "READ") or "READ").upper() == "READ":
+                if str(getattr(exc, "phase", FASE_LECTURA) or FASE_LECTURA) == FASE_LECTURA:
                     ENDPOINT_RUNTIME.get(tool.key).record_timeout(
                         getattr(exc, "limit_seconds", None)
                         or ENDPOINT_RUNTIME.get(tool.key).timeout())
@@ -1149,6 +1169,11 @@ class QuantDataIntelligence:
             # las dos y los arreglos son opuestos: al proveedor lento se le da
             # más plazo; a la cola propia, menos concurrencia.
             "governor": GOVERNOR.snapshot(),
+            # v1.60.0 · EL TRANSPORTE, POR HOST. El plazo de conexión vigente y
+            # de dónde sale, el p95 del handshake, cuántas conexiones se
+            # reutilizan —la cifra que dice si el keep-alive funciona—, los
+            # timeouts por fase y el cortocircuitos del host.
+            "transport": TRANSPORT.snapshot(),
             "timings": [dict(v, key=k) for k, v in sorted(self._timings.items())],
             "timeout_policy": self.settings.timeout_policy(),
             # Por qué NO se reintentó, herramienta a herramienta. Un «no» sin

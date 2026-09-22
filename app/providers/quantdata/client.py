@@ -3,10 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import asyncio
+
 import httpx
 
 from .settings import QuantDataSettings
 from ...core.endpoint_runtime import Deadline
+from ...core.transport_runtime import (TRANSPORT, TransportTrace, pool_limits,
+                                       CONNECT, POOL, READ, WRITE,
+                                       WRITE_TIMEOUT_S)
 from .shared import QUOTA
 from ...version import APP_VERSION
 
@@ -38,8 +43,23 @@ class QuantDataTimeout(QuantDataError):
     """
 
     limit_seconds: float | None = None
-    #: CONNECT o READ. Son dos causas distintas y dos arreglos distintos.
+    #: v1.60.0 · CONNECT_TIMEOUT, POOL_TIMEOUT, READ_TIMEOUT o WRITE_TIMEOUT.
+    #: Cuatro causas y cuatro arreglos, y ninguno se parece a los otros:
+    #:
+    #:   CONNECT  no se alcanzó al host   → red/DNS/TLS. NO es el endpoint, y
+    #:                                      afecta a TODAS las herramientas
+    #:   POOL     nuestro pool lleno      → congestión PROPIA. Subir el plazo
+    #:                                      del proveedor no la toca
+    #:   READ     conectó y no contestó   → el endpoint tarda: su p95 manda
+    #:   WRITE    no se pudo enviar       → enlace de subida
+    #:
+    #: Antes los cuatro llegaban como «timeout» y el remedio se adivinaba.
     phase: str | None = None
+    #: Telemetría del transporte de ESTA petición, cuando se llegó a medir.
+    transport: dict | None = None
+    #: Por qué NO se reintentó la conexión, cuando no se reintentó. Un «no» sin
+    #: causa no se puede diagnosticar.
+    retry_decision: dict | None = None
 
 
 @dataclass
@@ -49,6 +69,10 @@ class QuantDataResponse:
     remaining: int | None = None
     limit: int | None = None
     reset_seconds: float | None = None
+    #: v1.60.0 · Dónde se fue el tiempo de ESTA petición, medido en el
+    #: transporte: `pool_wait_ms`, `connect_ms`, `tls_ms`, `write_ms`,
+    #: `read_ms`, `request_ms` y si la conexión se REUTILIZÓ.
+    transport: dict[str, Any] | None = None
 
 
 # Claves bajo las que los proveedores publican el detalle de una validación
@@ -155,31 +179,71 @@ class QuantDataClient:
     def __init__(self, settings: QuantDataSettings) -> None:
         self.settings = settings
         self._client: httpx.AsyncClient | None = None
+        self._owns_reference = False
+
+    def _build_client(self) -> httpx.AsyncClient:
+        """El cliente del host: UNO para todo el proceso, con keep-alive real.
+
+        v1.60.0 · EL DEFECTO NO ERA EL PLAZO, ERA VOLVER A CONECTAR SIEMPRE.
+
+        Cada carril construía el suyo: dos pools contra el mismo host. Y con el
+        `keepalive_expiry` por defecto de httpx —CINCO segundos— frente a ciclos
+        de quince, todas las conexiones estaban caducadas al empezar cada ciclo.
+        El resultado era un handshake TCP+TLS por herramienta y por ciclo, todos
+        a la vez: una estampida de conexión contra el mismo host, que es lo que
+        se veía como `connect timed out after 4.0s` en cuatro endpoints que no
+        comparten nada salvo el destino.
+
+        El pool se dimensiona DESDE el techo de concurrencia: ni menos —la
+        diferencia se convertiría en espera de pool, que se lee como lentitud
+        del proveedor y no lo es— ni mucho más, que devolvería la estampida por
+        el otro lado.
+        """
+        limites = pool_limits(self.settings.max_inflight)
+        anfitrion = TRANSPORT.host(self.settings.base_url,
+                                   self.settings.connect_timeout_seconds)
+        return httpx.AsyncClient(
+            base_url=self.settings.base_url,
+            headers={
+                "Authorization": f"Bearer {self.settings.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": f"ITM-QUANT/{APP_VERSION}",
+            },
+            limits=httpx.Limits(
+                max_connections=limites["max_connections"],
+                max_keepalive_connections=limites["max_keepalive_connections"],
+                keepalive_expiry=limites["keepalive_expiry"]),
+            # Plazo por DEFECTO, con las CUATRO fases separadas. Cada petición
+            # trae el suyo (ver `post`); el del constructor ya no puede ser un
+            # número plano aplicado a las cuatro.
+            timeout=httpx.Timeout(
+                self.settings.read_warm_start_seconds,
+                connect=anfitrion.connect_timeout(),
+                write=WRITE_TIMEOUT_S,
+                pool=limites["pool_timeout_s"]),
+            follow_redirects=False,
+        )
 
     async def start(self) -> None:
         if self._client is None:
-            self._client = httpx.AsyncClient(
-                base_url=self.settings.base_url,
-                headers={
-                    "Authorization": f"Bearer {self.settings.api_key}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": f"ITM-QUANT/{APP_VERSION}",
-                },
-                # Plazo por DEFECTO del cliente, con la conexión separada de la
-                # lectura. Cada petición trae el suyo (ver `post`), pero el del
-                # constructor ya no puede ser un número plano que se aplique a
-                # los dos: son dos fallos distintos con dos escalas distintas.
-                timeout=httpx.Timeout(
-                    self.settings.read_warm_start_seconds,
-                    connect=self.settings.connect_timeout_seconds),
-                follow_redirects=False,
-            )
+            # El pool es del HOST, no de este objeto: los dos carriles comparten
+            # conexiones en vez de abrir cada uno las suyas.
+            self._client = TRANSPORT.acquire(self.settings.base_url,
+                                             self._build_client)
+            self._owns_reference = True
 
     async def close(self) -> None:
         if self._client is not None:
-            await self._client.aclose()
             self._client = None
+            if self._owns_reference:
+                self._owns_reference = False
+                # Sólo se cierra de verdad cuando lo suelta el ÚLTIMO carril:
+                # que el primero en parar cerrara el pool dejaría al otro sin
+                # transporte a mitad de ciclo.
+                sobrante = TRANSPORT.release(self.settings.base_url)
+                if sobrante is not None:
+                    await sobrante.aclose()
 
     @staticmethod
     def _int_header(headers: httpx.Headers, name: str) -> int | None:
@@ -195,8 +259,87 @@ class QuantDataClient:
         except Exception:
             return None
 
+    async def _enviar(self, path: str, body: dict[str, Any], plazo: "Deadline",
+                      anfitrion, limites: dict) -> tuple[Any, "TransportTrace"]:
+        """UN intento contra el host, con las cuatro fases separadas.
+
+        Cada `except` nombra una fase distinta porque cada una tiene un arreglo
+        distinto, y confundirlas fue lo que hizo que «timeout» significara
+        cuatro cosas en el mismo registro.
+        """
+        assert self._client is not None
+        traza = TransportTrace()
+        try:
+            response = await self._client.post(
+                path, json=body,
+                timeout=httpx.Timeout(plazo.read, connect=plazo.connect,
+                                      write=plazo.write, pool=plazo.pool),
+                # El único sitio donde se puede separar «esperar hueco en el
+                # pool» de «abrir el socket» de «negociar TLS» de «esperar la
+                # respuesta». Sin esto, los cuatro se leen igual desde fuera.
+                extensions={"trace": traza})
+        except httpx.PoolTimeout as exc:
+            # NO es el proveedor: es NUESTRO pool. Subirle el plazo al proveedor
+            # por esto sería arreglar la casa del vecino.
+            anfitrion.note_pool_timeout()
+            error = QuantDataTimeout(
+                f"Quant Data pool timed out after {plazo.pool:.1f}s: "
+                f"sin hueco en el pool propio")
+            error.limit_seconds = plazo.pool
+            error.phase = POOL
+            error.transport = anfitrion.snapshot()
+            raise error from exc
+        except httpx.ConnectTimeout as exc:
+            # Un plazo de CONEXIÓN agotado no dice nada sobre lo que tarda el
+            # endpoint en calcular: dice que no se llegó al proveedor. Subir el
+            # plazo de lectura por esto sería perseguir el síntoma equivocado.
+            #
+            # Y deja MUESTRA: el plazo del siguiente intento sube. Sin eso, un
+            # plazo corto impide completar el handshake, la falta de handshake
+            # impide medir y la falta de medidas mantiene el plazo corto. Para
+            # siempre, que es exactamente lo que se veía en Windows.
+            anfitrion.note_connect_timeout(plazo.connect)
+            error = QuantDataTimeout(
+                f"Quant Data connect timed out after {plazo.connect:.1f}s")
+            error.limit_seconds = plazo.connect
+            error.phase = CONNECT
+            error.transport = anfitrion.snapshot()
+            raise error from exc
+        except httpx.WriteTimeout as exc:
+            error = QuantDataTimeout(
+                f"Quant Data write timed out after {float(plazo.write or 0):.1f}s")
+            error.limit_seconds = plazo.write
+            error.phase = WRITE
+            raise error from exc
+        except httpx.TimeoutException as exc:
+            # El plazo que expiró viaja en el error. Sin él, aguas arriba no se
+            # puede distinguir «este endpoint está muerto» de «se le dieron
+            # cinco segundos y necesita doce», que son dos arreglos opuestos.
+            error = QuantDataTimeout(
+                f"Quant Data request timed out after {plazo.read:.1f}s")
+            error.limit_seconds = plazo.read
+            error.phase = READ
+            error.transport = traza.finish().as_dict()
+            raise error from exc
+        except httpx.ConnectError as exc:
+            # DNS, ruta, TLS rechazado: no se llegó al host. Cuenta para el
+            # cortocircuitos DEL TRANSPORTE, que es el que protege a las treinta
+            # y seis herramientas a la vez.
+            anfitrion.note_host_failure(f"{type(exc).__name__}: {exc}")
+            error = QuantDataError(f"Quant Data connect error: {type(exc).__name__}")
+            error.phase = CONNECT
+            error.transport = anfitrion.snapshot()
+            raise error from exc
+        except httpx.HTTPError as exc:
+            raise QuantDataError(f"Quant Data transport error: {type(exc).__name__}") from exc
+
+        traza.finish()
+        return response, traza
+
     async def post(self, path: str, body: dict[str, Any], *,
-                   timeout: float | "Deadline" | None = None) -> QuantDataResponse:
+                   timeout: float | "Deadline" | None = None,
+                   burst: bool = False,
+                   cycle_left_s: float | None = None) -> QuantDataResponse:
         """Una petición. `timeout` es el plazo DE ESTA petición, en segundos.
 
         v1.58.1 · EL PLAZO MEDIDO NO LLEGABA AL TRANSPORTE.
@@ -242,30 +385,73 @@ class QuantDataClient:
         else:
             plazo = Deadline(connect=self.settings.connect_timeout_seconds,
                              read=max(0.1, float(timeout)), source="FLOAT_COMPAT")
+
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.60.0 · EL PLAZO DE CONEXIÓN ES DEL HOST, NO DE LA HERRAMIENTA
+        # ═══════════════════════════════════════════════════════════════════
+        #
+        # Quien decide cuánto se espera un handshake es el HOST: el handshake no
+        # pertenece a `net_drift` ni a `gamma`, y medirlo por endpoint reparte
+        # treinta y seis veces la misma muestra. La LECTURA sigue siendo del
+        # endpoint —su p95—, que es lo que ya decidió `endpoint_runtime`.
+        anfitrion = TRANSPORT.host(self.settings.base_url,
+                                   self.settings.connect_timeout_seconds)
+        limites = pool_limits(self.settings.max_inflight)
+        permiso = anfitrion.allows()
+        if not permiso["allowed"]:
+            # Cortocircuito DE TRANSPORTE: el host no está respondiendo y
+            # llamarle otra vez sólo alarga la cola. Se falla rápido para que
+            # quien llama pueda servir su último valor bueno.
+            error = QuantDataError(f"Quant Data transport open: {permiso['reason']}")
+            error.phase = CONNECT
+            error.transport = anfitrion.snapshot()
+            raise error
+        plazo = plazo.with_transport(connect=anfitrion.connect_timeout(),
+                                     write=WRITE_TIMEOUT_S,
+                                     pool=limites["pool_timeout_s"],
+                                     source=plazo.source)
+
         try:
-            response = await self._client.post(
-                path, json=body,
-                timeout=httpx.Timeout(plazo.read, connect=plazo.connect))
-        except httpx.ConnectTimeout as exc:
-            # Un plazo de CONEXIÓN agotado no dice nada sobre lo que tarda el
-            # endpoint en calcular: dice que no se llegó al proveedor. Subir el
-            # plazo de lectura por esto sería perseguir el síntoma equivocado.
-            error = QuantDataTimeout(
-                f"Quant Data connect timed out after {plazo.connect:.1f}s")
-            error.limit_seconds = plazo.connect
-            error.phase = "CONNECT"
-            raise error from exc
-        except httpx.TimeoutException as exc:
-            # El plazo que expiró viaja en el error. Sin él, aguas arriba no se
-            # puede distinguir «este endpoint está muerto» de «se le dieron
-            # cinco segundos y necesita doce», que son dos arreglos opuestos.
-            error = QuantDataTimeout(
-                f"Quant Data request timed out after {plazo.read:.1f}s")
-            error.limit_seconds = plazo.read
-            error.phase = "READ"
-            raise error from exc
-        except httpx.HTTPError as exc:
-            raise QuantDataError(f"Quant Data transport error: {type(exc).__name__}") from exc
+            response, traza = await self._enviar(path, body, plazo, anfitrion,
+                                                 limites)
+        except QuantDataTimeout as fallo:
+            # ═══════════════════════════════════════════════════════════════
+            # UN reintento de CONEXIÓN, y sólo con las cuatro condiciones
+            # ═══════════════════════════════════════════════════════════════
+            #
+            # Un reintento por petición multiplicaría por dos la estampida de
+            # conexión que causa el fallo, así que el presupuesto es del HOST y
+            # por ciclo. Durante una ráfaga no se concede ninguno: la ráfaga ya
+            # está usando el enlace entero.
+            if fallo.phase != CONNECT:
+                raise
+            decision = anfitrion.retry_connect(burst=burst,
+                                               deadline_left_s=cycle_left_s)
+            if not decision.get("retry"):
+                fallo.retry_decision = decision
+                raise
+            await asyncio.sleep(float(decision["sleep_seconds"]))
+            QUOTA.spend(1)
+            # El segundo intento va con el plazo YA escalado por el primero: es
+            # lo que convierte un fallo en una medida en vez de en una repetición.
+            plazo = plazo.with_transport(connect=anfitrion.connect_timeout(),
+                                         write=WRITE_TIMEOUT_S,
+                                         pool=limites["pool_timeout_s"],
+                                         source="CONNECT_RETRY")
+            try:
+                response, traza = await self._enviar(path, body, plazo, anfitrion,
+                                                     limites)
+            except QuantDataTimeout as segundo:
+                # El reintento ya se gastó: que el error lo DIGA, o aguas arriba
+                # parecerá que nunca se intentó.
+                segundo.retry_decision = {**decision, "spent": True,
+                                          "outcome": "el reintento también agotó "
+                                                     "el plazo de conexión"}
+                raise
+        # Se alcanzó el host: el transporte está sano, se midió lo que costó y
+        # el cortocircuitos se cierra.
+        anfitrion.note_trace(traza)
+        anfitrion.note_success()
 
         remaining = self._int_header(response.headers, "X-RateLimit-Remaining")
         limit = self._int_header(response.headers, "X-RateLimit-Limit")
@@ -312,4 +498,6 @@ class QuantDataClient:
             raise QuantDataError("Quant Data returned invalid JSON") from exc
         if not isinstance(payload, dict):
             raise QuantDataError("Quant Data returned a non-object payload")
-        return QuantDataResponse(payload=payload, status_code=response.status_code, remaining=remaining, limit=limit, reset_seconds=reset)
+        return QuantDataResponse(payload=payload, status_code=response.status_code,
+                                 remaining=remaining, limit=limit, reset_seconds=reset,
+                                 transport=traza.as_dict())

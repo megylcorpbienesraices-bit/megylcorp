@@ -3606,7 +3606,7 @@
     "test_el_lkg_es_independiente_por_herramienta",
     "test_el_motivo_del_no_reintento_viaja_siempre",
     "test_el_plazo_de_conexion_es_independiente_del_de_lectura",
-    "test_el_transporte_recibe_los_dos_plazos_por_separado",
+    "test_el_transporte_recibe_las_cuatro_fases_por_separado",
     "test_el_turno_se_libera_aunque_la_peticion_reviente",
     "test_la_autoridad_del_plazo_es_el_p95_no_la_ewma",
     "test_la_clasificacion_separa_lo_pesado_de_lo_ligero",
@@ -3746,8 +3746,49 @@
     "test_una_dependencia_todavia_en_la_cola_tampoco_bloquea",
     "test_una_peticion_en_vuelo_manda_sobre_el_resultado_anterior"
    ]
+  },
+  "tests/test_v1600_transporte_de_conexion.py": {
+   "casos": 38,
+   "tests": [
+    "test_cada_timeout_dice_su_fase",
+    "test_con_el_circuito_abierto_se_falla_rapido_y_se_nombra_la_fase",
+    "test_con_handshakes_medidos_manda_el_p95",
+    "test_el_4_0_fijo_ya_no_existe_como_autoridad",
+    "test_el_circuito_se_reabre_y_deja_pasar_una_de_prueba",
+    "test_el_cliente_reintenta_una_vez_y_lo_deja_dicho",
+    "test_el_host_publica_el_porcentaje_de_reutilizacion",
+    "test_el_keepalive_sobrevive_al_ciclo",
+    "test_el_plazo_de_conexion_nunca_baja_del_suelo_ni_sube_del_techo",
+    "test_el_pool_se_dimensiona_desde_el_techo_de_concurrencia",
+    "test_el_presupuesto_es_del_HOST_y_se_agota",
+    "test_el_presupuesto_se_repone_cada_ciclo",
+    "test_el_primero_en_parar_no_deja_al_otro_sin_transporte",
+    "test_el_snapshot_del_transporte_dice_el_plazo_y_de_donde_sale",
+    "test_el_warm_start_solo_gobierna_mientras_no_hay_medidas",
+    "test_estampida_de_conexion_un_solo_handshake_para_todo_el_lote",
+    "test_la_escalada_tiene_techo",
+    "test_la_lectura_sigue_siendo_del_endpoint_y_la_conexion_del_host",
+    "test_la_peticion_lleva_los_cuatro_plazos",
+    "test_la_traza_separa_pool_socket_tls_y_lectura",
+    "test_los_dos_carriles_comparten_el_cliente_del_host",
+    "test_los_fallos_de_host_abren_el_circuito_del_transporte",
+    "test_no_se_reintenta_con_el_circuito_abierto",
+    "test_no_se_reintenta_si_no_cabe_en_lo_que_queda_de_ciclo",
+    "test_nunca_durante_una_rafaga",
+    "test_recuperacion_el_host_vuelve_despues_de_una_tanda_de_fallos",
+    "test_se_concede_uno_con_backoff_y_jitter",
+    "test_sin_muestras_manda_el_warm_start",
+    "test_un_5xx_no_abre_el_circuito_del_transporte",
+    "test_un_fallo_de_conexion_no_borra_el_ultimo_dato_bueno",
+    "test_un_fallo_de_conexion_no_infla_el_plazo_de_lectura_del_endpoint",
+    "test_un_plazo_agotado_SUBE_el_siguiente",
+    "test_un_pool_lleno_no_es_culpa_del_proveedor",
+    "test_una_conexion_reutilizada_se_declara_como_tal",
+    "test_y_baja_sola_cuando_el_host_vuelve_a_conectar_bien",
+    "test_y_en_rafaga_no_reintenta_ninguna_vez"
+   ]
   }
  },
- "total_minimo": 3171,
- "version": "1.59.0"
+ "total_minimo": 3209,
+ "version": "1.60.0"
 }

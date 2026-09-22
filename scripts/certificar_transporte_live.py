@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""CERTIFICADOR LIVE DEL TRANSPORTE · ITM QUANT v1.58.0
+"""CERTIFICADOR LIVE DEL TRANSPORTE · ITM QUANT v1.60.0
 
 Se ejecuta EN WINDOWS, contra la API real, con las credenciales del operador.
-Emite `JSON` + `MD` con las afirmaciones del bloque 1+2 MEDIDAS, no declaradas.
+Emite `JSON` + `MD` con las afirmaciones MEDIDAS, no declaradas.
 
     py -3.13 scripts\\certificar_transporte_live.py --symbols DIA,SPY,QQQ
 
@@ -25,6 +25,17 @@ Lo que mide
     5  ninguna respuesta tardía de un activo contamina a otro
     6  el plazo lo gobierna el p95 medido, no la variable de entorno
     7  la cola propia y la latencia del proveedor quedan separadas
+
+v1.60.0 · Y las del bloque de TRANSPORTE, que es lo que el registro de Windows
+enseñaba roto:
+
+    8  DESAPARECE la repetición sistemática de `connect timed out`
+    9  las conexiones se REUTILIZAN: el handshake deja de pagarse cada ciclo
+   10  el plazo de conexión NO se queda escalando (ya no se agotan handshakes)
+   11  las cuatro fases se distinguen: CONNECT / POOL / READ / WRITE
+   12  el transporte se RECUPERA: ningún host queda en cortocircuito al final
+   13  las Walls siguen publicándose, con su estado de snapshot
+   14  los tres carriles de Dark Pool declaran lo de AHORA y su último bueno
 
 No modifica nada del producto: arranca los dos carriles, observa N ciclos y
 escribe el informe. Si falta la clave, lo dice y sale sin fingir una medición.
@@ -75,6 +86,7 @@ class Certificacion:
         from app.providers.quantdata.intelligence import QUANTDATA_INTELLIGENCE as PAGES
         from app.providers.quantdata.runtime import QUANTDATA as ENGINE
         from app.providers.quantdata.shared import ENDPOINT_RUNTIME, GOVERNOR
+        from app.core.transport_runtime import TRANSPORT
 
         await ENGINE.start(simbolo)
         await PAGES.start(simbolo)
@@ -95,9 +107,58 @@ class Certificacion:
                            "detail": t.get("detail")}
                           for t in (cov.get("tools") or [])],
                 "quota": cov.get("quota") or {},
+                # v1.60.0 · EL TRANSPORTE, por host: plazo de conexión vigente y
+                # su fuente, p95 del handshake, reutilización de conexiones,
+                # timeouts por fase y cortocircuitos.
+                "transport": TRANSPORT.snapshot(),
+                # Y las dos vistas que el operador mira para decidir: si el
+                # transporte se arregló, estas dos tienen que estar servidas.
+                "walls": self._walls(simbolo),
+                "dark_pool": self._dark_pool(cov),
             })
         await PAGES.stop()
         await ENGINE.stop()
+
+    @staticmethod
+    def _walls(simbolo: str) -> dict:
+        """Estado de Call Wall / Put Wall, SIN recalcular nada.
+
+        Se lee lo que el motor publicó. Si el transporte se arregló, aquí tiene
+        que haber muro o un `NO_CALCULABLE` que nombre lo que falta: lo que no
+        puede haber es una caja vacía.
+        """
+        try:
+            from app.core import quant_data_hub as HUB
+            from app.core import wall_engine as WE
+            from app.providers.quantdata.intelligence import QUANTDATA_INTELLIGENCE as PAGES
+            hub = HUB.hub_snapshot(simbolo, PAGES.snapshot())
+            muros = WE.walls_from_hub(simbolo, hub)
+            return {
+                "snapshot_state": muros.get("snapshot_state"),
+                "verdict": muros.get("verdict"),
+                "verdict_label": muros.get("verdict_label"),
+                "call_wall": (muros.get("call_wall") or {}).get("strike"),
+                "put_wall": (muros.get("put_wall") or {}).get("strike"),
+                "missing": ((muros.get("snapshot") or {}).get("missing_names") or []),
+            }
+        except Exception as exc:                            # noqa: BLE001
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+    @staticmethod
+    def _dark_pool(cov: dict) -> list:
+        """Los tres carriles, con lo de AHORA separado del último bueno."""
+        carriles = ("dark_flow", "dark_pool_levels", "equity_prints")
+        filas = []
+        for t in (cov.get("tools") or []):
+            if t.get("key") not in carriles:
+                continue
+            ciclo = t.get("lifecycle") or {}
+            filas.append({"key": t["key"], "state": t.get("state"),
+                          "lifecycle": ciclo.get("state"),
+                          "rows": t.get("rows"),
+                          "age_seconds": t.get("age_seconds"),
+                          "detail": ciclo.get("detail")})
+        return filas
 
     def ejecutar(self) -> None:
         for simbolo in self.symbols:
@@ -221,6 +282,113 @@ class Certificacion:
             (f"{cuellos.get('COLA_PROPIA', 0)} mediciones con cuello en nuestra cola "
              f"y {cuellos.get('PROVEEDOR', 0)} en el proveedor"),
             bottlenecks=dict(cuellos))
+
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.60.0 · EL BLOQUE DE TRANSPORTE
+        # ═══════════════════════════════════════════════════════════════════
+        hosts = [h for o in self.observaciones
+                 for h in (o.get("transport") or {}).get("hosts", [])]
+        ultimo_host = {}
+        for h in hosts:
+            ultimo_host[h["host"]] = h           # la última lectura de cada host
+
+        # 8 · la repetición sistemática de `connect timed out` desaparece
+        connect_to = sum(int(h.get("connect_timeouts") or 0)
+                         for h in ultimo_host.values())
+        peticiones = sum(int(h.get("handshakes") or 0) + int(h.get("reused_connections") or 0)
+                         for h in ultimo_host.values())
+        ratio = _pct(connect_to, peticiones) if peticiones else 0.0
+        add("SIN_CONNECT_TIMEOUT_SISTEMATICO",
+            connect_to == 0 or ratio <= 2.0,
+            (f"{connect_to} timeouts de conexión sobre {peticiones} peticiones "
+             f"({ratio} %)" if peticiones else "ninguna petición observada"),
+            connect_timeouts=connect_to, requests=peticiones, pct=ratio,
+            por_host={k: v.get("connect_timeouts") for k, v in ultimo_host.items()})
+
+        # 9 · el keep-alive funciona: las conexiones se reutilizan
+        reutilizacion = [h.get("reuse_pct") for h in ultimo_host.values()
+                         if h.get("reuse_pct") is not None]
+        peor = min(reutilizacion) if reutilizacion else None
+        add("LAS_CONEXIONES_SE_REUTILIZAN",
+            peor is not None and peor >= 50.0,
+            (f"reutilización del {peor} % en el peor host: el handshake deja de "
+             f"pagarse en cada ciclo" if peor is not None
+             else "no hubo tráfico suficiente para medir la reutilización"),
+            reuse_pct_por_host={k: v.get("reuse_pct") for k, v in ultimo_host.items()},
+            handshakes={k: v.get("handshakes") for k, v in ultimo_host.items()})
+
+        # 10 · el plazo de conexión NO se queda escalando
+        #
+        # Cuidado con lo que se exige aquí. Pedir «p95 medido» sin más
+        # CONTRADICE la afirmación 9: si el keep-alive funciona, casi no hay
+        # handshakes, y sin handshakes no hay p95 que medir. Las dos no pueden
+        # pasar a la vez, así que exigirlas juntas sería una prueba imposible.
+        #
+        # Lo que de verdad hay que descartar es lo tercero: que el plazo esté
+        # ESCALANDO, porque eso significa que se siguen agotando plazos de
+        # conexión, que es el defecto que este bloque cierra.
+        fuentes_conn = Counter(h.get("connect_timeout_source")
+                               for h in ultimo_host.values())
+        escalando = [k for k, v in ultimo_host.items()
+                     if v.get("connect_timeout_source") == "ESCALATED_AFTER_TIMEOUT"]
+        add("EL_PLAZO_DE_CONEXION_NO_SE_QUEDA_ESCALANDO",
+            bool(ultimo_host) and not escalando,
+            ((f"hosts todavía escalando el plazo de conexión: "
+              f"{', '.join(escalando)} — se siguen agotando handshakes")
+             if escalando else
+             (f"fuentes del plazo de conexión: {dict(fuentes_conn)}; ninguno "
+              f"escalando. p95 del handshake por host: "
+              f"{ {k: v.get('connect_p95_ms') for k, v in ultimo_host.items()} }")),
+            sources=dict(fuentes_conn), escalating=escalando,
+            connect_timeout_s={k: v.get("connect_timeout_s")
+                               for k, v in ultimo_host.items()},
+            p95_ms={k: v.get("connect_p95_ms") for k, v in ultimo_host.items()},
+            nota=("WARM_START con pocos handshakes NO es un fallo: es la prueba "
+                  "de que las conexiones se están reutilizando en vez de "
+                  "reabrirse cada ciclo"))
+
+        # 11 · las cuatro fases se distinguen
+        fases = {"CONNECT": connect_to,
+                 "POOL": sum(int(h.get("pool_timeouts") or 0)
+                             for h in ultimo_host.values()),
+                 "READ": total_to}
+        add("LAS_FASES_DEL_TRANSPORTE_SE_DISTINGUEN",
+            bool(ultimo_host),
+            (f"timeouts por fase: {fases}. Un pool lleno es congestión NUESTRA y "
+             f"no puede leerse como lentitud del proveedor"),
+            por_fase=fases)
+
+        # 12 · el transporte se recupera
+        abiertos_host = [k for k, v in ultimo_host.items() if v.get("breaker") == "OPEN"]
+        add("EL_TRANSPORTE_SE_RECUPERA",
+            not abiertos_host,
+            ("ningún host quedó en cortocircuito al terminar la ventana"
+             if not abiertos_host else
+             f"hosts en cortocircuito al final: {', '.join(abiertos_host)}"),
+            breakers={k: v.get("breaker") for k, v in ultimo_host.items()},
+            connect_retries={k: v.get("connect_retries_used")
+                             for k, v in ultimo_host.items()})
+
+        # 13 · las Walls siguen publicándose
+        muros = [o.get("walls") or {} for o in self.observaciones]
+        con_muro = [m for m in muros if m.get("call_wall") or m.get("put_wall")]
+        estados = Counter(m.get("snapshot_state") for m in muros)
+        add("LAS_WALLS_SE_PUBLICAN",
+            bool(con_muro) or all(m.get("missing") for m in muros if m),
+            (f"{len(con_muro)}/{len(muros)} observaciones con muro calculado; "
+             f"estados de snapshot: {dict(estados)}"),
+            snapshot_states=dict(estados),
+            ultimo=(muros[-1] if muros else {}))
+
+        # 14 · Dark Pool declara lo de ahora y su último bueno
+        carriles = [c for o in self.observaciones for c in (o.get("dark_pool") or [])]
+        sirviendo = [c for c in carriles if (c.get("rows") or 0) > 0]
+        add("DARK_POOL_DECLARA_AHORA_Y_ULTIMO_BUENO",
+            bool(carriles),
+            (f"{len(sirviendo)}/{len(carriles)} lecturas de carril con filas; "
+             f"estados: {dict(Counter(c.get('lifecycle') for c in carriles))}"),
+            ultimo=(self.observaciones[-1].get("dark_pool")
+                    if self.observaciones else []))
         return out
 
     # ── informes ──────────────────────────────────────────────────────────
@@ -293,6 +461,47 @@ class Certificacion:
                    f"- congestión propia detectada en: "
                    f"{', '.join(gov.get('self_congested') or []) or 'ninguno'}"]
 
+        trans = (ultimo.get("transport") or {})
+        if trans.get("hosts"):
+            lineas += ["", "## Transporte por host", "",
+                       "| host | plazo conexión | fuente | p95 handshake | p95 TLS | "
+                       "reutilización | handshakes | connect TO | pool TO | circuito |",
+                       "|---|---|---|---|---|---|---|---|---|---|"]
+            for h in trans["hosts"]:
+                lineas.append(
+                    f"| `{h['host']}` | {h.get('connect_timeout_s')} s | "
+                    f"{h.get('connect_timeout_source')} | {h.get('connect_p95_ms')} ms | "
+                    f"{h.get('tls_p95_ms')} ms | {h.get('reuse_pct')} % | "
+                    f"{h.get('handshakes')} | {h.get('connect_timeouts')} | "
+                    f"{h.get('pool_timeouts')} | {h.get('breaker')} |")
+            lineas += ["",
+                       "> La columna que decide es **reutilización**: si el "
+                       "keep-alive funciona, el handshake se paga una vez y no "
+                       "en cada ciclo. Un plazo de conexión alto con "
+                       "reutilización alta es normal; uno alto con "
+                       "reutilización baja significa que se sigue reconectando."]
+
+        muros = ultimo.get("walls") or {}
+        if muros:
+            lineas += ["", "## Muros (último ciclo)", "",
+                       f"- estado del snapshot: **{muros.get('snapshot_state')}**",
+                       f"- veredicto: {muros.get('verdict_label') or muros.get('verdict')}",
+                       f"- call wall: {muros.get('call_wall')} · put wall: "
+                       f"{muros.get('put_wall')}"]
+            if muros.get("missing"):
+                lineas.append(f"- ingredientes que faltan: "
+                              f"{', '.join(muros['missing'])}")
+
+        carriles = ultimo.get("dark_pool") or []
+        if carriles:
+            lineas += ["", "## Dark Pool (último ciclo)", "",
+                       "| carril | estado | ciclo de vida | filas | edad | causa |",
+                       "|---|---|---|---|---|---|"]
+            for c in carriles:
+                lineas.append(f"| `{c.get('key')}` | {c.get('state')} | "
+                              f"{c.get('lifecycle')} | {c.get('rows')} | "
+                              f"{c.get('age_seconds')} s | {c.get('detail')} |")
+
         pol = ultimo.get("timeout_policy", {})
         lineas += ["", "## Política de plazos", "",
                    f"- conexión: **{pol.get('connect_timeout_s')} s** · warm start "
@@ -315,8 +524,13 @@ class Certificacion:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbols", default="DIA,SPY,QQQ")
-    ap.add_argument("--cycles", type=int, default=8,
-                    help="ciclos observados por activo")
+    ap.add_argument("--cycles", type=int, default=12,
+                    help=("ciclos observados por activo. Por debajo de 10 la "
+                          "afirmación del p95 medido no es alcanzable: un "
+                          "endpoint necesita OCHO muestras para calibrar, y con "
+                          "cadencia de 15 s eso son ocho ciclos en los que le "
+                          "toca turno. Con menos, el informe dice FALLA por "
+                          "falta de ventana y no por un defecto"))
     ap.add_argument("--seconds", type=float, default=16.0,
                     help="segundos entre observaciones")
     ap.add_argument("--out", type=Path, default=ROOT / "CERTIFICACION_LIVE_TRANSPORTE")

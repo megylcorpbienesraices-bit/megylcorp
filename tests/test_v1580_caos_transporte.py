@@ -34,6 +34,7 @@ import httpx
 import pytest
 
 from app.core import endpoint_runtime as ER
+from app.core import transport_runtime as TR
 from app.core.endpoint_runtime import (CLOSED, Deadline, EndpointRegistry,
                                        EndpointRuntime, retry_plan)
 from app.core.request_governor import HEAVY, LIGHT, RequestGovernor
@@ -64,10 +65,15 @@ class _Caos:
         self.vivos = 0
         self.max_vivos = 0
         self.arranques = []
+        self.extensiones = []
 
-    async def post(self, path, json=None, timeout=None):   # noqa: A002
+    async def post(self, path, json=None, timeout=None, extensions=None):  # noqa: A002
+        # v1.60.0 · El transporte mide con el `trace` de httpcore: pool, socket,
+        # TLS y lectura por separado. El caos tiene que aceptarlo igual que el
+        # transporte real, o estaría probando otra interfaz.
         self.llamadas += 1
         self.plazos.append(timeout)
+        self.extensiones.append(extensions)
         self.vivos += 1
         self.max_vivos = max(self.max_vivos, self.vivos)
         self.arranques.append(time.monotonic())
@@ -79,6 +85,8 @@ class _Caos:
                 raise httpx.ReadTimeout("read timeout")
             if clase == "CONNECT_TIMEOUT":
                 raise httpx.ConnectTimeout("connect timeout")
+            if clase == "POOL_TIMEOUT":
+                raise httpx.PoolTimeout("pool timeout")
             if clase == "SLOW":
                 await asyncio.sleep(float(arg))
             if clase == "429":
@@ -102,6 +110,19 @@ def _cliente(guion, **kw):
     c = QuantDataClient(_settings(**kw))
     c._client = _Caos(guion)
     return c, c._client
+
+
+@pytest.fixture(autouse=True)
+def _transporte_limpio():
+    """El transporte es del HOST y vive en un registro de proceso.
+
+    Sin esto, el plazo escalado por un caso de conexión fallida se arrastra al
+    siguiente y las pruebas se contaminan entre sí, que es la peor forma de
+    tener una suite verde.
+    """
+    TR.TRANSPORT.reset()
+    yield
+    TR.TRANSPORT.reset()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -151,13 +172,25 @@ def test_el_plazo_de_conexion_es_independiente_del_de_lectura():
     assert rt.deadline().read < 2.5
 
 
-def test_el_transporte_recibe_los_dos_plazos_por_separado():
+def test_el_transporte_recibe_las_cuatro_fases_por_separado():
+    """v1.60.0 · Cuatro plazos, y cada uno de su autoridad.
+
+    La LECTURA es la que trae el `Deadline` del endpoint —su p95—. La CONEXIÓN
+    ya no: la pone el HOST, porque un handshake no pertenece a ninguna
+    herramienta. `write` y `pool` los pone el transporte, que es quien conoce el
+    tamaño del pool.
+    """
     cliente, caos = _cliente(["OK"])
     plazo = Deadline(connect=2.0, read=11.0, source="TEST")
     asyncio.run(cliente.post("/v1/options/tool/interval-map", {}, timeout=plazo))
     enviado = caos.plazos[-1]
-    assert enviado.connect == pytest.approx(2.0)
-    assert enviado.read == pytest.approx(11.0)
+    anfitrion = TR.TRANSPORT.host(_settings().base_url)
+    assert enviado.read == pytest.approx(11.0), "la lectura sigue siendo del endpoint"
+    assert enviado.connect == pytest.approx(anfitrion.connect_timeout()), (
+        "la conexión la gobierna el host, no la herramienta")
+    assert enviado.write is not None and enviado.pool is not None
+    assert len({enviado.connect, enviado.read, enviado.write, enviado.pool}) >= 3, (
+        "cuatro fases con el mismo número serían una sola disfrazada de cuatro")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -168,7 +201,7 @@ def test_caos_timeout_de_lectura_dice_su_fase_y_su_plazo():
     cliente, _ = _cliente(["TIMEOUT"])
     with pytest.raises(QuantDataTimeout) as caja:
         asyncio.run(cliente.post("/x", {}, timeout=Deadline(connect=2.0, read=9.0)))
-    assert caja.value.phase == "READ"
+    assert caja.value.phase == TR.READ
     assert caja.value.limit_seconds == pytest.approx(9.0)
 
 
@@ -176,10 +209,20 @@ def test_caos_timeout_de_conexion_no_se_confunde_con_lentitud_del_endpoint():
     """Subir el plazo de lectura por un fallo de conexión es perseguir el
     síntoma equivocado: el proveedor no llegó a recibir la petición."""
     cliente, _ = _cliente(["CONNECT_TIMEOUT"])
+    esperado = TR.TRANSPORT.host(_settings().base_url).connect_timeout()
+    # `burst=True` deja el intento SOLO: durante una ráfaga no se concede
+    # reintento de conexión, así que el plazo que expira es el de este intento y
+    # no el ya escalado por el anterior.
     with pytest.raises(QuantDataTimeout) as caja:
-        asyncio.run(cliente.post("/x", {}, timeout=Deadline(connect=2.0, read=9.0)))
-    assert caja.value.phase == "CONNECT"
-    assert caja.value.limit_seconds == pytest.approx(2.0)
+        asyncio.run(cliente.post("/x", {}, timeout=Deadline(connect=2.0, read=9.0),
+                                 burst=True))
+    assert caja.value.phase == TR.CONNECT
+    # El plazo que expiró es el del HOST, y es el que viaja en el error: es el
+    # único con el que se puede subir el siguiente intento.
+    assert caja.value.limit_seconds == pytest.approx(esperado)
+    assert caja.value.limit_seconds != pytest.approx(9.0), (
+        "jamás el plazo de lectura: subirlo por un fallo de conexión es "
+        "perseguir el síntoma equivocado")
 
 
 def test_caos_un_timeout_de_conexion_no_infla_el_plazo_de_lectura():

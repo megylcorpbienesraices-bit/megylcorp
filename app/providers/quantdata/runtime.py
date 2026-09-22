@@ -14,6 +14,7 @@ from .client import QuantDataClient, QuantDataTimeout
 from .settings import QuantDataSettings, load_settings
 from ...core.provider_bus import FEATURE_BUS
 from ...core.obs import note as _obs_note, expected as _obs_expected
+from ...core.transport_runtime import TRANSPORT, READ as FASE_LECTURA
 from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
 
 
@@ -470,6 +471,10 @@ class QuantDataRuntime:
                 "iv_rank": ("/v1/options/tool/iv-rank", {"filter": {"ticker": ticker}, "lookBackPeriod": self.settings.iv_lookback_days, "maturity": self.settings.iv_maturity_days}),
             }
             ENDPOINT_RUNTIME.start_cycle()
+            # v1.60.0 · Y el presupuesto de reintentos de CONEXIÓN, que es del
+            # HOST y no del endpoint: un reintento por petición multiplicaría
+            # por dos la estampida de conexión que causa el fallo.
+            TRANSPORT.start_cycle()
             slow_due = (self._cycle % max(1, ENGINE_SLOW_EVERY_N_CYCLES)) == 0
             due_names = list(ENGINE_FAST_JOBS) + (list(ENGINE_SLOW_JOBS) if slow_due else [])
             self._cycle += 1
@@ -515,7 +520,7 @@ class QuantDataRuntime:
                     inner = gate.get("exception")
                     if isinstance(inner, QuantDataTimeout):
                         # Sólo la LECTURA agotada dice cuánto tarda el endpoint.
-                        if str(getattr(inner, "phase", "READ") or "READ").upper() == "READ":
+                        if str(getattr(inner, "phase", FASE_LECTURA) or FASE_LECTURA) == FASE_LECTURA:
                             rt.record_timeout(
                                 getattr(inner, "limit_seconds", None) or plazo.read)
                         else:

@@ -276,7 +276,10 @@ def test_el_fetch_usa_el_plazo_medido_y_registra_la_latencia():
     # v1.58.0 · el plazo es un `Deadline` con conexión y lectura separadas.
     assert "_plazo = _rt.deadline()" in src
     assert "timeout_s=_plazo.total + CHANNEL_SLACK_S," in src
-    assert "_client.post(path, body, timeout=_plazo)" in src
+    # v1.60.0 · la llamada lleva además la ráfaga y lo que queda de ciclo, que
+    # es con lo que el transporte decide el reintento de CONEXIÓN. El plazo de
+    # LECTURA sigue siendo el medido por endpoint, que es lo que este test ata.
+    assert "_client.post(" in src and "timeout=_plazo," in src
     assert "_rt.record_success(fila[\"request_ms\"] / 1000.0)" in src
     assert "_rt.record_failure(detail, status=STATUS_TRANSIENT)" in src
 
