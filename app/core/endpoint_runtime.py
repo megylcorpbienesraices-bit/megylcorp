@@ -134,7 +134,7 @@ class EndpointRuntime:
     __slots__ = ("key", "default_timeout", "_lat", "_failures", "_state",
                  "_open_until", "_open_for", "_probe_in_flight", "_last_error",
                  "_last_status", "_last_success_at", "_last_attempt_at",
-                 "_opens", "_lock")
+                 "_opens", "_timeouts", "_lock")
 
     def __init__(self, key: str, *, default_timeout: float = 10.0) -> None:
         self.key = str(key)
@@ -150,6 +150,7 @@ class EndpointRuntime:
         self._last_success_at: Optional[float] = None
         self._last_attempt_at: Optional[float] = None
         self._opens = 0
+        self._timeouts = 0
         self._lock = threading.Lock()
 
     # ── plazo ──────────────────────────────────────────────────────────────
@@ -238,6 +239,42 @@ class EndpointRuntime:
                 self._state = OPEN
                 self._open_until = t + self._open_for
 
+    def record_timeout(self, limit_seconds: float, *,
+                       now: Optional[float] = None) -> None:
+        """Un plazo agotado: cuenta como fallo Y como COTA INFERIOR de latencia.
+
+        v1.58.1 · EL RUNTIME NO PODÍA APRENDER DE SUS PROPIOS TIMEOUTS.
+
+        `record_failure` no toca las latencias a propósito: un 500 o un 404 no
+        dicen nada sobre cuánto tarda el endpoint cuando funciona. Pero un
+        TIMEOUT sí dice algo, y era justo lo que se tiraba.
+
+        El resultado era un pozo sin salida. Un endpoint que necesita doce
+        segundos, llamado con cinco, no dejaba NUNCA una muestra —porque no
+        llegaba a responder—, así que nunca alcanzaba las ocho que hacen falta
+        para calibrar, así que se le seguía llamando con cinco. Para siempre. El
+        techo de veinte segundos que este módulo publica era inalcanzable por
+        construcción, y en pantalla se leía como un proveedor caído.
+
+        Un timeout no dice cuánto tarda el endpoint; dice que tarda MÁS que el
+        plazo. Eso es una cota inferior y como tal se guarda: el plazo siguiente
+        sube —acotado por `TIMEOUT_CEILING_S`— hasta que el endpoint contesta y
+        sus latencias reales lo vuelven a bajar, o hasta que el cortacircuitos
+        deja de llamarlo. Lo que no puede pasar es que el plazo se quede clavado
+        donde se sabe que no alcanza.
+        """
+        lim = float(limit_seconds)
+        if lim == lim and lim > 0:
+            with self._lock:
+                self._timeouts += 1
+                self._lat.append(lim)
+                if len(self._lat) > LATENCY_WINDOW:
+                    del self._lat[0:len(self._lat) - LATENCY_WINDOW]
+        # El fallo se cuenta igual: un endpoint que sólo da timeouts tiene que
+        # acabar abriendo el circuito, no subiendo el plazo indefinidamente.
+        self.record_failure(f"plazo agotado a los {lim:.1f}s",
+                            status="TIMEOUT", now=now)
+
     def next_retry_in(self, rng: Optional[random.Random] = None) -> float:
         with self._lock:
             n = self._failures
@@ -260,6 +297,7 @@ class EndpointRuntime:
                                            if self._state == OPEN else 0.0),
                 "open_window_seconds": round(self._open_for, 2),
                 "times_opened": self._opens,
+                "timeouts": self._timeouts,
                 "consecutive_failures": self._failures,
                 "failure_threshold": FAILURE_THRESHOLD,
                 "timeout_seconds": round(plazo, 3),
@@ -291,6 +329,21 @@ class EndpointRegistry:
             if rt is None:
                 rt = self._by_key[k] = EndpointRuntime(k, default_timeout=self.default_timeout)
             return rt
+
+    def set_default_timeout(self, seconds: float) -> None:
+        """Fija el plazo configurado, también en los runtimes YA creados.
+
+        El plazo configurado sale de `QUANTDATA_TIMEOUT_SECONDS` y el registro se
+        construye al importar el módulo, antes de que haya settings. Sin esto el
+        registro se quedaba con su propio valor por defecto y cada llamador
+        recalculaba el suyo por su cuenta: dos autoridades para un mismo plazo,
+        que es como se deslizan las discrepancias.
+        """
+        v = max(TIMEOUT_FLOOR_S, float(seconds))
+        with self._lock:
+            self.default_timeout = v
+            for rt in self._by_key.values():
+                rt.default_timeout = v
 
     def snapshot(self, now: Optional[float] = None) -> Dict[str, Any]:
         with self._lock:

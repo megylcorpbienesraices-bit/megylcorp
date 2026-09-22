@@ -621,3 +621,99 @@ smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/sta
 ```
 
 61 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
+
+## REVISIÓN SOBRE `fe8534c` · Cinco segundos apagaban media pantalla
+
+El registro del motor, media hora seguida, con la cuota en **7 de 240**:
+
+```
+degradado en data_hub:dark_flow:late          [DEGRADED]: Quant Data request timed out
+degradado en data_hub:gamma:late              [DEGRADED]: Quant Data request timed out
+degradado en data_hub:max_pain:late           [DEGRADED]: Quant Data request timed out
+degradado en data_hub:interval_map_delta:late [DEGRADED]: Quant Data request timed out
+```
+
+Y en pantalla: los dos carriles de dark pool en `STALE` con «el canal tardó más
+de 6.0 s», media docena de herramientas en `DEGRADADO`, y la cobertura por canal
+entre el **27 %** y el **62 %**. El Auditor decía la verdad —los canales no
+respondían— pero el culpable no era ninguno de los que señalaba la pantalla: la
+cuota estaba intacta, la autorización era correcta y el proveedor contestaba.
+
+### La cadena
+
+El instalador reparte `QUANTDATA_TIMEOUT_SECONDS=5`, y ése era el plazo de
+**todas** las peticiones, de las treinta y seis herramientas y de los dos
+carriles. El plazo del canal se calculaba como ese valor **+ 1**: los `6.0 s`
+exactos que enseñaba la pantalla no eran una coincidencia, eran aritmética.
+
+Los endpoints pesados del proveedor —`interval-map`, `max-pain-over-time`,
+exposición por vencimiento, `dark-flow`— no contestan en cinco segundos. Morían
+por plazo en cada ciclo.
+
+Y no había salida. `record_failure` no toca las latencias medidas, y eso es
+correcto para un 500 o un 404: no dicen nada sobre cuánto tarda el endpoint
+cuando funciona. Pero un **timeout sí dice algo**, y era justo lo que se tiraba.
+Un endpoint que necesita doce segundos, llamado con cinco, no dejaba NUNCA una
+muestra, así que nunca alcanzaba las ocho que hacen falta para calibrar, así que
+se le seguía llamando con cinco. Para siempre. El techo de veinte segundos que
+`endpoint_runtime` publica era **inalcanzable por construcción**, y en pantalla
+se leía como un proveedor caído.
+
+Encima el plazo calibrado no llegaba a la petición. `QuantDataClient` se
+construía con un plazo fijo y `post()` no aceptaba otro, así que el plazo por
+endpoint sólo gobernaba el reloj del **ciclo**. Cuando el calibrado bajaba del
+configurado —un endpoint rápido, p95 de 200 ms— el ciclo se rendía a los dos
+segundos, la petición huérfana seguía viva ocupando conexión y cuota hasta los
+cinco, y al morir soltaba un **segundo** aviso `DEGRADED` por el mismo hecho. De
+ahí los `:late` del registro: una incidencia contada dos veces.
+
+### Lo que cambia
+
+```
+plazo de la petición    lo pasa el llamador · QuantDataClient.post(..., timeout=)
+plazo del ciclo         plazo de la petición + CHANNEL_SLACK_S
+autoridad del plazo     shared.ENDPOINT_RUNTIME, para los DOS carriles
+un timeout              cota inferior de latencia: el plazo siguiente SUBE
+plazo repartido         5 s → 12 s (12 + 1 caben en el ciclo de 15 s del motor)
+```
+
+Un timeout no dice cuánto tarda el endpoint; dice que tarda **más** que el
+plazo. Eso es una cota inferior y como tal se guarda: el plazo sube —acotado por
+el techo de 20 s— hasta que el endpoint contesta y sus latencias reales lo
+vuelven a bajar. Lo que **no** hace es llamar para siempre: el timeout sigue
+contando para el cortacircuitos, que abre a los cuatro fallos seguidos.
+
+Eso arregla también las instalaciones que ya tienen el `5` escrito en su `.env`:
+el plazo se corrige solo, sin que el operador toque un fichero.
+
+El carril del **motor** entra en el mismo régimen. Era el que más `:late`
+acumulaba —`gamma`, `delta`, `max_pain`, `iv_rank`— y no tenía plazo medido
+porque el registro vivía en el carril de páginas. Con una trampa que costaba
+caro: en ese carril `ready` no significa «respondió», porque puede venir del
+último valor bueno. Anotar eso como éxito metía una latencia de microsegundos en
+la calibración y hundía el plazo del endpoint **justo cuando va lento**. Sólo se
+anota éxito cuando la procedencia es `LIVE`.
+
+El aviso `:late` deja de ser una degradación: el ciclo ya contó ese fallo al
+agotarse el plazo del canal. El texto del error se conserva —es donde se ve qué
+plazo expiró— al nivel de lo esperado, no al de lo averiado.
+
+### Dos rojos que venían de antes
+
+`F821` en el gate de release, los dos silenciosos porque `from __future__ import
+annotations` no evalúa las anotaciones: `List` anotado y nunca importado en
+`intelligence.py`, y `FaltaRequisito` importado dentro de **otra** prueba, así
+que el `except` que la prueba existe para comprobar habría dado `NameError` justo
+al cumplirse.
+
+### Verificación
+
+```
+suite            2950 passed, 51 skipped, 0 failed
+ruff del gate    E9,F63,F7,F82 → All checks passed (venía con 2 F821)
+arranque en frío 0 degradaciones
+smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health → HTTP 200
+```
+
+24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
+**3001 casos / 189 ficheros**.

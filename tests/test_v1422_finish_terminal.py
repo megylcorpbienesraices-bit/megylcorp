@@ -118,8 +118,19 @@ def test_quantdata_timeout_uses_backoff_and_success_resets_it():
 
 
 def test_quantdata_default_timeout_allows_slow_analytics_without_blocking_core(monkeypatch):
+    """v1.58.1 · 10 → 12 s, y el plazo definitivo lo calibra cada endpoint.
+
+    El plazo por defecto tiene que caber en el ciclo del motor (15 s) con la
+    holgura del canal, y dar tiempo a los endpoints pesados del proveedor:
+    `interval-map`, `max-pain-over-time`, exposición por vencimiento y dark
+    flow. Ver `tests/test_v1581_plazo_del_transporte.py`.
+    """
+    from app.core.data_hub_runtime import CHANNEL_SLACK_S
+
     monkeypatch.delenv("QUANTDATA_TIMEOUT_SECONDS", raising=False)
-    assert load_settings().request_timeout_seconds == 10.0
+    plazo = load_settings().request_timeout_seconds
+    assert plazo == 12.0
+    assert plazo + CHANNEL_SLACK_S < 15.0
 
 
 def test_auto_accelerator_does_not_select_jax_cpu_only(monkeypatch):

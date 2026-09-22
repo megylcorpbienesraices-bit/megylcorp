@@ -147,7 +147,7 @@ def test_an_unrepairable_400_stops_instead_of_looping():
     calls = []
 
     class Rejecting:
-        async def post(self, path, body):
+        async def post(self, path, body, *, timeout=None):
             calls.append(dict(body))
             e = QuantDataError("Quant Data HTTP 400: Request validation failed "
                                "· campoDesconocidoQueNoSabemosCorregir: required")
@@ -178,7 +178,7 @@ def test_a_422_is_not_a_fault_and_does_not_mark_the_tool_broken():
     from app.core.data_hub_runtime import HUB_RUNTIME
 
     class NoData:
-        async def post(self, path, body):
+        async def post(self, path, body, *, timeout=None):
             e = QuantDataError("Quant Data HTTP 422: no data for requested window")
             e.status_code = 422
             raise e
@@ -203,7 +203,7 @@ def test_a_5xx_backs_off_and_says_so():
     from app.core.data_hub_runtime import HUB_RUNTIME
 
     class Down:
-        async def post(self, path, body):
+        async def post(self, path, body, *, timeout=None):
             e = QuantDataError("Quant Data HTTP 503: upstream unavailable")
             e.status_code = 503
             raise e

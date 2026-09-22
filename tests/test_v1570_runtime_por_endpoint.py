@@ -265,10 +265,17 @@ def test_el_fetch_pregunta_al_cortacircuitos_antes_de_llamar():
 
 
 def test_el_fetch_usa_el_plazo_medido_y_registra_la_latencia():
+    """v1.58.1 · el plazo lo fija el registro, y viaja con la PETICIÓN.
+
+    Antes se recalculaba aquí (`_rt.timeout() if _rt.calibrated() else
+    configurado + 1`) y sólo gobernaba el reloj del ciclo. Ver
+    `tests/test_v1581_plazo_del_transporte.py`.
+    """
     from pathlib import Path
     src = Path("app/providers/quantdata/intelligence.py").read_text(encoding="utf-8")
-    assert "_plazo = _rt.timeout() if _rt.calibrated()" in src
-    assert "timeout_s=_plazo," in src
+    assert "_plazo = _rt.timeout()" in src
+    assert "timeout_s=_plazo + CHANNEL_SLACK_S," in src
+    assert "_client.post(path, body, timeout=_plazo)" in src
     assert "_rt.record_success(time.monotonic() - _t0)" in src
     assert "_rt.record_failure(detail, status=STATUS_TRANSIENT)" in src
 

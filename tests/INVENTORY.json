@@ -3546,8 +3546,37 @@
     "test_un_simbolo_desconocido_sigue_resolviendo",
     "test_una_cache_VIEJA_se_filtra_al_leerla"
    ]
+  },
+  "tests/test_v1581_plazo_del_transporte.py": {
+   "casos": 24,
+   "tests": [
+    "test_el_carril_de_paginas_aprende_de_sus_timeouts",
+    "test_el_carril_de_paginas_da_la_holgura_al_ciclo_no_a_la_peticion",
+    "test_el_carril_del_motor_aprende_de_sus_timeouts",
+    "test_el_carril_del_motor_da_la_holgura_al_ciclo_no_a_la_peticion",
+    "test_el_carril_del_motor_no_mezcla_sus_latencias_con_las_de_las_paginas",
+    "test_el_plazo_configurado_entra_en_el_registro_ya_creado",
+    "test_el_plazo_configurado_respeta_el_suelo",
+    "test_el_plazo_de_la_peticion_es_el_que_se_le_pasa",
+    "test_el_plazo_por_defecto_del_codigo_coincide_con_el_que_se_reparte",
+    "test_el_plazo_que_se_reparte_cabe_en_el_ciclo_del_motor",
+    "test_el_plazo_sube_acotado_por_el_techo_publicado",
+    "test_el_timeout_es_reconocible_por_TIPO_no_por_texto",
+    "test_el_ultimo_valor_bueno_no_se_anota_como_latencia_de_exito",
+    "test_la_holgura_del_ciclo_es_positiva",
+    "test_los_dos_carriles_comparten_el_registro",
+    "test_los_dos_carriles_ponen_el_plazo_configurado_al_arrancar",
+    "test_los_timeouts_se_publican_para_poder_leerlos_en_el_auditor",
+    "test_sin_plazo_explicito_manda_el_configurado",
+    "test_subir_el_plazo_no_es_llamar_para_siempre",
+    "test_un_endpoint_lento_ya_no_se_queda_clavado_en_el_plazo_corto",
+    "test_un_fallo_que_NO_es_de_plazo_sigue_sin_tocar_las_latencias",
+    "test_un_fallo_tardio_no_se_cuenta_como_una_segunda_degradacion",
+    "test_un_plazo_agotado_dice_QUE_plazo_expiro",
+    "test_una_respuesta_real_vuelve_a_bajar_el_plazo"
+   ]
   }
  },
- "total_minimo": 2977,
+ "total_minimo": 3001,
  "version": "1.56.0"
 }

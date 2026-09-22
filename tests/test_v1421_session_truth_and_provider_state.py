@@ -357,7 +357,7 @@ def test_quantdata_catalog_bodies_all_build_without_nameerror():
     La regresión real dejaba `_tf` fuera del módulo: la conexión figuraba LIVE pero
     GEX/DEX/VEX/CHEX/Order Flow caían en DEGRADED al construir el cuerpo.
     """
-    from app.providers.quantdata.tools import build_catalog
+    from app.providers.quantdata.tools import FaltaRequisito, build_catalog
 
     catalog = build_catalog()
     assert len(catalog) >= 31

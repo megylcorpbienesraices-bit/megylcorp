@@ -101,7 +101,7 @@ def test_the_body_is_repaired_once_and_then_remembered():
 
     class FakeClient:
         def __init__(self): self.seen = []
-        async def post(self, path, body):
+        async def post(self, path, body, *, timeout=None):
             self.seen.append(dict(body))
             if "lookBackPeriod" not in body:
                 e = QuantDataError("Quant Data HTTP 400: Request validation failed")

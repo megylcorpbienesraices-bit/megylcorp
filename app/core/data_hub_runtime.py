@@ -46,6 +46,7 @@ tampoco un canal lento de Quant Data bloquee a los demás canales de Quant Data.
 from __future__ import annotations
 
 import asyncio
+import logging as _logging
 import math
 import threading
 import time
@@ -63,6 +64,20 @@ LKG_STALE_AFTER_S = 900.0
 # ESTE ciclo. No cancela la petición subyacente: la deja terminar para que alimente
 # el LKG, pero el ciclo no la espera.
 DEFAULT_CHANNEL_TIMEOUT_S = 6.0
+
+# Holgura del plazo del CICLO sobre el plazo de la PETICIÓN.
+#
+# v1.58.1 · Los dos plazos existen por motivos distintos y hay que ordenarlos.
+# Cuando el ciclo se rendía ANTES que la petición —lo que pasaba en cuanto el
+# plazo calibrado bajaba del configurado—, el mismo hecho se contaba dos veces:
+# el canal anotaba un timeout, la petición huérfana seguía viva ocupando
+# conexión y cuota, y al morir soltaba un segundo aviso `:late`. El registro se
+# llenaba de degradaciones que eran una sola.
+#
+# Con la holgura, la petición SIEMPRE muere primero y con su causa real —plazo
+# agotado, 400, 500—, el ciclo la recoge clasificada, y el camino del huérfano
+# queda para lo que se diseñó: una respuesta que llega tarde y alimenta el LKG.
+CHANNEL_SLACK_S = 1.0
 
 # Fallos consecutivos tras los cuales un canal queda abierto (cortocircuito).
 BREAKER_THRESHOLD = 3
@@ -448,7 +463,19 @@ class ChannelIsolator:
                 return
             exc = t.exception()
             if exc is not None:
-                _obs_note(f"data_hub:{channel}:late", exc, severity="DEGRADED")
+                # v1.58.1 · NO ES UNA SEGUNDA DEGRADACIÓN: es la misma.
+                #
+                # El ciclo ya contó este fallo al agotarse el plazo del canal
+                # —`note_failure`, que alimenta el cortacircuitos y la salud del
+                # canal—. Volver a contarlo aquí como DEGRADED duplicaba cada
+                # incidencia en /health y en el registro, y hacía leer como una
+                # avería del proveedor lo que era una petición que el ciclo ya
+                # había dado por perdida a propósito.
+                #
+                # El texto del error se conserva —es donde se ve QUÉ plazo
+                # expiró— pero al nivel de lo esperado, no al de lo averiado.
+                _obs_note(f"data_hub:{channel}:late", exc,
+                          level=_logging.INFO, severity="OPTIONAL")
                 return
             if on_late is not None:
                 try:

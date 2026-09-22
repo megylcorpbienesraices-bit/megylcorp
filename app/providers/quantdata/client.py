@@ -23,6 +23,22 @@ class QuantDataError(RuntimeError):
     body: Any = None
 
 
+class QuantDataTimeout(QuantDataError):
+    """El plazo expiró antes de que el proveedor contestara.
+
+    Tiene clase propia porque la decisión que sigue es DISTINTA a la de
+    cualquier otro fallo: un timeout no dice que el endpoint esté roto, dice que
+    el plazo con el que se le llamó era demasiado corto. Distinguirlo por el
+    TEXTO del error obligaba a comparar cadenas —y a acertar con el idioma y el
+    formato—; con un tipo, quien decide no se puede equivocar.
+
+    `limit_seconds` lleva el plazo que expiró, que es el dato con el que el
+    runtime del endpoint puede subirlo en el intento siguiente.
+    """
+
+    limit_seconds: float | None = None
+
+
 @dataclass
 class QuantDataResponse:
     payload: dict[str, Any]
@@ -170,7 +186,28 @@ class QuantDataClient:
         except Exception:
             return None
 
-    async def post(self, path: str, body: dict[str, Any]) -> QuantDataResponse:
+    async def post(self, path: str, body: dict[str, Any], *,
+                   timeout: float | None = None) -> QuantDataResponse:
+        """Una petición. `timeout` es el plazo DE ESTA petición, en segundos.
+
+        v1.58.1 · EL PLAZO MEDIDO NO LLEGABA AL TRANSPORTE.
+
+        `endpoint_runtime` calibra un plazo por endpoint —p95 medido, techo de
+        veinte segundos— y el cliente se construía con UNO fijo para las treinta
+        y seis herramientas y los dos carriles. El plazo calibrado sólo decidía
+        cuánto esperaba el CICLO; la petición seguía viva con el plazo del
+        constructor. Dos consecuencias, las dos visibles en el registro:
+
+          · un endpoint que legítimamente necesita doce segundos no podía
+            responder nunca, porque el transporte lo cortaba a los cinco por
+            mucho que su plazo calibrado dijera otra cosa;
+          · un endpoint rápido al que el ciclo abandonaba a los dos segundos
+            seguía ocupando conexión y cuota hasta el plazo del constructor, y
+            al morir soltaba un SEGUNDO aviso por el mismo hecho.
+
+        Con el plazo por petición hay un solo plazo por endpoint y un solo sitio
+        donde se decide.
+        """
         if not self.settings.configured:
             raise QuantDataError("Quant Data is not configured")
         await self.start()
@@ -182,10 +219,19 @@ class QuantDataClient:
         # calculaba con telemetría a medias. Se anota ANTES de pedir, porque una
         # petición en vuelo ya ocupa sitio en la ventana deslizante.
         QUOTA.spend(1)
+        plazo = (self.settings.request_timeout_seconds if timeout is None
+                 else max(0.1, float(timeout)))
         try:
-            response = await self._client.post(path, json=body)
+            response = await self._client.post(path, json=body,
+                                               timeout=httpx.Timeout(plazo))
         except httpx.TimeoutException as exc:
-            raise QuantDataError("Quant Data request timed out") from exc
+            # El plazo que expiró viaja en el error. Sin él, aguas arriba no se
+            # puede distinguir «este endpoint está muerto» de «se le dieron
+            # cinco segundos y necesita doce», que son dos arreglos opuestos.
+            error = QuantDataTimeout(
+                f"Quant Data request timed out after {plazo:.1f}s")
+            error.limit_seconds = plazo
+            raise error from exc
         except httpx.HTTPError as exc:
             raise QuantDataError(f"Quant Data transport error: {type(exc).__name__}") from exc
 

@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .shared import (RAW_CACHE, QUOTA, ENGINE_FAST_JOBS, ENGINE_SLOW_JOBS,
-                     ENGINE_FAST_REQUESTS, ENGINE_SLOW_EVERY_N_CYCLES)
-from .client import QuantDataClient
+                     ENGINE_FAST_REQUESTS, ENGINE_SLOW_EVERY_N_CYCLES,
+                     ENDPOINT_RUNTIME)
+from .client import QuantDataClient, QuantDataTimeout
 from .settings import QuantDataSettings, load_settings
 from ...core.provider_bus import FEATURE_BUS
 from ...core.obs import note as _obs_note, expected as _obs_expected
-from ...core.data_hub_runtime import HUB_RUNTIME
+from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
 
 
 def _f(value: Any, default: float | None = None) -> float | None:
@@ -333,6 +334,10 @@ class QuantDataRuntime:
 
     async def start(self, symbol: str) -> None:
         self.settings = load_settings()
+        # El plazo configurado entra en el registro, que es quien decide el de
+        # cada endpoint. Lo hacen los DOS carriles porque cualquiera de los dos
+        # puede arrancar primero, y el que arranque tiene que dejarlo puesto.
+        ENDPOINT_RUNTIME.set_default_timeout(self.settings.request_timeout_seconds)
         self._status["configured"] = self.settings.configured
         self._symbol = str(symbol or "DIA").upper()
         if not self.settings.configured:
@@ -406,9 +411,10 @@ class QuantDataRuntime:
             except asyncio.TimeoutError:
                 _obs_expected("quantdata.loop.clock_timeout")
 
-    async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    async def _post(self, path: str, body: dict[str, Any], *,
+                    timeout: float | None = None) -> dict[str, Any]:
         assert self.client is not None
-        response = await self.client.post(path, body)
+        response = await self.client.post(path, body, timeout=timeout)
         self._status["remaining"] = response.remaining
         self._status["limit"] = response.limit
         self._status["reset_seconds"] = response.reset_seconds
@@ -455,15 +461,53 @@ class QuantDataRuntime:
             # canal lleva su propio timeout y su propio cortocircuito, la respuesta
             # que llega tarde alimenta el Last Known Good, y las peticiones
             # duplicadas entre carriles se funden en una.
+            # v1.58.1 · EL CARRIL DEL MOTOR TAMBIÉN MIDE SU PLAZO.
+            #
+            # Aquí se llamaba con el plazo configurado + 1 s para los nueve
+            # endpoints por igual, y el plazo de la PETICIÓN era el del
+            # constructor del cliente. Con `QUANTDATA_TIMEOUT_SECONDS=5` —lo que
+            # reparte el instalador— los endpoints pesados del motor
+            # (`interval-map`, `max-pain-over-time`, las cuatro exposiciones por
+            # strike) morían a los cinco segundos EN CADA CICLO, y como un
+            # timeout no dejaba muestra, su plazo no subía nunca: el registro se
+            # llenaba de `data_hub:gamma:late`, `:max_pain:late`, `:iv_rank:late`
+            # con la cuota intacta.
+            #
+            # El plazo lo fija ahora el mismo registro que el carril de páginas
+            # —medido si hay muestra, configurado si no— y viaja con la petición.
+            # La clave lleva prefijo porque son llamadas de este carril: mezclar
+            # sus latencias con las de la herramienta homónima falsearía las dos.
             async def _channel(name: str):
                 path, payload_body = requests[name]
+                rt = ENDPOINT_RUNTIME.get(f"engine:{name}")
+                plazo = rt.timeout()
+                t0 = time.monotonic()
                 gate = await HUB_RUNTIME.fetch(
                     name, target.active_symbol,
-                    lambda: self._post(path, payload_body),
-                    timeout_s=self.settings.request_timeout_seconds + 1.0)
+                    lambda: self._post(path, payload_body, timeout=plazo),
+                    timeout_s=plazo + CHANNEL_SLACK_S)
+
+                def _anotar_fallo() -> str:
+                    detalle = str(gate.get("detail") or "canal no disponible")
+                    inner = gate.get("exception")
+                    if isinstance(inner, QuantDataTimeout):
+                        rt.record_timeout(
+                            getattr(inner, "limit_seconds", None) or plazo)
+                    else:
+                        rt.record_failure(detalle)
+                    return detalle
+
                 if gate.get("ready") and isinstance(gate.get("payload"), dict):
+                    # `ready` no significa «respondió»: con el último valor bueno
+                    # el DATO sirve y la LLAMADA falló. Anotar eso como un éxito
+                    # metería una latencia de microsegundos en la calibración y
+                    # hundiría el plazo del endpoint justo cuando va lento.
+                    if gate.get("source") == "LIVE":
+                        rt.record_success(time.monotonic() - t0)
+                    else:
+                        _anotar_fallo()
                     return gate["payload"]
-                raise RuntimeError(str(gate.get("detail") or "canal no disponible"))
+                raise RuntimeError(_anotar_fallo())
 
             jobs = {n: _channel(n) for n in due_names if n in requests}
             names = list(jobs)

@@ -15,12 +15,11 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 
-from .client import QuantDataClient, QuantDataError
+from .client import QuantDataClient, QuantDataError, QuantDataTimeout
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
-from ...core.endpoint_runtime import EndpointRegistry
 from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_validation_error,
                     _validation_detail, repair_body, classify_provider_failure,
                     STATUS_REQUEST_INVALID, STATUS_NO_DATA, STATUS_MISSING_TOOL,
@@ -28,9 +27,10 @@ from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_val
                     STATUS_TRANSIENT, CADENCE, PAGES, QuantDataTool,
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
-                     BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE)
+                     BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE,
+                     ENDPOINT_RUNTIME)
 from ...core.obs import note as _obs_note, expected as _obs_expected
-from ...core.data_hub_runtime import HUB_RUNTIME
+from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
 
 PAGE_MAX_CONCURRENCY = 2
 
@@ -107,10 +107,9 @@ _PRIORITY_DEFAULT = 3
 #: puesto hasta que le toca. Nadie se queda fuera para siempre.
 AGING_SECONDS = 45.0
 
-#: Runtime POR ENDPOINT: plazo calibrado con latencia medida, reintento con
-#: jitter y cortacircuitos. Nada se comparte entre herramientas, así que
-#: `dark_flow` con el circuito abierto no cambia un byte de `gex_by_strike`.
-ENDPOINT_RUNTIME = EndpointRegistry(default_timeout=10.0)
+#: El runtime POR ENDPOINT se importa de `shared`, con la caché y la cuota: los
+#: dos carriles hablan con los mismos endpoints, así que el plazo medido de cada
+#: uno tiene que ser el mismo para los dos. Ver `shared.ENDPOINT_RUNTIME`.
 
 #: Nada sube por encima de la clase crítica por envejecer: la exposición que
 #: dibuja el gráfico principal no puede perder su turno frente a las noticias.
@@ -180,6 +179,10 @@ class QuantDataIntelligence:
 
     async def start(self, symbol: str) -> None:
         self.settings = load_settings()
+        # El plazo configurado entra en el registro, que es el único que decide
+        # el plazo de cada endpoint. Mientras cada llamador lo calculaba por su
+        # cuenta había dos autoridades para un mismo número.
+        ENDPOINT_RUNTIME.set_default_timeout(self.settings.request_timeout_seconds)
         self._symbol = str(symbol or "DIA").upper().strip()
         if not self.settings.configured:
             return
@@ -551,8 +554,19 @@ class QuantDataIntelligence:
             # Hasta tener muestra suficiente se usa el configurado: calibrar con
             # tres datos es peor que no calibrar.
             _rt = ENDPOINT_RUNTIME.get(tool.key)
-            _plazo = _rt.timeout() if _rt.calibrated() else (
-                self.settings.request_timeout_seconds + 1.0)
+            # v1.58.1 · UN SOLO PLAZO, Y EL DE LA PETICIÓN.
+            #
+            # Aquí se sumaba un segundo al plazo configurado para dar margen al
+            # ciclo, pero el margen se le daba al lado equivocado: la PETICIÓN
+            # seguía muriendo al plazo del constructor del cliente, así que el
+            # canal se rendía antes en cuanto el plazo calibrado bajaba de ése,
+            # y el mismo fallo se contaba dos veces. El registro se llenaba de
+            # `:late` con «request timed out» mientras la cuota estaba intacta.
+            #
+            # Ahora el plazo es UNO, lo fija el registro —medido si hay muestra,
+            # configurado si no—, y la holgura va donde corresponde: al ciclo,
+            # que espera un pelo más que la petición para recogerla clasificada.
+            _plazo = _rt.timeout()
             _t0 = time.monotonic()
 
             # v1.57.6 · LO QUE ENTRA EN EL HUB ES SIEMPRE EL PAYLOAD CRUDO.
@@ -573,13 +587,13 @@ class QuantDataIntelligence:
             # cuota de verdad— sigue funcionando y ya no puede mentir sobre el
             # tipo de lo que devuelve.
             async def _pedir_payload() -> Dict[str, Any]:
-                respuesta = await _client.post(path, body)
+                respuesta = await _client.post(path, body, timeout=_plazo)
                 return respuesta.payload
 
             gate = await HUB_RUNTIME.fetch(
                 tool.key, ticker,
                 _pedir_payload,
-                timeout_s=_plazo,
+                timeout_s=_plazo + CHANNEL_SLACK_S,
                 accept_stale=False)
             if not gate.get("ready"):
                 inner = gate.get("exception")
@@ -616,7 +630,15 @@ class QuantDataIntelligence:
             tool.note_attempt(path, msg)
             # Un 400 es culpa del cuerpo, no del canal: no cuenta para abrir el
             # circuito, porque reintentarlo menos no lo arregla.
-            if status != STATUS_REQUEST_INVALID:
+            if isinstance(exc, QuantDataTimeout):
+                # Un plazo agotado es la única clase de fallo que dice algo sobre
+                # cuánto tarda el endpoint: que tarda MÁS que el plazo con el que
+                # se le llamó. Se guarda como cota inferior para que el siguiente
+                # intento le dé el tiempo que pide, en vez de repetir el corte.
+                ENDPOINT_RUNTIME.get(tool.key).record_timeout(
+                    getattr(exc, "limit_seconds", None)
+                    or ENDPOINT_RUNTIME.get(tool.key).timeout())
+            elif status != STATUS_REQUEST_INVALID:
                 ENDPOINT_RUNTIME.get(tool.key).record_failure(msg, status=status)
 
             if status == STATUS_REQUEST_INVALID:

@@ -26,6 +26,8 @@ import time
 from collections import deque
 from typing import Any, Dict, Tuple
 
+from ...core.endpoint_runtime import EndpointRegistry
+
 
 def _env_float(name: str, default: float | None) -> float | None:
     raw = str(os.getenv(name, "") or "").strip()
@@ -570,6 +572,18 @@ EXPIRY_SELECTION = VencimientoSeleccionado()
 
 RAW_CACHE = RawCache()
 QUOTA = QuotaGuard()
+
+#: Runtime POR ENDPOINT: plazo calibrado con latencia medida, reintento con
+#: jitter y cortacircuitos. Nada se comparte entre herramientas, así que
+#: `dark_flow` con el circuito abierto no cambia un byte de `gex_by_strike`.
+#:
+#: v1.58.1 · VIVE AQUÍ, con la caché y la cuota, porque los DOS carriles hablan
+#: con los mismos endpoints. Estaba en `intelligence`, el carril de páginas, así
+#: que el carril del motor —el que hidrata la estructura, y el que más timeouts
+#: acumulaba en el registro— no tenía plazo medido ni podía aprender de ellos.
+#: El plazo configurado se inyecta con `set_default_timeout` al arrancar: el
+#: registro se crea al importar, cuando todavía no hay settings.
+ENDPOINT_RUNTIME = EndpointRegistry(default_timeout=10.0)
 
 
 # Herramienta de página -> clave con la que el carril del motor publica su payload.

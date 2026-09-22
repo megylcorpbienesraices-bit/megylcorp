@@ -105,7 +105,9 @@ def save_settings(values: dict[str, str]) -> None:
         "QUANTDATA_API_KEY": quantdata_key,
         "QUANTDATA_BASE_URL": values.get("QUANTDATA_BASE_URL", "https://api.quantdata.us").strip() or "https://api.quantdata.us",
         "QUANTDATA_REFRESH_SECONDS": "15",
-        "QUANTDATA_TIMEOUT_SECONDS": "5",
+        # Plazo inicial; cada endpoint calibra el suyo con la latencia medida.
+        # 5 s cortaba los endpoints pesados en cada ciclo. Ver .env.example.
+        "QUANTDATA_TIMEOUT_SECONDS": "12",
         # tastytrade is read-only market data in this build.
         "TASTYTRADE_ENABLED": "1" if tasty_all else "0",
         "TASTYTRADE_CLIENT_ID": tasty_id,
