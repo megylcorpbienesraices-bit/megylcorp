@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
+import datetime as dt
 import json
 import os
 import re
@@ -333,6 +334,118 @@ def _target_rust() -> str:
     return match.group(1)
 
 
+RUNTIME_DECL = ROOT / ".python-runtime.json"
+
+
+def _parse_ver(value: str) -> tuple:
+    try:
+        return tuple(int(x) for x in str(value).strip().split("."))
+    except Exception:
+        raise SystemExit(f"version de Python ilegible: {value!r}")
+
+
+def windows_runtime_guard() -> None:
+    """El runtime certificado tiene que EXISTIR como instalador de Windows.
+
+    ═══════════════════════════════════════════════════════════════════════
+    QUÉ SE ROMPIÓ, Y POR QUÉ NO LO VIO NADIE
+    ═══════════════════════════════════════════════════════════════════════
+
+    El gate exigía `sys.version_info == 3.12.14` y en Windows era imposible
+    cumplirlo: la rama 3.12 está en fase de solo seguridad, sus releases se
+    publican **source-only** (PEP 693) y python.org no distribuye instalador de
+    Windows desde 3.12.10. Para certificar en Windows había que compilar CPython
+    a mano o meter una instalación no estándar —las dos cosas destruyen la
+    reproducibilidad que este gate existe para garantizar—.
+
+    Y el repositorio ya se había contradicho para salir del paso:
+    `INSTALAR_WEB.bat` fijaba 3.12.10 a mano mientras `.python-version` decía
+    3.12.14. Se instalaba una versión y se certificaba contra otra, así que el
+    entorno que el operador acababa de montar era exactamente el que el gate
+    rechazaba. Nadie lo vio porque **nada comparaba los dos ficheros**.
+
+    ═══════════════════════════════════════════════════════════════════════
+    LO QUE COMPRUEBA
+    ═══════════════════════════════════════════════════════════════════════
+
+    1. `.python-version` y `.python-runtime.json` declaran la MISMA versión.
+    2. Su rama está declarada como certificable en Windows.
+    3. El parche fijado NO es posterior al último con instalador de Windows:
+       fijar 3.12.14 cuando el último binario es 3.12.10 es el defecto original.
+    4. La declaración no ha caducado. Una rama sale de la fase BUGFIX y deja de
+       publicar binarios; el control VENCE en vez de callarse, que es la
+       diferencia entre un guardián y un comentario.
+    5. El instalador de Windows no fija ninguna versión a mano: la lee del mismo
+       fichero que el gate. Una constante duplicada es una discrepancia futura.
+
+    No baja el control: lo hace comprobable. Antes exigía una versión exacta sin
+    preguntarse si existía para la plataforma de producción.
+    """
+    if not RUNTIME_DECL.is_file():
+        raise SystemExit(".python-runtime.json ausente: el runtime certificado "
+                         "no declara su disponibilidad en Windows")
+    try:
+        decl = json.loads(RUNTIME_DECL.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise SystemExit(f".python-runtime.json ilegible: {exc}") from exc
+
+    pin = _target_python()
+    cert = decl.get("certificado") or {}
+    if str(cert.get("version") or "") != pin:
+        raise SystemExit(
+            f".python-version dice {pin} y .python-runtime.json certifica "
+            f"{cert.get('version')!r}: una sola version certificada, no dos")
+    rama = ".".join(pin.split(".")[:2])
+    if str(cert.get("rama") or "") != rama:
+        raise SystemExit(f"la rama certificada {cert.get('rama')!r} no es la del "
+                         f"pin ({rama})")
+    info = (decl.get("ramas") or {}).get(rama)
+    if not isinstance(info, dict):
+        raise SystemExit(f"la rama {rama} no esta declarada en .python-runtime.json")
+    if not info.get("certificable_en_windows"):
+        raise SystemExit(
+            f"Python {pin}: la rama {rama} no es certificable en Windows "
+            f"({info.get('motivo') or 'sin motivo declarado'})")
+    if not info.get("instaladores_windows"):
+        raise SystemExit(f"Python {pin}: la rama {rama} no publica instaladores "
+                         f"de Windows; el empaquetado exigiria un binario que "
+                         f"python.org no distribuye")
+    ultimo = info.get("ultimo_instalador_windows")
+    if ultimo and _parse_ver(pin) > _parse_ver(ultimo):
+        raise SystemExit(
+            f"Python {pin} es posterior al ultimo con instalador de Windows de "
+            f"la rama ({ultimo}): no hay binario oficial que instalar")
+    limite = info.get("revisar_antes_de")
+    if limite:
+        try:
+            vence = dt.date.fromisoformat(str(limite))
+        except ValueError as exc:
+            raise SystemExit(f"revisar_antes_de ilegible en la rama {rama}: "
+                             f"{limite!r}") from exc
+        if dt.date.today() > vence:
+            raise SystemExit(
+                f"la declaracion de la rama {rama} caduco el {limite}: "
+                f"recertifica sobre la siguiente rama en fase BUGFIX antes de "
+                f"empaquetar (ver docs/RUNTIME_CERTIFICADO.md)")
+
+    win = (ROOT / "INSTALAR_WEB.bat").read_text(encoding="utf-8", errors="replace")
+    if "set /p ITMQ_PYTHON=<.python-version" not in win:
+        raise SystemExit("INSTALAR_WEB.bat no lee el interprete de "
+                         ".python-version: puede volver a discrepar del gate")
+    # Se miran los COMANDOS, no los comentarios: el `.bat` explica en un `rem`
+    # por qué dejó de fijar la versión a mano, y nombrar ahí las versiones del
+    # defecto es justamente lo que hace útil el comentario. Un control que
+    # prohíbe documentar la historia se arregla borrando la explicación, que es
+    # lo contrario de lo que se quiere.
+    ejecutable = "\n".join(
+        linea for linea in win.splitlines()
+        if not linea.strip().lower().startswith(("rem ", "rem\t", "::")))
+    huellas = re.findall(r"(?<![\d.])3\.\d+\.\d+(?![\d.])", ejecutable)
+    if huellas:
+        raise SystemExit(f"INSTALAR_WEB.bat fija versiones de Python a mano "
+                         f"({sorted(set(huellas))}): tiene que leerlas del pin")
+
+
 def deployment_guard() -> None:
     required = (
         ROOT / "Dockerfile", ROOT / "docker-compose.yml", ROOT / "docker-compose.always-on.yml",
@@ -341,6 +454,7 @@ def deployment_guard() -> None:
         ROOT / "INSTALAR_WEB.bat", WINDOWS_LOCK, ROOT / "requirements.windows.in",
         ROOT / "LEEME_WINDOWS.txt", BOOTSTRAP_LOCK, ROOT / ".python-version",
         ROOT / ".node-version", ROOT / ".npm-version", ROOT / "rust-toolchain.toml",
+        RUNTIME_DECL, ROOT / "docs" / "RUNTIME_CERTIFICADO.md",
     )
     missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     if missing:
@@ -403,7 +517,7 @@ def deployment_guard() -> None:
         raise SystemExit(".dockerignore no excluye todos los secretos/build outputs")
 
     win = (ROOT / "INSTALAR_WEB.bat").read_text(encoding="utf-8", errors="replace")
-    for token in ("py -3.12 -m venv .venv", "requirements.bootstrap.lock.txt", "requirements.windows.lock.txt", "--require-hashes --no-deps --only-binary=:all:"):
+    for token in ("py -%ITMQ_PYMM% -m venv .venv", "requirements.bootstrap.lock.txt", "requirements.windows.lock.txt", "--require-hashes --no-deps --only-binary=:all:"):
         if token not in win:
             raise SystemExit(f"instalador Windows no endurecido: falta {token}")
     if "requirements.production.lock.txt" in win:
@@ -639,6 +753,7 @@ def main() -> int:
         release_traceability_guard(version)
         artifact_cleanliness_guard()  # dirty input must fail; do not silently clean it first
         secret_file_guard()
+        windows_runtime_guard()
         deployment_guard()
         lock_structure_guard()
 

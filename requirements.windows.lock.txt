@@ -1,4 +1,8 @@
-# ITM QUANT v1.27.21 · lock reproducible para Windows x64 + CPython 3.12.
+# ITM QUANT · lock reproducible para Windows x64.
+# v1.57.1 · El interprete certificado es el de .python-version (3.13.12). Este
+# lock NO se regenero al migrar de rama: se comprobo contra PyPI que los 38
+# paquetes tienen rueda cp313 win_amd64 (o pura/py3-none/abi3) con su hash ya
+# dentro del fichero, asi que instala igual en 3.12 y en 3.13 sin recompilar nada.
 # Derivado del lock de produccion hash-complete; excluye uvloop porque no soporta Windows.
 # Instalar SIEMPRE con: pip install --require-hashes --no-deps --only-binary=:all: -r requirements.windows.lock.txt
 # Si falta un wheel, la instalacion DEBE fallar: nunca compilar pandas/numpy/scipy localmente.

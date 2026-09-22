@@ -1,0 +1,46 @@
+{
+  "_nota": "RUNTIME CERTIFICADO Y SU DISPONIBILIDAD EN WINDOWS. Lo lee scripts/release_gate_full.py (windows_runtime_guard). La determinacion completa, con su evidencia, esta en docs/RUNTIME_CERTIFICADO.md. Este fichero se actualiza A MANO y de forma deliberada: el gate no puede consultar python.org, asi que lo que aqui se declara es lo que el gate exige.",
+  "politica": "La version certificada tiene que ser una que python.org distribuya como INSTALADOR amd64 para Windows. Eso implica una rama en fase BUGFIX: una rama en fase de solo seguridad se publica source-only (PEP 693) y en Windows no hay binario oficial que instalar. Exigir en Windows una version que python.org no distribuye para Windows obliga a compilar CPython a mano o a meter una instalacion no estandar, y las dos cosas destruyen la reproducibilidad que este gate existe para garantizar.",
+  "certificado": {
+    "version": "3.13.12",
+    "rama": "3.13",
+    "verificado_el": "2026-09-22",
+    "regresion": "2989 passed, 49 skipped, 0 failed",
+    "locks_verificados": [
+      "requirements.bootstrap.lock.txt",
+      "requirements.production.lock.txt",
+      "requirements.test.lock.txt",
+      "requirements.rust-bridge.lock.txt"
+    ],
+    "instalacion": "hash-verificada con --require-hashes --no-deps --only-binary=:all: · cero compilaciones desde codigo fuente",
+    "descarga_windows": "https://www.python.org/downloads/windows/"
+  },
+  "ramas": {
+    "3.12": {
+      "fase": "SOLO_SEGURIDAD",
+      "instaladores_windows": false,
+      "ultimo_instalador_windows": "3.12.10",
+      "motivo": "PEP 693 · desde 3.12.11 las releases de esta rama son source-only. 3.12.11, 3.12.12, 3.12.13 y 3.12.14 existen pero NO tienen instalador de Windows, asi que sus correcciones de seguridad no son instalables como binario oficial en Windows.",
+      "certificable_en_windows": false
+    },
+    "3.13": {
+      "fase": "BUGFIX",
+      "instaladores_windows": true,
+      "ultimo_instalador_windows": "3.13.15",
+      "revisar_antes_de": "2026-10-31",
+      "motivo": "Rama en fase de correccion de errores: cada parche se publica con instalador de Windows y macOS. 3.13.12 (3 de febrero de 2026) es una release de mantenimiento con instalador oficial.",
+      "certificable_en_windows": true
+    },
+    "3.14": {
+      "fase": "BUGFIX",
+      "instaladores_windows": true,
+      "certificable_en_windows": false,
+      "bloqueado_por": "pandas==2.2.3 no publica rueda cp314 win_amd64 (la primera que la publica es 2.3.3). Migrar a 3.14 exige subir pandas y re-resolver los locks hash-cerrados, con su regresion completa. No es un bloqueo permanente: es una migracion de dependencias que todavia no se ha hecho.",
+      "cobertura_medida": "requirements.windows.lock.txt: 37/38 paquetes con rueda cp314 win_amd64 en el lock; el que falta es pandas"
+    }
+  },
+  "revision_de_ramas": {
+    "cuando": "Cuando `revisar_antes_de` de la rama certificada venza, o cuando la rama salga de la fase BUGFIX.",
+    "que_hacer": "Recertificar sobre la siguiente rama en fase BUGFIX: comprobar la cobertura de ruedas del lock para su ABI, instalar los locks con hashes en ese interprete, pasar la regresion completa y solo entonces mover `.python-version` y este fichero."
+  }
+}

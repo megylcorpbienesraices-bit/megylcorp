@@ -1,6 +1,6 @@
 {
-  "version": "1.57.0",
-  "release": "ITM_QUANT_v1.57.0_PRE_VPS",
+  "version": "1.57.1",
+  "release": "ITM_QUANT_v1.57.1_PRE_VPS",
   "scope": "MULTI_ASSET",
   "base_version": "1.55.0",
   "focus": "CIERRE INTEGRAL POR GATES: tradeSideCode como autoridad del agresor con tabla de evidencia forense, una sola implementacion de la marca de flujo, barras de agresor y prima recuperadas desde el FlowViewModel, ocho carriles con LKG, Net Drift con muros y QFLOW sobre un eje unico, auditoria del calculo de los muros, Interval Map con el hueco preservado y el signo verificado celda a celda, Monte Carlo como gate de release, cinco ficheros de acumulaciones auditados uno a uno y snapshot transaccional.",
@@ -23,21 +23,22 @@
     "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
   ],
   "tests": {
-    "collected": 3038,
-    "passed": 2987,
+    "collected": 3057,
+    "passed": 3008,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 190,
+    "files": 191,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "58d7ae8e2fedab2a6c37ccf2ee7b638fca63de137eaf9b03485ac5c135b1f0dd",
+    "plan_sha256": "c393035efa86fa2812f0c0a5627ac8493f6fb39db214194afa37343bdf727d24",
     "run_observed": {
-      "passed": 2987,
-      "skipped": 51,
+      "passed": 3008,
+      "skipped": 49,
       "failed": 0,
-      "collected": 3038,
-      "note": "ejecución completa en el entorno de desarrollo. `skipped` del contrato es 0 porque ningún salto se presenta como auditado; los 51 saltos reales son pruebas que exigen credenciales o red al proveedor y se declaran aquí en vez de esconderse"
+      "collected": 3057,
+      "interprete": "CPython 3.13.12 (el certificado)",
+      "note": "ejecucion completa en el interprete certificado, con los locks instalados con --require-hashes --only-binary=:all:. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 49 saltos reales exigen credenciales o red al proveedor"
     }
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
@@ -176,5 +177,13 @@
     "Los puntos 5, 10, 18, 25, 27, 37, 38 y 53 del cierre exigen la API real de quantdata.us con ocho activos; el entorno de desarrollo no tiene credenciales ni salida de red al proveedor. Las herramientas existen y se ejecutan con `scripts/verify_live_quantdata.py --cierre`.",
     "Monte Carlo es el unico modulo CERTIFICADO, y puede serlo porque se contrasta contra formulas cerradas y no depende de ningun proveedor.",
     "La regresion visual valida GEOMETRIA en un navegador real, no datos de mercado."
-  ]
+  ],
+  "runtime": {
+    "python": "3.13.12",
+    "rama": "3.13",
+    "instalador_windows": true,
+    "declaracion": ".python-runtime.json",
+    "determinacion": "docs/RUNTIME_CERTIFICADO.md",
+    "anterior": "3.12.14 (source-only; sin instalador de Windows desde 3.12.10)"
+  }
 }

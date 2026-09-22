@@ -1,13 +1,22 @@
 ITM QUANT · INSTALACION WINDOWS
 
-1. Requisito obligatorio: Python 3.12 x64.
-   Verifica con: py -0p
+1. Requisito obligatorio: la version exacta de CPython x64 que dice .python-version.
+   Hoy es 3.13.12. Descarga oficial: https://www.python.org/downloads/windows/
+   Verifica lo que tienes con: py -0p
 2. Ejecuta: INSTALAR_WEB.bat
-   El instalador IGNORA Python 3.14/3.13 y crea .venv solo con 3.12.
+   El instalador LEE .python-version, no lleva ninguna version escrita a mano, y
+   crea .venv solo con esa. Cualquier otra version instalada se ignora.
 3. El instalador usa requirements.windows.lock.txt, hashes SHA-256 y solo wheels binarios.
    Nunca intenta compilar pandas/numpy/scipy ni necesita Visual Studio.
 4. Ejecuta CONFIGURAR_WEB.bat.
 5. Ejecuta INICIAR_WEB.bat.
 
-Si ya habia un .venv de Python distinto de 3.12, el instalador elimina SOLO ese .venv y lo recrea.
+Si ya habia un .venv con otra version, el instalador elimina SOLO ese .venv y lo recrea.
 El VPS Linux sigue usando requirements.production.lock.txt y deploy/VALIDAR_Y_DESPLEGAR_VPS.sh.
+
+POR QUE LA VERSION NO ES 3.12
+La rama 3.12 esta en fase de solo seguridad: sus releases se publican source-only
+y python.org no distribuye instalador de Windows desde 3.12.10. Exigir en Windows
+una version que python.org no distribuye para Windows obliga a compilar CPython a
+mano, y eso rompe la reproducibilidad. La determinacion completa, con la evidencia
+medida, esta en docs/RUNTIME_CERTIFICADO.md.

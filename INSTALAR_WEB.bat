@@ -3,8 +3,17 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d %~dp0
 
 set /p ITMQ_VERSION=<VERSION.txt
-rem Historical Docker/Linux certification target remains 3.12.14; Windows hotfix uses official CPython 3.12.10 x64.
-set ITMQ_PYTHON=3.12.10
+rem v1.57.1 · EL INTERPRETE SE LEE DE .python-version, NO SE ESCRIBE AQUI.
+rem
+rem Antes este fichero fijaba 3.12.10 a mano mientras el gate de release exigia
+rem 3.12.14 (.python-version). Las dos cosas no podian ser ciertas a la vez: en
+rem Windows se instalaba 3.12.10 —porque python.org no distribuye instalador de
+rem 3.12.14— y despues el gate rechazaba certificar ese mismo entorno. Leyendo
+rem el pin desde el mismo fichero que lee el gate, la contradiccion no se puede
+rem reintroducir. La disponibilidad en Windows de la version fijada la declara
+rem .python-runtime.json y la comprueba el gate.
+set /p ITMQ_PYTHON=<.python-version
+for /f "tokens=1,2 delims=." %%a in ("%ITMQ_PYTHON%") do set ITMQ_PYMM=%%a.%%b
 echo ==============================================================
 echo ITM QUANT DOW SPECIALIZED v%ITMQ_VERSION% - WINDOWS %ITMQ_PYTHON%
 echo ==============================================================
@@ -18,8 +27,8 @@ echo.
 where py >nul 2>nul
 if errorlevel 1 goto :no_launcher
 
-py -3.12 -c "import sys,platform; assert sys.version_info[:2]==(3,12); assert sys.version_info[:3]==(3,12,10); assert platform.architecture()[0]=='64bit'; print(sys.version)" >nul 2>nul
-if errorlevel 1 goto :no_py312
+py -%ITMQ_PYMM% -c "import sys,platform,pathlib; want=pathlib.Path('.python-version').read_text(encoding='utf-8').strip(); got='.'.join(map(str,sys.version_info[:3])); assert got==want,(got,want); assert platform.architecture()[0]=='64bit'; print(sys.version)" >nul 2>nul
+if errorlevel 1 goto :no_python
 
 if exist ".venv\Scripts\python.exe" (
   for /f "delims=" %%V in ('".venv\Scripts\python.exe" -c "import sys; print('.'.join(map(str,sys.version_info[:3])))" 2^>nul') do set VENV_VER=%%V
@@ -32,14 +41,14 @@ if exist ".venv\Scripts\python.exe" (
 
 if not exist ".venv\Scripts\python.exe" (
   echo [1/6] Creando entorno privado con Python %ITMQ_PYTHON% x64...
-  py -3.12 -m venv .venv
+  py -%ITMQ_PYMM% -m venv .venv
   if errorlevel 1 goto :install_error
 ) else (
   echo [1/6] Entorno privado Python %ITMQ_PYTHON% verificado.
 )
 
 echo [2/6] Verificando interprete privado exacto...
-".venv\Scripts\python.exe" -c "import sys,platform; assert sys.version_info[:2]==(3,12); assert sys.version_info[:3]==(3,12,10); assert platform.architecture()[0]=='64bit'; print('Python OK:',sys.version.split()[0],platform.machine())"
+".venv\Scripts\python.exe" -c "import sys,platform,pathlib; want=pathlib.Path('.python-version').read_text(encoding='utf-8').strip(); got='.'.join(map(str,sys.version_info[:3])); assert got==want,(got,want); assert platform.architecture()[0]=='64bit'; print('Python OK:',got,platform.machine())"
 if errorlevel 1 goto :install_error
 
 echo [3/6] Normalizando pip desde bootstrap lock hash-verificado...
@@ -76,11 +85,12 @@ echo NO instales Visual Studio para compilar pandas.
 pause
 exit /b 1
 
-:no_py312
+:no_python
 echo ERROR: ITM QUANT necesita Python %ITMQ_PYTHON% x64 exactamente en Windows.
-echo Otra version de Python no se usara para este hotfix Windows reproducible.
+echo Esa version es la que python.org distribuye como instalador para Windows y
+echo es la unica con la que esta release se ha certificado.
 echo Instala Python %ITMQ_PYTHON% x64 y vuelve a ejecutar INSTALAR_WEB.bat.
-echo Descarga oficial: https://www.python.org/downloads/release/python-31210/
+echo Descarga oficial: https://www.python.org/downloads/windows/
 echo Puedes comprobarlo con: py -0p
 pause
 exit /b 1

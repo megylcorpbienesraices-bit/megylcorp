@@ -1128,7 +1128,7 @@
     "test_release_identity_advanced_to_12720_without_quant_logic_change_claim",
     "test_windows_configuration_and_provider_tools_do_not_fallback_to_global_python",
     "test_windows_install_never_compiles_scientific_stack_from_source",
-    "test_windows_installer_requires_cpython_312_x64_and_private_venv",
+    "test_windows_installer_requires_the_certified_cpython_x64_and_private_venv",
     "test_windows_lock_is_hash_complete_and_excludes_linux_only_uvloop"
    ]
   },
@@ -3411,6 +3411,30 @@
     "test_una_herramienta_ya_servida_cuenta_desde_su_ultimo_exito"
    ]
   },
+  "tests/test_v1571_runtime_windows.py": {
+   "casos": 19,
+   "tests": [
+    "test_el_bloqueo_de_3_14_esta_nombrado_con_su_version_minima",
+    "test_el_ci_lee_el_pin_del_fichero_y_no_una_constante",
+    "test_el_contenedor_usa_el_mismo_interprete_que_windows",
+    "test_el_guardian_acepta_el_pin_vigente",
+    "test_el_guardian_corre_antes_del_preflight_de_toolchain",
+    "test_el_guardian_rechaza_que_el_pin_y_la_declaracion_discrepen",
+    "test_el_guardian_rechaza_un_instalador_que_fija_la_version",
+    "test_el_guardian_rechaza_un_parche_sin_binario_oficial",
+    "test_el_guardian_rechaza_una_version_source_only",
+    "test_el_guardian_vence_cuando_la_rama_sale_de_bugfix",
+    "test_el_instalador_de_windows_lee_el_pin_en_vez_de_fijarlo",
+    "test_el_instalador_no_lleva_ninguna_version_escrita_a_mano",
+    "test_el_lock_de_windows_no_dice_una_rama_que_ya_no_es_la_certificada",
+    "test_el_parche_no_es_posterior_al_ultimo_con_instalador",
+    "test_el_pin_y_la_declaracion_dicen_lo_mismo",
+    "test_la_declaracion_no_ha_caducado",
+    "test_la_declaracion_y_su_documento_son_obligatorios_para_desplegar",
+    "test_la_rama_3_12_queda_declarada_como_no_certificable",
+    "test_la_rama_del_pin_es_certificable_en_windows"
+   ]
+  },
   "tests/test_v1573_contrato_de_cuota.py": {
    "casos": 32,
    "tests": [
@@ -3619,6 +3643,6 @@
    ]
   }
  },
- "total_minimo": 3038,
- "version": "1.57.0"
+ "total_minimo": 3057,
+ "version": "1.57.1"
 }

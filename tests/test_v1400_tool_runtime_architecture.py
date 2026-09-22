@@ -289,10 +289,25 @@ def test_vps_requires_prepared_assets_and_never_resolves_locks_in_gate_path():
 
 
 def test_windows_installer_requires_exact_python_patch_and_bootstrap_lock():
+    """v1.57.1 · EL CONTROL ANTI-DERIVA ESTABA SILENCIADO POR UN COMENTARIO.
+
+    Esto exigía que la versión de `.python-version` apareciera en el `.bat`, y se
+    cumplía… porque un `rem` decía «Historical Docker/Linux certification target
+    remains 3.12.14» mientras el comando instalaba 3.12.10. La prueba pasaba con
+    el instalador y el gate pidiendo versiones distintas, que es exactamente lo
+    que existía para impedir.
+
+    Un texto que aparece en un comentario no demuestra que el comando lo use. Lo
+    que sí lo demuestra es que el `.bat` LEA el pin.
+    """
     win = (ROOT / "INSTALAR_WEB.bat").read_text(encoding="utf-8", errors="replace")
     target = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
-    assert target in win
-    assert "py -3.12 -m venv .venv" in win
+    assert "set /p ITMQ_PYTHON=<.python-version" in win
+    comandos = "\n".join(l for l in win.splitlines()
+                         if not l.strip().lower().startswith(("rem ", "rem\t", "::")))
+    assert target not in comandos, (
+        "la versión vuelve a estar escrita a mano en un comando")
+    assert "py -%ITMQ_PYMM% -m venv .venv" in win
     assert "requirements.bootstrap.lock.txt" in win
     assert "requirements.windows.lock.txt" in win
     assert "--require-hashes --no-deps --only-binary=:all:" in win

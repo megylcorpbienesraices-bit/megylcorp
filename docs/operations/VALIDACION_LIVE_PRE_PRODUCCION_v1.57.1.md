@@ -1,4 +1,4 @@
-# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.57.0
+# VALIDACIÓN LIVE PRE-PRODUCCIÓN · v1.57.1
 
 Dos comprobaciones distintas, y hacen falta las dos:
 

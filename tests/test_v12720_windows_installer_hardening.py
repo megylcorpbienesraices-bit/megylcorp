@@ -7,12 +7,25 @@ ROOT=Path(__file__).resolve().parents[1]
 def text(rel):
     return (ROOT/rel).read_text(encoding="utf-8",errors="replace")
 
-def test_windows_installer_requires_cpython_312_x64_and_private_venv():
+def test_windows_installer_requires_the_certified_cpython_x64_and_private_venv():
+    """v1.57.1 · la rama exacta ya no se escribe aquí: se lee de `.python-version`.
+
+    Esta prueba exigía `py -3.12` y `sys.version_info[:2]==(3,12)`. Fijar la rama
+    en la prueba convertía el defecto en contrato: la rama 3.12 es source-only y
+    python.org no distribuye instalador de Windows desde 3.12.10, así que exigir
+    3.12 era exigir un binario que no existe. Ver docs/RUNTIME_CERTIFICADO.md.
+
+    Lo que hay que seguir garantizando es lo de siempre: versión EXACTA, x64 y
+    entorno privado. Sólo que ahora la versión la manda el pin.
+    """
     s=text("INSTALAR_WEB.bat")
-    assert 'py -3.12 -m venv .venv' in s
-    assert 'sys.version_info[:2]==(3,12)' in s
+    assert 'set /p ITMQ_PYTHON=<.python-version' in s
+    assert 'py -%ITMQ_PYMM% -m venv .venv' in s
+    # La comprobación de versión es contra el pin LEÍDO, no contra una constante.
+    assert "pathlib.Path('.python-version').read_text" in s
+    assert "got==want" in s
     assert "platform.architecture()[0]=='64bit'" in s
-    assert 'py -m venv .venv' not in s.replace('py -3.12 -m venv .venv','')
+    assert 'py -m venv .venv' not in s.replace('py -%ITMQ_PYMM% -m venv .venv','')
 
 def test_windows_install_never_compiles_scientific_stack_from_source():
     s=text("INSTALAR_WEB.bat")

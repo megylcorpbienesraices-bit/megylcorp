@@ -1,8 +1,79 @@
-# ITM QUANT MULTI ASSET · v1.57.0 — Los muros, con su fórmula y su veredicto
+# ITM QUANT MULTI ASSET · v1.57.1 — Un runtime que Windows puede instalar
 
-Release: `ITM_QUANT_v1.57.0_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.57.1_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
 
-## CAMBIO DE FÓRMULA DECLARADO
+---
+
+## 0 · RUNTIME CERTIFICADO · 3.12.14 → 3.13.12
+
+### El gate exigía un Python que python.org no distribuye para Windows
+
+```
+.python-version      3.12.14      ← lo que el gate exigía
+INSTALAR_WEB.bat     3.12.10      ← lo que el instalador ponía, a mano
+```
+
+La rama 3.12 está en fase de **solo seguridad**: sus releases se publican
+*source-only* (PEP 693) y python.org **no distribuye instalador de Windows desde
+3.12.10** (abril 2025). Para certificar en Windows había que compilar CPython a
+mano o instalar un binario no oficial, y las dos cosas destruyen exactamente lo
+que el gate existe para garantizar.
+
+Y el repositorio **ya se había contradicho** para salir del paso: se instalaba
+3.12.10 y después el gate rechazaba certificar ese mismo entorno. El comentario
+del `.bat` lo llamaba «Windows hotfix» y dejaba el gate intacto. No lo detectó
+nadie porque **ningún control comparaba los dos ficheros**.
+
+### La determinación, medida antes de tocar el control
+
+```
+cobertura de ruedas del lock de Windows (38 paquetes, contra PyPI)
+  cp312   38/38      cp313   38/38      cp314   37/38  (falta pandas)
+
+instalación de los cinco locks en CPython 3.13.12
+  --require-hashes --no-deps --only-binary=:all:  →  0 errores, 0 compilaciones
+
+regresión completa en CPython 3.13.12
+  2989 passed, 49 skipped, 0 failed
+```
+
+**Opción 1 —certificar 3.12.10—** estaba disponible y era mínima, pero congelaba
+Windows en un intérprete de abril de 2025 que **no puede recibir ninguna
+corrección de seguridad más en forma de binario oficial**: 3.12.11–3.12.14 son
+source-only y la rama seguirá así hasta 2028.
+
+**Opción 2 —migrar de rama— es la que corresponde**, y los locks ya la cubrían
+sin regenerar nada. El pin es **3.13.12 y no 3.13.15**, la última de la rama,
+porque 3.13.12 es la versión en la que se ha corrido la regresión: el pin no va
+por delante de la evidencia. Moverlo es una línea y una re-ejecución.
+
+**3.14 queda nombrado, no descartado:** lo bloquea `pandas==2.2.3`, que no
+publica rueda `cp314` win_amd64; la primera que la publica es **2.3.3**.
+
+### El control nuevo · `windows_runtime_guard()`
+
+No baja el control: antes exigía una versión exacta sin preguntarse si existía
+para la plataforma de producción. Ahora exige lo mismo **y además** que exista:
+
+1. `.python-version` y `.python-runtime.json` declaran la misma versión;
+2. su rama está declarada certificable en Windows;
+3. el parche no es posterior al último con instalador de esa rama;
+4. la declaración **caduca** (`revisar_antes_de`): cuando la rama sale de la fase
+   de corrección de errores, el control vence en vez de callarse;
+5. `INSTALAR_WEB.bat` **lee** el pin del mismo fichero que el gate, así que la
+   contradicción no se puede reintroducir.
+
+Corre **antes** del preflight de toolchain: si el runtime no existe para la
+plataforma, lo demás no significa nada.
+
+La determinación entera, con su evidencia, en `docs/RUNTIME_CERTIFICADO.md`.
+La rama 3.13 hay que revisarla **antes del 2026-10-31**.
+
+---
+
+## 1 · Los muros, con su fórmula y su veredicto
+
+## 1.0 · CAMBIO DE FÓRMULA DECLARADO
 
 **Una fórmula sí cambia**, y con ella un número en pantalla: el strike de Call
 Wall y Put Wall. El método anterior —media geométrica de la exposición agregada
@@ -26,7 +97,7 @@ El changelog de v1.56.0 vive en el historial de git (`CHANGELOG_v1.56.0.md`, en
 
 ---
 
-## 1 · CALL WALL Y PUT WALL · el contrato, entero
+## 1.1 · CALL WALL Y PUT WALL · el contrato, entero
 
 ### La fórmula, y sólo la fórmula
 
@@ -246,25 +317,32 @@ smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/sta
 24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
 **3001 casos / 189 ficheros**.
 
-## Verificación de v1.57.0
+## Verificación de v1.57.1
 
 ```
-suite            2987 passed, 51 skipped, 0 failed
+intérprete       CPython 3.13.12 · el certificado, no otro
+locks            bootstrap · production · test · rust-bridge instalados con
+                 --require-hashes --no-deps --only-binary=:all: · 0 compilaciones
+suite            3008 passed, 49 skipped, 0 failed
 ruff del gate    E9,F63,F7,F82 -> All checks passed
 eslint           no-undef limpio · sintaxis OK (5 módulos)
 arranque en frío 0 degradaciones
 smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health -> HTTP 200
-versión activa   1.57.0 en VERSION.txt, marcador, rust, frontend y documentos
+versión activa   1.57.1 en VERSION.txt, marcador, rust, frontend y documentos
 ```
 
-37 regresiones nuevas en `tests/test_v1570_contrato_de_muros.py` —una por cada
-regla del contrato y una por cada método prohibido— y 24 en
-`tests/test_v1581_plazo_del_transporte.py`. Inventario: **3038 casos / 190
+19 regresiones nuevas en `tests/test_v1571_runtime_windows.py` —el guardián
+rechaza cada forma del defecto: rama source-only, parche sin binario, pin y
+declaración discrepando, declaración caducada e instalador con la versión
+escrita a mano—, 37 en `tests/test_v1570_contrato_de_muros.py` y 24 en
+`tests/test_v1581_plazo_del_transporte.py`. Inventario: **3057 casos / 191
 ficheros**.
 
 Lo que esta release **no** demuestra: que los muros que salen ahora sean los que
-frenen al precio, y que los endpoints lentos del proveedor contesten dentro del
-plazo nuevo. Lo primero depende del posicionamiento real de clientes y dealers,
+frenen al precio, que los endpoints lentos del proveedor contesten dentro del
+plazo nuevo, ni que el instalador de Windows funcione en una máquina Windows
+real —la migración de runtime se verificó en Linux con el mismo intérprete y los
+mismos locks; el `.bat` no se ha podido ejecutar aquí—. Lo primero depende del posicionamiento real de clientes y dealers,
 que ningún proveedor conectado publica; lo segundo exige la API real, y este
 entorno no tiene credenciales ni salida a `quantdata.us`.
 
