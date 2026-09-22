@@ -1,11 +1,247 @@
-# ITM QUANT MULTI ASSET · v1.58.0 — Timeouts reales y concurrencia real
+# ITM QUANT MULTI ASSET · v1.59.0 — Cuatro cajones genéricos, abiertos uno a uno
 
-Release: `ITM_QUANT_v1.58.0_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.59.0_PRE_VPS` · Base: `v1.58.0` · Alcance: `MULTI_ASSET`
 
 **No se modifican fórmulas, pesos del Scanner ni autoridad direccional.** La
-metodología de Call Wall y Put Wall de v1.57.2 queda intacta.
+metodología de Call Wall y Put Wall de v1.57.2 queda intacta, y el Quant Data
+Interval Map sigue siendo la autoridad del campo de TRACE.
 
 ---
+
+## 0 · POR QUÉ ESTOS CUATRO Y POR QUÉ JUNTOS
+
+Los cuatro bloques de esta release corrigen el mismo error en cuatro sitios
+distintos: **una respuesta que junta causas que se arreglan de maneras
+opuestas**.
+
+```
+DEGRADED                       ← el endpoint, sin saber quién lo consume
+«sin cálculo en este ciclo»    ← ¿faltó gamma, OI, vencimiento o precio?
+SIN_DATOS con 216 filas        ← ¿lo de ahora o lo guardado?
+«sin intentos»                 ← seis situaciones, una de ellas un defecto
+```
+
+Mientras estuvieron juntas, saber cuál era la de hoy exigía leer el código.
+
+---
+
+## 1 · BLOQUE 3 · LA CRITICIDAD ES DEL PAR (DATO, CONSUMIDOR)
+
+### El defecto
+
+`OPTIONAL` y `DEGRADED` eran propiedades **del endpoint**. Pero:
+
+```
+gamma falla
+  · para una tarjeta con respaldo propio   → opcional
+  · para Call Wall / Put Wall              → gamma ES un factor de la fórmula
+```
+
+Una etiqueta global obliga a elegir una de las dos lecturas, y la elegida es
+falsa la mitad del tiempo.
+
+### Lo que cambia · `app/core/consumer_contracts.py` (NUEVO)
+
+Siete consumidores —`WALLS`, `TRACE`, `DARK_POOL`, `EXPOSICION`, `FLUJO`,
+`VOLATILIDAD`, `INTERES_ABIERTO`— **declaran** de qué dependen, con qué nivel y
+por qué, y qué hacen cuando les falta algo. La severidad se DERIVA:
+
+```python
+severity_for("interval_map_gamma")  # DEGRADED · TRACE lo exige
+severity_for("max_pain")            # OPTIONAL · nadie lo exige
+```
+
+Y cada consumidor dice su propio estado sin preguntarle al endpoint:
+
+```
+READY     tiene todo lo obligatorio
+DEGRADED  tiene lo obligatorio, le falta algo opcional
+BLOCKED   le falta algo OBLIGATORIO, y se dice cuál
+UNKNOWN   falta MEDIR algo obligatorio
+```
+
+### El cuarto estado no es un adorno
+
+`UNKNOWN` es lo que impide el falso negativo más caro: **declarar bloqueada una
+sección que funciona** porque nadie preguntó por uno de sus datos. Dos reglas:
+
+* lo que no está en el mapa sale como *no medido*, nombrando el carril
+  (`PAGES`, `HUB`, `TERMINAL`) al que hay que preguntarle;
+* lo que está todavía en la cola —`SCHEDULED`, `RUNNING`,
+  `WAITING_RATE_LIMIT`— tampoco bloquea: no ha servido, pero no ha fallado.
+
+`COOLDOWN` queda fuera de esa exención a propósito: viene de fallar.
+
+---
+
+## 2 · BLOQUE 4 · EL SNAPSHOT DE MUROS
+
+### El defecto
+
+Las Walls se calculaban con lo que llegara **en el ciclo de sondeo actual**. Un
+timeout dejaba «sin cálculo de muros en este ciclo»: una frase que no dice qué
+ingrediente faltó ni si había muros válidos hace treinta segundos. Y ataba una
+lectura **estructural** —que cambia despacio— al ritmo de un canal que falla a
+menudo.
+
+### Lo que cambia · `app/core/wall_snapshot.py` (NUEVO)
+
+Los seis ingredientes —`GAMMA`, `OI`, `VENCIMIENTO`, `SPOT`, `COBERTURA`,
+`MULTIPLICADOR`— en un objeto coherente, con tres salidas y ninguna vacía:
+
+```
+COMPLETO       → se calcula
+LKG            → se publica el anterior CON SU EDAD   (fresco 180 s · tope 900 s)
+NO_CALCULABLE  → «NO CALCULABLE · falta VENCIMIENTO, GAMMA, SPOT…»
+```
+
+En pantalla:
+
+```
+WALL_CONFIRMADA · LKG · edad 42s
+WALL PROVISIONAL · STALE · edad 240s
+NO CALCULABLE · falta VENCIMIENTO, GAMMA, SPOT, COBERTURA, MULTIPLICADOR
+```
+
+### El detalle que costaba una wall falsa
+
+Un snapshot es coherente **o no es nada**. Al servir el LKG se sirve también
+**su precio**: mezclar una cadena de hace cuarenta segundos con el spot de ahora
+mide dos mercados, y el precio entra **al cuadrado** en la exposición. Se
+detectó al escribir la regresión —el muro salía `None` sirviendo desde LKG— y
+está atado.
+
+**La fórmula no se toca.** `wall_gex` sigue siendo la única autoridad del
+cálculo; este bloque prepara su entrada y guarda la última buena.
+
+---
+
+## 3 · BLOQUE 5 · DARK POOL · AHORA Y ÚLTIMO BUENO, SIN MEZCLAR
+
+Un par `state`/`rows` respondía a dos preguntas distintas. Con un timeout y 216
+filas del ciclo anterior, las dos lecturas posibles eran falsas.
+
+Cinco hechos, cinco campos, más la conclusión:
+
+```
+current_status   qué pasó en ESTE refresco
+current_rows     filas que trajo ESTE refresco (0 si falló)
+lkg_rows         filas del último refresco que SÍ funcionó
+lkg_age          cuántos segundos tiene
+last_success_at  cuándo fue
+serving          LIVE · STALE_LKG · NONE
+```
+
+```
+HTTP 200 con cero filas   → NO_DATA        no hay actividad, no hay avería
+timeout/5xx con LKG       → STALE_LKG      dato real, viejo, con su edad
+timeout/5xx sin LKG       → PROVIDER_ERROR
+```
+
+Un 400 **no** se rebaja por tener filas antiguas.
+
+---
+
+## 4 · BLOQUE 7 · NUEVE ESTADOS, Y LA ANOMALÍA FUERA DE ELLOS
+
+«Sin intentos» juntaba seis situaciones con cinco remedios distintos y un
+defecto real escondido entre ellas.
+
+```
+SCHEDULED            su cadencia aún no vence
+WAITING_RATE_LIMIT   exigible, presupuesto de cuota agotado
+WAITING_DEPENDENCY   exigible, le falta un dato del que depende
+COOLDOWN             en enfriamiento tras un fallo, con su backoff
+RUNNING              petición en vuelo AHORA
+LIVE                 sirviendo dato fresco
+NO_DATA              respondió bien y no hay datos
+STALE                sirve su último valor bueno, con la edad declarada
+PROVIDER_ERROR       falla y no hay valor bueno que servir
+```
+
+Y aparte, **no como estado**: `NUNCA_LLAMADA`, para la herramienta exigible que
+pasó el calentamiento sin un solo intento con la cuota libre. Un estado describe
+a la herramienta; una anomalía acusa al programador.
+
+### Dos decisiones de orden
+
+* **`RUNNING` se comprueba antes que el resultado de la última llamada.** Al
+  revés, una herramienta que está llamando ahora se declararía con el estado de
+  su intento anterior.
+* **Exigible y sin un solo intento es `SCHEDULED`, no `NO_DATA`.** Decir
+  `NO_DATA` ahí atribuye al proveedor un silencio que es nuestro. Y la exención
+  de la anomalía es por **cadencia**, nunca por estado.
+
+`RUNNING` dejó de ser una deducción: el carril de páginas mantiene el conjunto
+de claves **en vuelo**.
+
+---
+
+## 5 · DOS DEFECTOS ENCONTRADOS AL CABLEAR
+
+Ninguno de los dos se buscaba.
+
+1. **Una herramienta decía `LIVE` con el último intento fallido.** Bastaba con
+   que quedara dato anterior publicado: `data["ready"]` se comprobaba antes que
+   `tool.last_error`. Eso es servir el ciclo anterior con la etiqueta del
+   actual. Ahora declara `DEGRADADO`/`NO_DISPONIBLE` y `lifecycle` dice `STALE`
+   con la edad.
+
+2. **La wall servida desde LKG salía sin precio** (ver bloque 4).
+
+---
+
+## 6 · QUÉ PUBLICA EL AUDITOR AHORA
+
+`/api/quantdata/coverage` añade:
+
+```
+consumers          quién se queda sin qué, con su estado y su comportamiento
+scheduler_states   recuento por estado + las anomalías, aparte
+tools[].lifecycle  el estado real de esa herramienta, con su causa
+tools[].anomaly    el defecto del programador, si lo hay
+tools[].criticality  para quién es obligatoria y para quién opcional
+```
+
+---
+
+## 7 · REGRESIÓN
+
+`tests/test_v1590_criticidad_y_estados.py` · **54 casos**, un bloque por cajón,
+más la integración de los cuatro en el Auditor y en el motor de muros. Entre
+ellos, los que atan lo que no se puede volver a perder:
+
+* el mismo dato obligatorio para uno y opcional para otro;
+* lo no medido nunca se declara bloqueado;
+* una dependencia en la cola no bloquea; en enfriamiento, sí;
+* el LKG sirve su precio y su cadena, o no sirve;
+* un LKG por encima del tope deja de sostener el muro;
+* el snapshot de un activo no respalda a otro;
+* una petición en vuelo manda sobre el resultado anterior;
+* exigible y sin intentos no es que el proveedor calle;
+* y `wall_gex` sigue siendo la única autoridad de la fórmula.
+
+---
+
+## 8 · AUDITORÍA DEL MOTOR
+
+La auditoría del motor de esta release, con lo que **no** afirma, está en
+`QUANT_ENGINE_AUDIT_v1.59.0.md`.
+
+---
+
+## 9 · LO QUE SIGUE PENDIENTE
+
+* La evidencia **LIVE en Windows** del certificador de transporte de v1.58.0.
+* **TRACE visual** sobre el Interval Map como autoridad: entrega aparte.
+* **GLOBAL/LOCAL** por sección con subconjuntos de herramientas: entrega aparte.
+* **Bloque 6** (unidades de exposición tipadas tras un adaptador): el último.
+
+---
+
+# Historial · v1.58.0 — Timeouts reales y concurrencia real
+
+Release: `ITM_QUANT_v1.58.0_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
 
 ## 0 · BLOQUE 1+2 · EL TRANSPORTE, DE RAÍZ
 

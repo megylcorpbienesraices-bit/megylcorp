@@ -1,44 +1,42 @@
 {
-  "version": "1.58.0",
-  "release": "ITM_QUANT_v1.58.0_PRE_VPS",
+  "version": "1.59.0",
+  "release": "ITM_QUANT_v1.59.0_PRE_VPS",
   "scope": "MULTI_ASSET",
-  "base_version": "1.55.0",
-  "focus": "CIERRE INTEGRAL POR GATES: tradeSideCode como autoridad del agresor con tabla de evidencia forense, una sola implementacion de la marca de flujo, barras de agresor y prima recuperadas desde el FlowViewModel, ocho carriles con LKG, Net Drift con muros y QFLOW sobre un eje unico, auditoria del calculo de los muros, Interval Map con el hueco preservado y el signo verificado celda a celda, Monte Carlo como gate de release, cinco ficheros de acumulaciones auditados uno a uno y snapshot transaccional.",
+  "base_version": "1.58.0",
+  "focus": "CUATRO CAJONES GENERICOS ABIERTOS UNO A UNO: la criticidad pasa a ser del PAR (dato, consumidor) y la severidad se deriva de quien lo exige; las Walls se calculan sobre un snapshot coherente que sobrevive a un ciclo perdido y nombra el ingrediente que falta; Dark Pool separa el refresco de AHORA del ultimo valor bueno en campos distintos; y el programador declara nueve estados reales con la anomalia NUNCA_LLAMADA fuera de ellos. La formula de Call Wall / Put Wall no se toca.",
   "scanner_authority": "UNCHANGED_SOLE_DIRECTIONAL_AUTHORITY",
   "quant_logic_changes": [
-    "aggressor: `tradeSideCode` decide y NO se cae al NBBO cuando dice MID_MARKET; 17 campos forenses por print; MID_TRADE deja de contarse como averia.",
-    "aggressor_evidence: tabla RAW -> esperado -> clasificador -> marca FLUJO -> marca TRACE, con la columna esperada reimplementada a mano.",
-    "itmq_core.flowMark: UNA implementacion de la marca para TRACE, FLUJO y NET DRIFT; antes habia dos copias que podian separarse.",
-    "flow_view.bucketize: las barras de agresor y prima se agrupan en el servidor desde la misma cinta que las tarjetas, con LKG por carril y recuento de la cadena.",
-    "flow_view: ocho carriles declarados, `last_known_good` publicado aparte de `current`, y la clave completa en cada respuesta.",
-    "drawDrift: el eje de precio cae a las velas cuando el proveedor no publica `stockPrice`; sin ese respaldo se perdian precio, muros y QFLOW a la vez.",
-    "wall_engine.wall_audit: exposicion por lado, OI, distancia, ranking, score y la formula entera; la igualdad se comprueba en SEIS secciones.",
-    "asset_normalization: una celda ausente deja de convertirse en 0.0 y sobrevive como hueco hasta el renderizador.",
-    "interval_map_audit: signo verificado celda a celda contra el crudo, con dos tests de inyeccion que comprueban que la auditoria falla cuando debe.",
-    "market_state_field: sin exposicion el regimen dice NO_EXPOSURE_DATA en vez de afirmar TRANSITION con estabilidad 50.",
-    "dealer_intelligence: un componente ausente sale de la media en vez de puntuar cero con todo su peso.",
-    "nextgen_terminal: `spot or 0.0` ordenaba los strikes por distancia a CERO y devolvia los mas bajos de la cadena; corregido, junto al charm y la prima del print.",
-    "terminal_api: `cycle_id` ademas de `generation_id`, y commit transaccional del snapshot en el cliente.",
-    "REPASO FINAL: nueve huecos dados por cerrados sin estarlo. level_id y name faltaban en cada linea; la igualdad de muros no declaraba activo, sesion ni ciclo; el recuento de Dark Pool se paraba en el modelo y no llegaba a lo entregado; el periodo viajaba pero no se veia; la regresion visual solo media barras y dejaba fuera campo de calor, relieve, curvas y puntos.",
-    "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
+    "consumer_contracts (NUEVO): siete consumidores declaran de que dependen y con que nivel. `severity_for` DERIVA la severidad de un fallo de si alguien lo exige, en vez de etiquetar el endpoint. Cuarto estado `UNKNOWN`: lo que no se ha medido no se declara bloqueado.",
+    "wall_snapshot (NUEVO): los seis ingredientes en un objeto coherente, con tres salidas -COMPLETO, LKG con su edad, NO_CALCULABLE con el nombre de lo que falta-. Ninguna es una caja vacia. La formula sigue entera en wall_gex.",
+    "wall_engine.walls_from_hub: arma y resuelve el snapshot antes de calcular, y publica `snapshot_state`, `verdict_label` y `from_lkg` por lado. Cuando sirve el LKG sirve su PRECIO tambien: tomar las filas de hace cuarenta segundos con el spot de ahora seria medir dos mercados, y el precio entra al cuadrado.",
+    "scheduler_states (NUEVO): nueve estados reales -SCHEDULED, WAITING_RATE_LIMIT, WAITING_DEPENDENCY, COOLDOWN, RUNNING, LIVE, NO_DATA, STALE, PROVIDER_ERROR- y la anomalia NUNCA_LLAMADA aparte. Exigible y sin un solo intento ya no se lee como NO_DATA: ese silencio era nuestro, no del proveedor.",
+    "dark_pool_state.lane_state: `current_status`, `current_rows`, `lkg_rows`, `lkg_age`, `last_success_at` y `serving`. Un timeout con cien filas del ciclo anterior deja de obligar a elegir entre tirar el dato o esconder el fallo.",
+    "quantdata.intelligence.coverage: publica `consumers` (quien se queda sin que) y `scheduler_states` (los nueve estados con sus anomalias), y cada herramienta lleva su `lifecycle`, su `anomaly` y su `criticality`.",
+    "quantdata.intelligence: una herramienta con dato anterior publicado y el ultimo intento fallido dejaba de poder decir LIVE. Eso era servir el ciclo anterior con la etiqueta del actual.",
+    "quantdata.intelligence: conjunto EN VUELO por clave, que es lo que hace que `RUNNING` sea un estado medido y no una deduccion del intento anterior."
   ],
   "tests": {
-    "collected": 3117,
-    "passed": 3068,
+    "collected": 3171,
+    "passed": 3120,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 192,
+    "files": 193,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "45607865fb44cbd8610a163e94034e8f971c54a11b3e14df4f53810536efbc3c",
+    "plan_sha256": "a4870fa16f26f56f822635a23b8692a07ecd08610dd84dd1ea48de3a7547b321",
     "run_observed": {
-      "passed": 3068,
-      "skipped": 49,
+      "passed": 3120,
+      "skipped": 51,
       "failed": 0,
-      "collected": 3117,
-      "interprete": "CPython 3.13.12 (el certificado)",
-      "note": "ejecucion completa en el interprete certificado. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 49 reales exigen credenciales o red al proveedor"
+      "collected": 3171,
+      "interprete": "CPython 3.11.15 (el del contenedor de desarrollo)",
+      "skips_desglosados": {
+        "live_con_credenciales": 45,
+        "pyzmq_ausente_en_el_contenedor": 2,
+        "universo_retirado_en_v1.58.0_con_regla_cubierta_en_otro_fichero": 4
+      },
+      "note": "ejecucion completa: 3120 pasados, 51 saltados, 0 fallos. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 51 reales son 45 que exigen ITMQ_LIVE_TESTS=1 con la terminal levantada y QUANTDATA_API_KEY, 2 por pyzmq ausente en este contenedor y 4 de activos retirados del universo en v1.58.0 cuya regla cubre test_v1580_contrato_del_universo.py. El interprete CERTIFICADO sigue siendo CPython 3.13.12 (.python-runtime.json): esta corrida es del contenedor de desarrollo y no lo sustituye."
     }
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
@@ -200,5 +198,24 @@
       "EL_PLAZO_LO_FIJA_EL_p95_MEDIDO",
       "COLA_PROPIA_SEPARADA_DE_LA_LATENCIA_DEL_PROVEEDOR"
     ]
+  },
+  "gate_observed": {
+    "guards_pass": [
+      "WINDOWS RUNTIME",
+      "DEPLOYMENT CONTRACT",
+      "LOCKS",
+      "DEPENDENCY AUDIT",
+      "RUFF",
+      "COMPILEALL",
+      "CODEMOD SILENT EXCEPT",
+      "CODEMOD VERSION ASSERTS",
+      "CODEMOD ORPHAN DOCSTRINGS",
+      "TEST INVENTORY",
+      "MONTE CARLO MATH GATE",
+      "JAVASCRIPT 26/26",
+      "CARGO CHECK --locked (causality_engine + wasm_bridge)"
+    ],
+    "detenido_en": "particion pytest 2/21. El gate exige CERO saltos y este contenedor no tiene pyzmq ni credenciales del proveedor: la particion 2 pasa 149/149 y salta 2 por `No module named 'zmq'`. Es una limitacion del entorno, no un fallo de la suite: la corrida completa da 0 fallos.",
+    "que_falta_para_PASS": "ejecutar el gate en el entorno certificado (CPython 3.13.12 con los locks instalados, pyzmq incluido) y con QUANTDATA_API_KEY + ITMQ_LIVE_TESTS=1 con la terminal levantada."
   }
 }

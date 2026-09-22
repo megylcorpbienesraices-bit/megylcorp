@@ -1,5 +1,30 @@
 # ITM QUANT · MULTI ASSET
 
+## v1.59.0 · Cuatro cajones genéricos, abiertos uno a uno
+
+Ninguna fórmula cambia. Lo que cambia son los cuatro sitios donde una respuesta
+juntaba causas que se arreglan de maneras opuestas.
+
+- **La criticidad es del PAR (dato, consumidor).** `gamma` falla: para una
+  tarjeta con respaldo es opcional; para Call Wall / Put Wall es un **factor de
+  la fórmula**. Siete consumidores declaran de qué dependen y con qué nivel, y la
+  severidad se **deriva**. Con un cuarto estado, `UNKNOWN`: lo que no se ha
+  medido no se declara bloqueado, y una dependencia que sigue en la cola tampoco.
+- **Las Walls dejan de depender del ciclo de sondeo.** Los seis ingredientes se
+  arman en un snapshot coherente con tres salidas y ninguna vacía: `COMPLETO`,
+  `LKG` **con su edad**, o `NO_CALCULABLE` **nombrando el ingrediente que
+  falta**. Al servir el LKG se sirve también **su precio**: el precio entra al
+  cuadrado, y mezclarlo con la cadena de hace cuarenta segundos mide dos
+  mercados.
+- **Dark Pool separa lo de ahora de lo guardado.** Un timeout con 216 filas del
+  ciclo anterior ya no obliga a elegir entre tirar el dato o esconder el fallo:
+  `current_status`, `current_rows`, `lkg_rows`, `lkg_age`, `last_success_at` y
+  `serving`.
+- **Nueve estados del programador, y la anomalía fuera de ellos.** «Sin
+  intentos» juntaba seis situaciones con cinco remedios distintos y un defecto
+  real escondido entre ellas: `NUNCA_LLAMADA` sale ahora **como anomalía**,
+  porque un estado describe a la herramienta y una anomalía acusa al programador.
+
 ## v1.58.0 · Dónde se rompe, y qué no se borra
 
 - **El agresor: «no lo sé» no era suficiente.** v1.53.0 dejó de inventar el lado

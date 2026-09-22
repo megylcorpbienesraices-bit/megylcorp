@@ -107,8 +107,14 @@ def test_el_bloqueo_de_3_14_esta_nombrado_con_su_version_minima(declaracion):
     """«No se puede» sin decir qué falta no es accionable."""
     r314 = declaracion["ramas"]["3.14"]
     assert r314["certificable_en_windows"] is False
-    assert "pandas" in r314["bloqueado_por"]
-    assert "2.3.3" in r314["bloqueado_por"], "hace falta la versión mínima exacta"
+    bloqueo = r314["bloqueado_por"]
+    assert "pandas" in bloqueo, "hay que NOMBRAR el paquete que bloquea"
+    # Lo que se exige es que el bloqueo lleve una versión mínima EXACTA, no una
+    # concreta: clavar aquí el número obligaría a tocar este test cada vez que
+    # el paquete publique la rueda que falta, que es justo lo contrario de lo
+    # que este control defiende.
+    assert re.search(r"\b\d+\.\d+\.\d+\b", bloqueo), (
+        "hace falta la versión mínima exacta del paquete que bloquea")
 
 
 def test_la_declaracion_no_ha_caducado(declaracion):

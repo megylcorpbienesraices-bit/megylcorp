@@ -29,10 +29,13 @@ from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_val
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
                      BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE,
-                     ENDPOINT_RUNTIME, GOVERNOR, weight_of)
+                     ENDPOINT_RUNTIME, GOVERNOR, weight_of, EXPIRY_SELECTION)
 from ...core.obs import note as _obs_note, expected as _obs_expected
 from ...core.obs import get_logger as _get_logger
 from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
+from ...core import consumer_contracts as CC
+from ...core import scheduler_states as SS
+from ...core.wall_snapshot import SNAPSHOTS as WALL_SNAPSHOTS, LKG_FRESCO_S as _WALL_FRESCO_S
 
 _LOG = _get_logger("quantdata.intelligence")
 
@@ -175,6 +178,9 @@ class QuantDataIntelligence:
         self._lock = asyncio.Lock()
         self._data: Dict[str, Dict[str, Any]] = {}
         self._fetched_at: Dict[str, float] = {}
+        #: Claves con petición VIVA ahora mismo. No es telemetría: es el estado
+        #: `RUNNING` del programador, que antes no existía.
+        self._en_vuelo: set[str] = set()
         self._running = False
         self._cycle = 0
         self._burst_until = 0.0
@@ -426,7 +432,10 @@ class QuantDataIntelligence:
                                                return_exceptions=True)
                 for tool, res in zip(batch, results):
                     if isinstance(res, Exception):
-                        _obs_note(f"quantdata_intelligence:{tool.key}", res, severity="DEGRADED")
+                        # v1.59.0 · La severidad no la decide el endpoint: la
+                        # decide si ALGÚN consumidor declarado exige este dato.
+                        _obs_note(f"quantdata_intelligence:{tool.key}", res,
+                                  severity=CC.severity_for(tool.key))
             self._cycle += 1
             return {"ready": True, "fetched": len(batch), "reused": reused,
                     "deferred": max(0, len(remaining_due) - len(batch)), "cycle": self._cycle}
@@ -487,6 +496,19 @@ class QuantDataIntelligence:
         self._data[tool.key] = block
 
     async def _fetch(self, tool: QuantDataTool) -> None:
+        """Marca la petición como VIVA mientras dura, y la descarga.
+
+        v1.59.0 · `RUNNING` es uno de los nueve estados del programador y no se
+        puede deducir de nada de lo que quedaba escrito: una herramienta que está
+        llamando AHORA se leía con el resultado de su intento anterior.
+        """
+        self._en_vuelo.add(tool.key)
+        try:
+            await self._fetch_one(tool)
+        finally:
+            self._en_vuelo.discard(tool.key)
+
+    async def _fetch_one(self, tool: QuantDataTool) -> None:
         """Descarga una herramienta, reparando el cuerpo con lo que el proveedor dicta.
 
         Cinco clases de fallo, cinco tratamientos. Confundirlas fue lo que dejó
@@ -926,6 +948,11 @@ class QuantDataIntelligence:
         now = time.time()
         pausa_cuota = QUOTA.pages_paused_reason()
         tools = []
+        #: Estado de cada dato, para evaluar a los CONSUMIDORES (bloque 3). Sólo
+        #: entra lo que este carril mide de verdad: lo que no se mide se queda
+        #: fuera del mapa y el consumidor sale `UNKNOWN`, que es distinto de
+        #: salir bloqueado.
+        disponibilidad: Dict[str, str] = {}
         for key, tool in self.catalog.items():
             data = self._data.get(key) or {}
             esperado = self._waited(key, now)
@@ -948,8 +975,12 @@ class QuantDataIntelligence:
             empty = session_resolver.empty_reason(channel=tool.title)
             if route["state"] == ROUTE_INVALID:
                 state = "RUTA_INVALIDA"
-            elif data.get("ready"):
+            elif data.get("ready") and not tool.last_error:
                 state = "LIVE"
+            # v1.59.0 · Antes bastaba con que quedara dato anterior publicado para
+            # seguir diciendo LIVE aunque el último intento hubiera fallado. Eso
+            # es servir el ciclo anterior con la etiqueta del actual: lo que se
+            # está sirviendo es el último valor bueno, y se dice.
             elif tool.last_error and tool.transient_failures > 0:
                 # Timeout/red: DEGRADED con reintento programado, nunca se presenta
                 # como ruta inexistente ni se martilla cada 15 segundos.
@@ -964,11 +995,52 @@ class QuantDataIntelligence:
                 state = "SIN_DATOS"
             else:
                 state = "PENDIENTE"
+            # ═══════════════════════════════════════════════════════════
+            # v1.59.0 · BLOQUE 7 · EL ESTADO REAL, NO EL CAJÓN GENÉRICO
+            # ═══════════════════════════════════════════════════════════
+            #
+            # `state` conserva el vocabulario que ya consume la interfaz.
+            # `lifecycle` dice cuál de los NUEVE estados del programador es, con
+            # su causa, y separa lo que se está sirviendo AHORA de lo que se
+            # sirve del último ciclo bueno. La distinción importa: un refresco
+            # que falla no borra el dato anterior, pero tampoco lo convierte en
+            # dato de este ciclo.
+            fallo_actual = bool(tool.last_error)
+            filas_publicadas = int(data.get("count") or 0)
+            sirviendo_lkg = bool(data.get("ready")) and fallo_actual
+            lifecycle = SS.classify(
+                due=scheduler["due"],
+                in_flight=(key in self._en_vuelo),
+                cooldown_seconds=scheduler["cooldown_seconds"],
+                quota_paused=pausa_cuota,
+                missing_dependencies=list(data.get("lane_fields") or [])
+                if str(data.get("lane_status") or "") == "REQUISITO_AUSENTE" else [],
+                rows=(0 if fallo_actual else filas_publicadas),
+                provider_status=(tool.provider_status or
+                                 (STATUS_TRANSIENT if fallo_actual else "")),
+                lkg_rows=(filas_publicadas if sirviendo_lkg else 0),
+                lkg_age_seconds=(round(now - last, 1) if last else None),
+                fresh=(not fallo_actual),
+                ever_attempted=bool(tool.attempts or last or tool.last_error))
+            anomalia = SS.anomaly(
+                state=lifecycle["state"], due=scheduler["due"],
+                attempts=len(tool.attempts or []), eligible_seconds=esperado,
+                quota_paused=pausa_cuota)
+            criticidad = CC.criticality(key)
+            disponibilidad[key] = lifecycle["state"]
             tools.append({
                 "key": key,
                 "page": tool.page,
                 "title": tool.title,
                 "state": state,
+                # Los nueve estados del programador, con su causa.
+                "lifecycle": lifecycle,
+                # Y la anomalía, que NO es un estado: es un defecto del
+                # programador —exigible, con cuota libre y sin un solo intento—.
+                "anomaly": anomalia,
+                # Para quién es obligatorio este dato y para quién opcional. De
+                # ahí sale la severidad de su fallo, no del endpoint.
+                "criticality": criticidad,
                 "path": tool.resolved_path,
                 "age_seconds": round(now - last, 1) if last else None,
                 "rows": data.get("count"),
@@ -1010,6 +1082,30 @@ class QuantDataIntelligence:
                     tool, state, ENDPOINT_RUNTIME.get(key).snapshot(), scheduler),
             })
 
+        # ═══════════════════════════════════════════════════════════════
+        # v1.59.0 · BLOQUE 3 · LO QUE NO MIDE ESTE CARRIL
+        # ═══════════════════════════════════════════════════════════════
+        #
+        # `expiry_selection` y `underlying_price` no son herramientas del
+        # catálogo: las resuelve la terminal. Aquí sólo se declara lo que de
+        # verdad se puede comprobar desde este proceso, y lo que no, se deja
+        # FUERA del mapa. Un consumidor al que le falta una medición sale
+        # `UNKNOWN`, no `BLOCKED`: decir que las Walls están bloqueadas porque
+        # nadie preguntó por el precio sería un falso negativo.
+        sym = str(self._symbol or "").upper()
+        if sym:
+            # El registro de vencimientos SÍ es consultable, y su ausencia es
+            # una medición: sin vencimiento en pantalla no hay muro con fecha.
+            disponibilidad["expiry_selection"] = (
+                "DATA_OK" if EXPIRY_SELECTION.principal(sym) else "NO_DATA")
+            # Del precio sólo se afirma lo observado: si hay un snapshot de
+            # muros reciente, el precio entró en él. Sin snapshot no se afirma
+            # nada —ni que hay precio ni que falta—, porque este carril no lo ve.
+            edad_precio = WALL_SNAPSHOTS.age_seconds(sym)
+            if edad_precio is not None and edad_precio <= _WALL_FRESCO_S:
+                disponibilidad["underlying_price"] = (
+                    "LIVE" if edad_precio <= 60.0 else "STALE")
+
         pages = []
         by_key = {t["key"]: t for t in tools}
         for page, keys in PAGES.items():
@@ -1035,6 +1131,16 @@ class QuantDataIntelligence:
             "cycle": self._cycle,
             # Resumen accionable: qué hay que hacer y con cuántas herramientas.
             "pending_by_verdict": {k: sorted(v) for k, v in sorted(por_veredicto.items())},
+            # v1.59.0 · QUIÉN SE QUEDA SIN QUÉ. La criticidad es del PAR
+            # (dato, consumidor): el mismo fallo es opcional para quien tiene
+            # respaldo y bloqueante para quien no lo tiene.
+            "consumers": CC.evaluate_all(disponibilidad),
+            # Y los nueve estados del programador, con las anomalías aparte:
+            # una herramienta exigible, con cuota libre y sin un solo intento no
+            # está esperando, es que nadie la llama.
+            "scheduler_states": SS.summarize(
+                [{"key": t["key"], "state": (t.get("lifecycle") or {}).get("state"),
+                  "anomaly": t.get("anomaly")} for t in tools]),
             "endpoint_runtime": ENDPOINT_RUNTIME.snapshot(),
             # v1.58.0 · DÓNDE SE VA EL TIEMPO, por endpoint.
             #

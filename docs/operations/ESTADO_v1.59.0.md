@@ -1,4 +1,4 @@
-# ITM QUANT v1.58.0 · ESTADO POR MÓDULO
+# ITM QUANT v1.59.0 · ESTADO POR MÓDULO
 
 ## Los cinco niveles, y qué NO demuestra cada uno
 

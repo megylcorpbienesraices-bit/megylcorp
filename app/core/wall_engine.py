@@ -74,6 +74,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import data_lineage as DL
 from . import wall_gex as WG
+from . import wall_snapshot as WS
 from .data_lineage import LINEAGE, DERIVED, DATA_OK, NO_PROVIDER_DATA, UNAVAILABLE
 from .obs import note as _obs_note
 
@@ -644,13 +645,59 @@ def walls_from_hub(symbol: str, hub: Dict[str, Any], *, spot: Optional[float] = 
         except Exception as exc:   # noqa: BLE001
             _obs_note("wall_engine:expiry_selection", exc, severity="DEGRADED")
             pedido = None
-    return resolve_walls(symbol, exposure_rows=exposure, oi_rows=oi, spot=spot,
-                         fallback=fallback, contract_rows=contract_rows,
-                         price_as_of=price_as_of, expiry=pedido,
-                         expiry_policy=expiry_policy, ages=edades,
-                         sources={"gamma": fuente_griegas,
-                                  "open_interest": fuente_griegas,
-                                  "price": price_source or "SESSION_PRICE_PIPELINE"})
+    # ═══════════════════════════════════════════════════════════════════════
+    # v1.59.0 · EL SNAPSHOT DECIDE, NO EL CICLO DE SONDEO
+    # ═══════════════════════════════════════════════════════════════════════
+    #
+    # Las Walls se calculaban con lo que hubiera llegado EN ESTE ciclo. Si una
+    # petición moría, el panel salía con «sin cálculo de muros en este ciclo»,
+    # que no dice si faltó la gamma, el OI, el vencimiento o el precio, ni si
+    # había muros válidos hace treinta segundos.
+    #
+    # Ahora se arma un snapshot coherente y se resuelve en uno de tres estados:
+    # COMPLETO (se calcula), LKG (el ciclo perdió algo y hay uno anterior
+    # válido, que se publica CON SU EDAD) o NO_CALCULABLE (se nombran los
+    # ingredientes que faltan, uno a uno). Ninguno de los tres es una caja
+    # vacía. La FÓRMULA no cambia: esto prepara su entrada.
+    instantanea = WS.build(str(symbol or "").upper(),
+                           contract_rows=contract_rows, spot=spot,
+                           price_as_of=price_as_of, expiry=pedido,
+                           source=fuente_griegas, ages=edades)
+    resuelta = WS.resolve(str(symbol or "").upper(), instantanea)
+    filas_snapshot = list(resuelta.get("rows") or [])
+    # El snapshot es COHERENTE o no es nada: si se sirve el anterior, se sirve
+    # ENTERO. Tomar sus filas y el precio de ahora mezclaría una cadena de hace
+    # cuarenta segundos con un spot de este instante, y el precio entra al
+    # cuadrado en la exposición: sería una wall medida sobre dos mercados.
+    precio_snapshot = resuelta.get("spot")
+    out = resolve_walls(symbol, exposure_rows=exposure, oi_rows=oi,
+                        spot=(precio_snapshot if precio_snapshot is not None else spot),
+                        fallback=fallback,
+                        contract_rows=(filas_snapshot or contract_rows),
+                        price_as_of=(resuelta.get("price_as_of") or price_as_of),
+                        expiry=(resuelta.get("expiry") or pedido),
+                        expiry_policy=expiry_policy, ages=edades,
+                        sources={"gamma": fuente_griegas,
+                                 "open_interest": fuente_griegas,
+                                 "price": price_source or "SESSION_PRICE_PIPELINE"})
+    out["snapshot"] = {k: v for k, v in resuelta.items() if k != "rows"}
+    out["snapshot_state"] = resuelta.get("state")
+    etiqueta = WS.verdict_label(resuelta, str(out.get("verdict") or ""))
+    out["verdict_label"] = etiqueta
+    for lado in (CALL_WALL, PUT_WALL):
+        muro = out.get(lado)
+        if not isinstance(muro, dict):
+            continue
+        muro["snapshot_state"] = resuelta.get("state")
+        muro["snapshot_age_seconds"] = resuelta.get("age_seconds")
+        muro["from_lkg"] = bool(resuelta.get("from_lkg"))
+        muro["verdict_label"] = etiqueta
+        if resuelta.get("state") == WS.NO_CALCULABLE:
+            # Ya no hay caja vacía: se dice QUÉ ingrediente falta.
+            muro["ready"] = False
+            muro["missing_ingredients"] = list(resuelta.get("missing_names") or [])
+            muro["detail"] = resuelta.get("detail")
+    return out
 
 
 def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -795,6 +842,11 @@ def wall_audit(walls: Dict[str, Any], hub: Optional[Dict[str, Any]] = None) -> D
         # calculó. Un muro provisional se sigue pudiendo operar; lo que no se
         # puede es presentarlo como si la cadena estuviera completa.
         "verdict": w.get("verdict") or contrato.get("verdict"),
+        # v1.59.0 · el estado del SNAPSHOT y la etiqueta que ve el operador:
+        # COMPLETO, LKG con su edad, o NO CALCULABLE con lo que falta.
+        "verdict_label": w.get("verdict_label"),
+        "snapshot": w.get("snapshot") or {},
+        "snapshot_state": w.get("snapshot_state"),
         "failed_controls": contrato.get("failed_controls") or [],
         "controls": contrato.get("controls") or [],
         "gex_formula": contrato.get("formula") or WG.FORMULA,

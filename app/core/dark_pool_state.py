@@ -108,6 +108,38 @@ def _lineage_state(state: str) -> str:
     }.get(state, NO_PROVIDER_DATA)
 
 
+def _current_status(provider_status: str, generic: str, rows: int) -> str:
+    """Qué pasó en ESTE refresco, sin mirar lo que hubiera guardado antes.
+
+    Los tres significados que no se pueden mezclar:
+
+        LIVE            respondió y trajo filas
+        NO_DATA         respondió BIEN y no hay filas (no es una avería)
+        PROVIDER_ERROR  timeout o 5xx: no se sabe si hay filas
+
+    Distinguir el segundo del tercero es lo que evita mandar a nadie a buscar
+    una avería en un mercado que simplemente no tiene actividad fuera de bolsa.
+    """
+    st = str(provider_status or "").upper()
+    if st in ("PROVIDER_ERROR", "TRANSIENT", "MISSING_TOOL", "TIMEOUT"):
+        return PROVIDER_ERROR
+    if st == "REQUEST_INVALID":
+        return REQUEST_INVALID
+    if str(generic or "") == LINEAGE_PROVIDER_ERROR:
+        return PROVIDER_ERROR
+    if int(rows or 0) > 0:
+        return DIRECT_PROVIDER_OK
+    return NO_DATOS_ACTUAL
+
+
+#: Un refresco que respondió bien y no trajo filas. No es una avería y no puede
+#: compartir etiqueta con un timeout.
+NO_DATOS_ACTUAL = "NO_DATA"
+
+#: Un refresco que falló habiendo dato bueno guardado.
+STALE_LKG = "STALE_LKG"
+
+
 def lane_state(block: Any, classification: Dict[str, Any], *,
                market_open: Optional[bool] = None,
                unclassified: int = 0, classified: int = 0) -> Dict[str, Any]:
@@ -191,6 +223,42 @@ def lane_state(block: Any, classification: Dict[str, Any], *,
         "capability": cls.get("capability"),
         "rows": rows,
         "age_seconds": cls.get("age_seconds"),
+        # ═══════════════════════════════════════════════════════════════════
+        # v1.59.0 · ESTADO ACTUAL Y ÚLTIMO VALOR BUENO, SIN MEZCLAR
+        # ═══════════════════════════════════════════════════════════════════
+        #
+        # `state` y `rows` respondían a dos preguntas distintas con un solo par
+        # de campos, y eso obligaba a elegir cuál contar. Un timeout de ahora
+        # con cien filas del ciclo anterior se leía como SIN_DATOS —tirando un
+        # dato bueno— o como OK —escondiendo que el refresco falló—. Las dos
+        # lecturas son falsas.
+        #
+        # Son CINCO hechos independientes y cada uno tiene su campo:
+        #
+        #   current_status   qué pasó en ESTE refresco
+        #   current_rows     filas que trajo ESTE refresco (0 si falló)
+        #   lkg_rows         filas del último refresco que SÍ funcionó
+        #   lkg_age          cuántos segundos tiene ese último bueno
+        #   last_success_at  cuándo fue
+        #
+        # Con eso, los tres significados dejan de confundirse:
+        #   HTTP 200 con cero filas   → current_status NO_DATA, y el carril
+        #                               declara SIN_DATOS_REALES: no hay avería
+        #   timeout/5xx con LKG       → current_status PROVIDER_ERROR y
+        #                               `serving` STALE_LKG: el refresco falló y
+        #                               lo que se ve es el último ciclo bueno
+        #   timeout/5xx sin LKG       → current_status PROVIDER_ERROR y no hay
+        #                               nada que servir
+        "current_status": _current_status(provider_status, generic, rows),
+        "current_rows": (rows if not fallo_de_llamada else 0),
+        "lkg_rows": (rows if fallo_de_llamada and hay_dato_bueno else
+                     (rows if not fallo_de_llamada else 0)),
+        "lkg_age": cls.get("age_seconds"),
+        # Y lo que el operador está viendo AHORA, que es la conclusión de los
+        # cinco hechos anteriores y no un sexto hecho independiente.
+        "serving": ("LIVE" if (not fallo_de_llamada and rows > 0) else
+                    (STALE_LKG if (fallo_de_llamada and hay_dato_bueno) else "NONE")),
+        "last_success_at": block.get("fetched_at") or cls.get("last_success_at"),
         "endpoint": block.get("path"),
         "request_body": block.get("request_body"),
         "unclassified": int(unclassified),

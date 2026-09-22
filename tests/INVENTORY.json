@@ -3698,8 +3698,56 @@
     "test_un_plazo_agotado_dice_QUE_plazo_expiro",
     "test_una_respuesta_real_vuelve_a_bajar_el_plazo"
    ]
+  },
+  "tests/test_v1590_criticidad_y_estados.py": {
+   "casos": 54,
+   "tests": [
+    "test_al_cambiar_de_activo_el_snapshot_anterior_se_tira",
+    "test_cada_causa_tiene_su_estado",
+    "test_el_auditor_publica_los_nueve_estados_y_la_criticidad",
+    "test_el_ciclo_completo_se_calcula_y_se_guarda",
+    "test_el_mismo_dato_es_obligatorio_para_uno_y_opcional_para_otro",
+    "test_el_motor_de_muros_publica_el_estado_del_snapshot",
+    "test_el_precio_sin_hora_de_captura_no_vale_porque_entra_al_cuadrado",
+    "test_el_recuento_del_auditor_cuadra_con_sus_propias_filas",
+    "test_el_resumen_cuenta_estados_y_anomalias_por_separado",
+    "test_el_snapshot_de_un_activo_no_respalda_a_otro",
+    "test_en_frio_el_auditor_no_declara_bloqueado_a_nadie_por_no_haber_medido",
+    "test_entre_fresco_y_maximo_el_muro_se_publica_como_provisional",
+    "test_exigible_y_sin_un_solo_intento_no_es_que_el_proveedor_calle",
+    "test_gamma_caida_bloquea_las_walls_y_no_la_seccion_que_tiene_respaldo",
+    "test_la_anomalia_es_el_defecto_que_el_cajon_generico_escondia",
+    "test_la_formula_de_los_muros_no_la_toca_este_bloque",
+    "test_la_severidad_se_deriva_de_quien_lo_exige_y_no_del_endpoint",
+    "test_las_griegas_por_contrato_se_derivan_de_quien_las_trae",
+    "test_lo_que_NO_es_una_anomalia",
+    "test_lo_que_falta_es_opcional_degrada_pero_no_bloquea",
+    "test_lo_que_no_se_ha_medido_no_puede_declararse_bloqueado",
+    "test_los_nueve_estados_existen_y_no_se_solapan",
+    "test_media_cadena_no_es_cadena",
+    "test_ninguna_herramienta_del_catalogo_se_queda_sin_estado",
+    "test_pasado_el_calentamiento_pero_no_los_tres_minutos_avisa_sin_gritar",
+    "test_respondio_bien_y_no_hay_actividad_no_es_una_averia",
+    "test_sin_nada_el_muro_dice_que_ingrediente_falta_y_no_una_caja_vacia",
+    "test_sin_snapshot_anterior_se_nombra_cada_ingrediente_que_falta",
+    "test_solo_se_guarda_lo_completo",
+    "test_todo_consumidor_declara_que_hace_cuando_le_falta_algo",
+    "test_trace_declara_que_el_interval_map_es_la_autoridad",
+    "test_un_400_no_se_rebaja_por_tener_filas_viejas",
+    "test_un_carril_sano_sirve_lo_de_ahora_y_no_un_recuerdo",
+    "test_un_ciclo_perdido_no_borra_los_muros_y_declara_su_edad",
+    "test_un_ciclo_perdido_sigue_dando_muro_y_lo_dice",
+    "test_un_consumidor_sin_ninguna_dependencia_medida_no_sale_listo",
+    "test_un_dato_viejo_declarado_sigue_sosteniendo_al_consumidor",
+    "test_un_fallo_actual_no_borra_el_ultimo_dato_bueno",
+    "test_un_fallo_sin_nada_guardado_no_tiene_nada_que_servir",
+    "test_un_lkg_demasiado_viejo_deja_de_sostener_el_muro",
+    "test_un_timeout_con_dato_guardado_separa_las_dos_preguntas",
+    "test_una_dependencia_todavia_en_la_cola_tampoco_bloquea",
+    "test_una_peticion_en_vuelo_manda_sobre_el_resultado_anterior"
+   ]
   }
  },
- "total_minimo": 3117,
- "version": "1.58.0"
+ "total_minimo": 3171,
+ "version": "1.59.0"
 }

@@ -1,14 +1,85 @@
-# VALIDACIÓN PRE-VPS · ITM QUANT v1.58.0
+# VALIDACIÓN PRE-VPS · ITM QUANT v1.59.0
 
-Release: `ITM_QUANT_v1.58.0_PRE_VPS` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.59.0_PRE_VPS` · Alcance: `MULTI_ASSET`
 
-> Documento acumulativo. La sección **A19** es la de esta release.
+> Documento acumulativo. La sección **A20** es la de esta release.
 
 ## Suite
 
-- Inventario nominal: **3117 casos / 192 ficheros**
-- Particiones: 21 · `plan_sha256`: `45607865fb44cbd8610a163e94034e8f971c54a11b3e14df4f53810536efbc3c`
+- Inventario nominal: **3171 casos / 193 ficheros**
+- Particiones: 21 · `plan_sha256`: `a4870fa16f26f56f822635a23b8692a07ecd08610dd84dd1ea48de3a7547b321`
 - Resultado: **PASS**
+
+---
+
+## A20 · v1.59.0 · Cuatro cajones genéricos, abiertos uno a uno
+
+### Qué se certifica
+
+Cincuenta y cuatro casos en `tests/test_v1590_criticidad_y_estados.py`, un
+bloque por cajón más la integración de los cuatro.
+
+**Bloque 3 · criticidad por consumidor.** El mismo dato obligatorio para un
+consumidor y opcional para otro (`gex_by_strike`: exige `EXPOSICION`, contrasta
+`WALLS`). La severidad DERIVADA de quién lo exige, no etiquetada en el endpoint.
+Gamma caída bloquea las Walls y no toca a la sección que tiene respaldo. Un dato
+`STALE` declarado sigue sosteniendo al consumidor —quitarlo dejaría la pantalla
+en blanco por un ciclo perdido—. Y las dos reglas que impiden el falso negativo:
+**lo no medido nunca se declara bloqueado**, y una dependencia todavía en la
+cola tampoco; `COOLDOWN` sí, porque viene de fallar.
+
+**Bloque 4 · snapshot de muros.** El ciclo completo se calcula y se guarda. El
+ciclo perdido sigue dando muro y **declara su edad**. Sin snapshot anterior se
+nombra cada ingrediente que falta, uno a uno. Sólo se guarda lo COMPLETO —un
+respaldo incompleto no respalda—. Un LKG por encima del tope de 900 s deja de
+sostener el muro; entre 180 s y 900 s sale como **WALL PROVISIONAL**. El precio
+sin hora de captura no vale porque entra al cuadrado. Media cadena no es cadena.
+El snapshot de un activo no respalda a otro, y al cambiar de activo se tira.
+
+**Bloque 5 · Dark Pool.** Un timeout con cien filas guardadas separa las dos
+preguntas: `current_status=PROVIDER_ERROR`, `current_rows=0`, `lkg_rows=100`,
+`lkg_age=42.0`, `serving=STALE_LKG`, y la sección **no** se declara rota. Un
+HTTP 200 con cero filas es `NO_DATA` y no una avería. Un fallo sin nada guardado
+no tiene nada que servir. Un 400 no se rebaja por tener filas antiguas.
+
+**Bloque 7 · estados del programador.** Los nueve existen y no se solapan
+(servir y esperar son excluyentes). Cada causa tiene su estado, parametrizado.
+Una petición en vuelo manda sobre el resultado anterior. Un fallo actual no
+borra el último dato bueno. **Exigible y sin un solo intento no es que el
+proveedor calle**: es `SCHEDULED` con `never_attempted`. La anomalía
+`NUNCA_LLAMADA` sale a los 60 s como `WARN` y a los 180 s como `CRITICAL`, y
+**no** se dispara con intentos hechos, con la cadencia sin vencer, con la cuota
+agotada ni dentro del calentamiento.
+
+**Integración.** El Auditor publica los nueve estados, la criticidad por
+herramienta y los consumidores; su recuento cuadra con sus propias filas;
+ninguna herramienta se queda sin causa declarada; y en frío nadie se declara
+bloqueado sin nombrar qué falta. En el motor de muros: `snapshot_state`,
+`verdict_label` y `from_lkg` por lado, el LKG sirviendo **su** precio y su
+cadena, y `wall_gex` intacto como única autoridad de la fórmula.
+
+### Dos defectos encontrados al escribir la regresión
+
+1. Una herramienta con dato anterior publicado y el último intento fallido
+   seguía diciendo **LIVE**: era servir el ciclo anterior con la etiqueta del
+   actual.
+2. La wall servida desde LKG salía **sin precio**, porque se tomaban sus filas
+   con el spot del ciclo actual. Un snapshot es coherente o no es nada.
+
+### Qué NO se certifica aquí
+
+- El transporte en producción: sigue pendiente la evidencia **LIVE en Windows**
+  del certificador de v1.58.0.
+- Que un consumidor en `READY` dibuje bien: `READY` dice que sus dependencias
+  están disponibles, no que el resultado sea correcto.
+- Ninguna fórmula: esta release no toca ninguna.
+
+### Entorno de ejecución
+
+La suite se corrió completa en el contenedor de desarrollo (**CPython
+3.11.15**): 3120 pasados, 51 saltados, 0 fallos. El intérprete **certificado**
+sigue siendo **CPython 3.13.12**, declarado en `.python-runtime.json` y exigido
+por `windows_runtime_guard()`; esta corrida no lo sustituye ni lo modifica.
 
 ---
 
