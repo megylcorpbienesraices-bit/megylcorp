@@ -3177,12 +3177,21 @@
    ]
   },
   "tests/test_v1570_contrato_de_muros.py": {
-   "casos": 37,
+   "casos": 52,
    "tests": [
+    "test_NO_es_gamma_agregada_por_oi_agregado",
+    "test_cada_contrato_usa_SU_multiplicador",
+    "test_cada_strike_del_vencimiento_entra_en_el_ranking",
     "test_call_wall_es_el_strike_de_mayor_gex_de_calls",
     "test_con_los_diez_datos_la_wall_es_CONFIRMADA",
+    "test_dos_contratos_distintos_en_el_mismo_strike_no_se_pisan",
+    "test_el_control_se_llama_por_lo_que_hace",
+    "test_el_gex_del_strike_es_la_SUMA_de_sus_contratos",
     "test_el_hub_pasa_las_griegas_por_contrato_al_motor",
+    "test_el_lado_de_las_calls_conserva_su_signo_positivo",
+    "test_el_mismo_contrato_repetido_sigue_contando_una_vez",
     "test_el_multiplicador_no_se_da_por_supuesto",
+    "test_el_muro_lo_decide_la_suma_y_no_el_contrato_mayor",
     "test_el_muro_publica_los_cinco_numeros_que_lo_sostienen",
     "test_el_precio_entra_al_cuadrado",
     "test_el_precio_llega_con_su_hora_desde_la_terminal",
@@ -3193,16 +3202,20 @@
     "test_la_auditoria_publica_el_veredicto_y_los_diez_controles",
     "test_la_convencion_se_declara_y_no_se_presenta_como_medicion",
     "test_la_formula_es_la_publicada",
+    "test_la_gamma_publicada_reproduce_la_suma",
+    "test_la_seleccion_por_modulo_esta_escrita_en_el_codigo",
     "test_la_wall_se_declara_como_probabilidad_no_como_barrera",
     "test_los_dos_lados_se_calculan_por_separado",
     "test_no_es_el_max_pain",
     "test_no_es_el_strike_con_mayor_interes_abierto",
     "test_no_es_el_strike_con_mayor_volumen",
     "test_no_es_la_gamma_neta",
+    "test_no_se_descarta_ningun_strike_por_su_distancia_al_precio",
     "test_no_se_mezclan_vencimientos_en_silencio",
+    "test_ordenar_por_el_signo_crudo_elegiria_la_put_MAS_PEQUENA",
     "test_put_wall_es_el_strike_de_mayor_gex_de_puts",
+    "test_put_wall_por_valor_absoluto_con_gamma_firmada",
     "test_se_puede_pedir_el_viernes_semanal",
-    "test_sin_cobertura_fuera_del_dinero_la_wall_es_PROVISIONAL",
     "test_sin_convencion_declarada_solo_hay_gamma_matematica",
     "test_sin_griegas_por_contrato_la_via_anterior_sostiene_la_pantalla",
     "test_sin_iv_ni_delta_la_gamma_no_se_puede_validar",
@@ -3213,8 +3226,10 @@
     "test_un_dato_viejo_deja_la_wall_PROVISIONAL",
     "test_un_factor_que_falta_no_es_un_cero",
     "test_un_hueco_en_la_escalera_de_strikes_deja_la_wall_PROVISIONAL",
+    "test_un_muro_puede_caer_al_otro_lado_del_precio_y_se_declara",
     "test_un_precio_sin_hora_deja_la_wall_PROVISIONAL",
     "test_un_vencimiento_pedido_que_no_esta_se_declara_y_no_apaga_la_pantalla",
+    "test_una_cadena_que_no_llega_lejos_del_precio_deja_la_wall_PROVISIONAL",
     "test_una_wall_PROVISIONAL_se_sigue_publicando"
    ]
   },
@@ -3643,6 +3658,6 @@
    ]
   }
  },
- "total_minimo": 3057,
- "version": "1.57.1"
+ "total_minimo": 3072,
+ "version": "1.57.2"
 }

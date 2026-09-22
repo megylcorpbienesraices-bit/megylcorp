@@ -298,10 +298,10 @@ def test_un_hueco_en_la_escalera_de_strikes_deja_la_wall_PROVISIONAL():
     assert fila["evidence"]["gaps"]
 
 
-def test_sin_cobertura_fuera_del_dinero_la_wall_es_PROVISIONAL():
+def test_una_cadena_que_no_llega_lejos_del_precio_deja_la_wall_PROVISIONAL():
     filas = [r for r in _cadena() if 99.0 <= r["strike"] <= 101.0]
     out = _muros(contract_rows=filas)
-    _falla(out, "STRIKES_FUERA_DEL_DINERO")
+    _falla(out, "TODOS_LOS_STRIKES_DEL_VENCIMIENTO")
 
 
 def test_un_contrato_sin_interes_abierto_deja_la_wall_PROVISIONAL():
@@ -457,3 +457,215 @@ def test_el_precio_llega_con_su_hora_desde_la_terminal():
     bloque = bloque[:bloque.index("payload[\"levels\"] = kept")]
     assert "price_as_of=price_as_of" in bloque
     assert "price_age_s=price_age_s" in bloque
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7 · v1.57.2 · LAS TRES CONDICIONES DEL CONTRATO, ATADAS UNA A UNA
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#   1  GEX_strike = Σ( gamma_i × OI_i × multiplicador_i × precio² × 0.01 )
+#      contrato a contrato, y DESPUÉS sumado por strike. Nunca
+#      `gamma agregada × OI agregado`.
+#   2  Put Wall por MAYOR VALOR ABSOLUTO, aunque la exposición venga firmada.
+#   3  TODOS los strikes del vencimiento, sin filtrar por el precio.
+
+
+# ── 1 · la suma es por contrato ────────────────────────────────────────────
+
+def test_el_gex_del_strike_es_la_SUMA_de_sus_contratos():
+    """Dos contratos en el mismo strike: el GEX es la suma de los dos términos."""
+    filas = [
+        _contrato(105.0, "call", gamma=0.10, oi=100.0),
+        dict(_contrato(105.0, "call", gamma=0.01, oi=1000.0), option_symbol="MINI105C"),
+    ]
+    filas[0]["option_symbol"] = "STD105C"
+    fila = WG.rank_side(WG.dedupe_contracts(filas), side=WG.CALL, spot=SPOT)[0]
+    assert fila["contracts"] == 2
+    assert fila["gex"] == pytest.approx((0.10 * 100.0 + 0.01 * 1000.0) * 100.0
+                                        * SPOT ** 2 * 0.01)
+    assert fila["open_interest"] == pytest.approx(1100.0)
+
+
+def test_NO_es_gamma_agregada_por_oi_agregado():
+    """El atajo que da un número plausible y falso.
+
+    Σ(γᵢ·OIᵢ) = 0,10·100 + 0,01·1000 = 20
+    γ sumada × OI sumado   = 0,11 · 1100 = 121      ← seis veces más
+    γ media  × OI sumado   = 0,055 · 1100 = 60,5    ← tres veces más
+
+    Ninguno de los dos corresponde a una posición real: mezclan la gamma de un
+    contrato con el interés abierto de otro.
+    """
+    filas = [dict(_contrato(105.0, "call", gamma=0.10, oi=100.0), option_symbol="A"),
+             dict(_contrato(105.0, "call", gamma=0.01, oi=1000.0), option_symbol="B")]
+    fila = WG.rank_side(WG.dedupe_contracts(filas), side=WG.CALL, spot=SPOT)[0]
+    k = 100.0 * SPOT ** 2 * 0.01
+    assert fila["gex"] == pytest.approx(20.0 * k)
+    assert fila["gex"] != pytest.approx(121.0 * k), "se agregó antes de multiplicar"
+    assert fila["gex"] != pytest.approx(60.5 * k), "se usó la gamma media"
+
+
+def test_la_gamma_publicada_reproduce_la_suma():
+    """Con varios contratos, la gamma del strike es la ponderada por OI.
+
+    Es la única que cumple Σ(γᵢ·OIᵢ) = γ_publicada × OI_total; cualquier otra
+    media haría que los cinco números publicados no cuadraran entre sí.
+    """
+    filas = [dict(_contrato(105.0, "call", gamma=0.10, oi=100.0), option_symbol="A"),
+             dict(_contrato(105.0, "call", gamma=0.01, oi=1000.0), option_symbol="B")]
+    fila = WG.rank_side(WG.dedupe_contracts(filas), side=WG.CALL, spot=SPOT)[0]
+    assert fila["gamma_method"] == "media ponderada por interés abierto"
+    reconstruido = WG.gamma_exposure(gamma=fila["gamma"],
+                                     open_interest=fila["open_interest"],
+                                     spot=SPOT, multiplier=100.0)
+    assert reconstruido == pytest.approx(fila["gex"])
+
+
+def test_cada_contrato_usa_SU_multiplicador():
+    """`multiplicador_i`: una mini de 10 no se cuenta como una estándar de 100."""
+    filas = [dict(_contrato(105.0, "call", gamma=0.05, oi=100.0),
+                  option_symbol="STD", multiplier=100.0),
+             dict(_contrato(105.0, "call", gamma=0.05, oi=100.0),
+                  option_symbol="MINI", multiplier=10.0)]
+    fila = WG.rank_side(WG.dedupe_contracts(filas), side=WG.CALL, spot=SPOT)[0]
+    esperado = (0.05 * 100.0 * 100.0 + 0.05 * 100.0 * 10.0) * SPOT ** 2 * 0.01
+    assert fila["contracts"] == 2
+    assert fila["gex"] == pytest.approx(esperado)
+    assert sorted(fila["multipliers"]) == [10.0, 100.0]
+
+
+def test_dos_contratos_distintos_en_el_mismo_strike_no_se_pisan():
+    """Antes ganaba el último visto: el otro desaparecía sin dejar rastro."""
+    filas = [dict(_contrato(105.0, "call", gamma=0.05, oi=4000.0), option_symbol="STD"),
+             dict(_contrato(105.0, "call", gamma=0.05, oi=4000.0),
+                  option_symbol="MINI", multiplier=10.0)]
+    uno = WG.rank_side(WG.dedupe_contracts([filas[0]]), side=WG.CALL, spot=SPOT)[0]
+    dos = WG.rank_side(WG.dedupe_contracts(filas), side=WG.CALL, spot=SPOT)[0]
+    assert dos["gex"] > uno["gex"]
+
+
+def test_el_mismo_contrato_repetido_sigue_contando_una_vez():
+    """La suma no puede abrir la puerta a contar prints como contratos."""
+    fila = dict(_contrato(105.0, "call", gamma=0.05, oi=4000.0), option_symbol="STD105C")
+    uno = WG.rank_side(WG.dedupe_contracts([fila]), side=WG.CALL, spot=SPOT)[0]
+    cien = WG.rank_side(WG.dedupe_contracts([dict(fila) for _ in range(100)]),
+                        side=WG.CALL, spot=SPOT)[0]
+    assert cien["contracts"] == 1
+    assert cien["gex"] == pytest.approx(uno["gex"])
+
+
+def test_el_muro_lo_decide_la_suma_y_no_el_contrato_mayor():
+    """Un strike puede ganar por la SUMA de dos contratos medianos."""
+    filas = []
+    for k in range(90, 111):
+        filas.append(_contrato(float(k), "call", gamma=0.010, oi=1000.0))
+        filas.append(_contrato(float(k), "put", gamma=0.010, oi=1000.0))
+    for r in filas:
+        r["option_symbol"] = f"X{r['strike']}{r['option_type'][0].upper()}"
+    # 104: un solo contrato grande. 106: dos medianos que suman más.
+    filas.append(dict(_contrato(104.0, "call", gamma=0.030, oi=1000.0), option_symbol="G104"))
+    filas.append(dict(_contrato(106.0, "call", gamma=0.018, oi=1000.0), option_symbol="A106"))
+    filas.append(dict(_contrato(106.0, "call", gamma=0.018, oi=1000.0),
+                      option_symbol="B106", multiplier=100.0))
+    out = _muros(contract_rows=filas)
+    assert out[WG.CALL_WALL]["strike"] == 106.0, "el muro no se decidió por la suma"
+    assert out[WG.CALL_WALL]["contracts"] == 3
+
+
+# ── 2 · Put Wall por valor absoluto, con exposición firmada ───────────────
+
+def test_put_wall_por_valor_absoluto_con_gamma_firmada():
+    """Si las puts llegan con gamma negativa, el muro no cambia de sitio."""
+    filas = _cadena()
+    for r in filas:
+        if r["option_type"] == "put":
+            r["gamma"] = -abs(r["gamma"])          # el proveedor firma el lado
+    out = _muros(contract_rows=filas)
+    assert out[WG.PUT_WALL]["strike"] == 95.0
+    assert out[WG.PUT_WALL]["gex"] > 0, "la magnitud se publica en positivo"
+
+
+def test_ordenar_por_el_signo_crudo_elegiria_la_put_MAS_PEQUENA():
+    """La prueba que distingue |GEX| de GEX con signo.
+
+        strike 95 → gex_signed = −2.000.000      ← el muro
+        strike 97 → gex_signed =   −100.000
+
+    Con el signo crudo gana 97, porque −100.000 > −2.000.000. Es el error que
+    esta prueba existe para impedir, y sólo se ve con un lado firmado.
+    """
+    filas = []
+    for k in range(90, 111):
+        filas.append(_contrato(float(k), "call", gamma=0.001, oi=10.0))
+        filas.append(_contrato(float(k), "put", gamma=-0.001, oi=10.0))
+    filas.append(_contrato(95.0, "put", gamma=-0.200, oi=10_000.0))
+    filas.append(_contrato(97.0, "put", gamma=-0.010, oi=10_000.0))
+    out = _muros(contract_rows=filas)
+    muro = out[WG.PUT_WALL]
+    assert muro["strike"] == 95.0, "se ordenó por el signo, no por el módulo"
+    assert muro["gex_signed"] < 0, "bajo la convención declarada las puts restan"
+    assert abs(muro["gex_signed"]) == pytest.approx(muro["gex"])
+    assert muro["selection"] == "MAYOR_VALOR_ABSOLUTO_DEL_LADO"
+    # Y el segundo del ranking es el de MENOR módulo, no el de mayor signo.
+    assert muro["runner_up"]["strike"] == 97.0
+    assert muro["gex"] > muro["runner_up"]["gex"]
+
+
+def test_el_lado_de_las_calls_conserva_su_signo_positivo():
+    out = _muros()
+    assert out[WG.CALL_WALL]["gex_signed"] > 0
+    assert out[WG.PUT_WALL]["gex_signed"] < 0
+    assert out[WG.CALL_WALL]["gex"] > 0 and out[WG.PUT_WALL]["gex"] > 0
+
+
+def test_la_seleccion_por_modulo_esta_escrita_en_el_codigo():
+    src = Path("app/core/wall_gex.py").read_text(encoding="utf-8")
+    assert "-abs(f[\"gex\"] or 0.0)" in src or "-abs(f['gex'] or 0.0)" in src, \
+        "el orden tiene que ser por valor absoluto"
+
+
+# ── 3 · todos los strikes del vencimiento, sin filtrar por precio ─────────
+
+def test_el_control_se_llama_por_lo_que_hace():
+    """`STRIKES_FUERA_DEL_DINERO` describía una regla distinta de la aplicada."""
+    assert "TODOS_LOS_STRIKES_DEL_VENCIMIENTO" in WG.CONTROL_KEYS
+    assert "STRIKES_FUERA_DEL_DINERO" not in WG.CONTROL_KEYS
+    src = Path("app/core/wall_gex.py").read_text(encoding="utf-8")
+    ejecutable = "\n".join(l for l in src.splitlines()
+                           if not l.strip().startswith("#"))
+    assert "STRIKES_FUERA_DEL_DINERO" not in ejecutable
+
+
+def test_no_se_descarta_ningun_strike_por_su_distancia_al_precio():
+    out = _muros()
+    fila = next(c for c in out["controls"]
+                if c["control"] == "TODOS_LOS_STRIKES_DEL_VENCIMIENTO")
+    ev = fila["evidence"]
+    assert fila["ok"] is True
+    assert ev["descartados_por_precio"] == 0
+    assert ev["evaluados_calls"] == ev["strikes_con_calls"] == 21
+    assert ev["evaluados_puts"] == ev["strikes_con_puts"] == 21
+    assert "NINGUNO" in ev["filtro_por_precio"]
+
+
+def test_cada_strike_del_vencimiento_entra_en_el_ranking():
+    """Los 21, del más profundo ITM al más lejano OTM, en los dos lados."""
+    contratos = WG.dedupe_contracts(_cadena())
+    esperados = {float(k) for k in range(90, 111)}
+    for lado in (WG.CALL, WG.PUT):
+        vistos = {f["strike"] for f in WG.rank_side(contratos, side=lado, spot=SPOT)}
+        assert vistos == esperados, f"faltan strikes en {lado}: {esperados - vistos}"
+
+
+def test_un_muro_puede_caer_al_otro_lado_del_precio_y_se_declara():
+    """El máximo es el máximo. Si está atravesado se dice, no se filtra."""
+    filas = []
+    for k in range(90, 111):
+        filas.append(_contrato(float(k), "call", gamma=0.001, oi=10.0))
+        filas.append(_contrato(float(k), "put", gamma=0.001, oi=10.0))
+    filas.append(_contrato(93.0, "call", gamma=0.300, oi=20_000.0))   # muy por debajo
+    out = _muros(contract_rows=filas)
+    muro = out[WG.CALL_WALL]
+    assert muro["strike"] == 93.0
+    assert muro["position"] == "BELOW"
+    assert muro["crossed"] is True

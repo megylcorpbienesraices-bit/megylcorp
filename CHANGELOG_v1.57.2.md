@@ -1,10 +1,95 @@
-# ITM QUANT MULTI ASSET · v1.57.1 — Un runtime que Windows puede instalar
+# ITM QUANT MULTI ASSET · v1.57.2 — La suma por contrato, el módulo y el nombre
 
-Release: `ITM_QUANT_v1.57.1_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.57.2_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+
+**No cambia la metodología de walls.** El concepto de Call Wall y Put Wall es el
+mismo de v1.57.0; esto cierra tres condiciones del contrato que no estaban
+cumplidas al pie de la letra.
 
 ---
 
-## 0 · RUNTIME CERTIFICADO · 3.12.14 → 3.13.12
+## 0 · LAS TRES CONDICIONES DEL CONTRATO DE WALLS
+
+### 1 · El GEX se SUMA por contrato dentro del strike
+
+```
+GEX_strike = Σ( gamma_i × OI_i × multiplicador_i × precio² × 0.01 )
+```
+
+El cálculo ya era por contrato —nunca `gamma agregada × OI agregado`— pero el
+código **asignaba en vez de acumular**:
+
+```python
+slot["gex"] = round(gex, 6)      # ← el último contrato ganaba
+```
+
+Con un contrato por (vencimiento, strike, tipo) el número salía bien, y eso es
+precisamente lo que hacía peligroso el atajo: **funciona hasta que hay dos**. Un
+segundo contrato en el mismo strike —una mini junto a la estándar— se perdía en
+silencio.
+
+Tres cosas cambian con la suma:
+
+* **el multiplicador es por contrato** (`multiplicador_i`): una mini de 10 ya no
+  se cuenta como una estándar de 100;
+* **la identidad del contrato** es su símbolo de opción cuando viene, y si no
+  (vencimiento, strike, tipo, **multiplicador**). Con la clave corta, una mini y
+  una estándar del mismo strike colisionaban y una desaparecía;
+* **la gamma publicada del strike** es la media ponderada por interés abierto,
+  que es la única que reproduce la suma: `Σ(γᵢ·OIᵢ) = γ_pub × OI_total`. Con
+  cualquier otra media, los cinco números del panel no cuadrarían entre sí.
+
+La prueba que lo ata mide los tres caminos sobre los mismos datos:
+
+```
+Σ(γᵢ·OIᵢ)              = 0,10·100 + 0,01·1000 = 20      ← el correcto
+γ sumada × OI sumado   = 0,11 · 1100          = 121     ← seis veces más
+γ media  × OI sumado   = 0,055 · 1100         = 60,5    ← tres veces más
+```
+
+### 2 · Put Wall por MAYOR VALOR ABSOLUTO, con la exposición firmada
+
+La fórmula toma `|gamma|`, así que el GEX publicado ya era una magnitud y el
+orden ya era por módulo. Lo que **faltaba era la prueba** que lo garantice
+cuando el proveedor firma el lado:
+
+```
+strike 95 → gex_signed = −2.000.000      ← el muro
+strike 97 → gex_signed =   −100.000
+```
+
+Ordenar por el signo crudo elegiría **97**, porque −100.000 > −2.000.000: la put
+más pequeña. Ese error sólo se ve con un lado firmado, y ahora hay una regresión
+construida exactamente para provocarlo.
+
+El muro publica además `gex_signed` —negativo en puts bajo la convención
+declarada— y `selection: MAYOR_VALOR_ABSOLUTO_DEL_LADO`. El signo viaja para
+poder leerlo; **no** para ordenar.
+
+### 3 · `STRIKES_FUERA_DEL_DINERO` → `TODOS_LOS_STRIKES_DEL_VENCIMIENTO`
+
+El requisito es usar **todos** los strikes del vencimiento definido, incluidos
+los que están lejos del precio. El nombre anterior sugería lo contrario
+—quedarse sólo con los que están fuera del dinero— cuando lo que medía era la
+cobertura de la cadena. Un control cuyo nombre describe una regla distinta de la
+que aplica es peor que no tenerlo: **se cita el nombre**.
+
+El ranking nunca filtró por precio, pero eso había que creérselo. Ahora se
+**demuestra**: el control compara los strikes que existen en el vencimiento por
+lado con los que entraron en el ranking y publica `descartados_por_precio`, que
+tiene que ser cero. Por eso el ranking pasó a calcularse **antes** de la
+auditoría: auditar primero obligaba a suponer el filtro en vez de medirlo.
+
+Y sigue en pie lo de v1.57.0: si el máximo de un lado cae al otro lado del
+precio, se publica con `crossed: true` y su posición declarada, no se filtra.
+
+---
+
+## 1 · RUNTIME CERTIFICADO · un Python que Windows puede instalar
+
+---
+
+### 3.12.14 → 3.13.12
 
 ### El gate exigía un Python que python.org no distribuye para Windows
 
@@ -71,9 +156,9 @@ La rama 3.13 hay que revisarla **antes del 2026-10-31**.
 
 ---
 
-## 1 · Los muros, con su fórmula y su veredicto
+## 2 · Los muros, con su fórmula y su veredicto
 
-## 1.0 · CAMBIO DE FÓRMULA DECLARADO
+## 2.0 · CAMBIO DE FÓRMULA DECLARADO
 
 **Una fórmula sí cambia**, y con ella un número en pantalla: el strike de Call
 Wall y Put Wall. El método anterior —media geométrica de la exposición agregada
@@ -97,7 +182,7 @@ El changelog de v1.56.0 vive en el historial de git (`CHANGELOG_v1.56.0.md`, en
 
 ---
 
-## 1.1 · CALL WALL Y PUT WALL · el contrato, entero
+## 2.1 · CALL WALL Y PUT WALL · el contrato, entero
 
 ### La fórmula, y sólo la fórmula
 
@@ -221,7 +306,7 @@ veredicto. Nunca disfrazada del resultado principal.
 
 ---
 
-## 2 · PLAZOS · cinco segundos apagaban media pantalla
+## 3 · PLAZOS · cinco segundos apagaban media pantalla
 
 El registro del motor, media hora seguida, con la cuota en **7 de 240**:
 
@@ -317,25 +402,28 @@ smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/sta
 24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
 **3001 casos / 189 ficheros**.
 
-## Verificación de v1.57.1
+## Verificación de v1.57.2
 
 ```
 intérprete       CPython 3.13.12 · el certificado, no otro
 locks            bootstrap · production · test · rust-bridge instalados con
                  --require-hashes --no-deps --only-binary=:all: · 0 compilaciones
-suite            3008 passed, 49 skipped, 0 failed
+suite            3023 passed, 49 skipped, 0 failed
 ruff del gate    E9,F63,F7,F82 -> All checks passed
 eslint           no-undef limpio · sintaxis OK (5 módulos)
 arranque en frío 0 degradaciones
 smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state · /health -> HTTP 200
-versión activa   1.57.1 en VERSION.txt, marcador, rust, frontend y documentos
+versión activa   1.57.2 en VERSION.txt, marcador, rust, frontend y documentos
 ```
 
-19 regresiones nuevas en `tests/test_v1571_runtime_windows.py` —el guardián
+15 regresiones nuevas en `tests/test_v1570_contrato_de_muros.py` para las tres
+condiciones del contrato de walls —la suma por contrato frente a los dos atajos
+de agregación, el módulo frente al signo crudo, y la prueba de que no se descarta
+ningún strike por su distancia al precio—, 19 en `tests/test_v1571_runtime_windows.py` —el guardián
 rechaza cada forma del defecto: rama source-only, parche sin binario, pin y
 declaración discrepando, declaración caducada e instalador con la versión
 escrita a mano—, 37 en `tests/test_v1570_contrato_de_muros.py` y 24 en
-`tests/test_v1581_plazo_del_transporte.py`. Inventario: **3057 casos / 191
+`tests/test_v1581_plazo_del_transporte.py`. Inventario: **3072 casos / 191
 ficheros**.
 
 Lo que esta release **no** demuestra: que los muros que salen ahora sean los que

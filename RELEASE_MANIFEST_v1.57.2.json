@@ -1,6 +1,6 @@
 {
-  "version": "1.57.1",
-  "release": "ITM_QUANT_v1.57.1_PRE_VPS",
+  "version": "1.57.2",
+  "release": "ITM_QUANT_v1.57.2_PRE_VPS",
   "scope": "MULTI_ASSET",
   "base_version": "1.55.0",
   "focus": "CIERRE INTEGRAL POR GATES: tradeSideCode como autoridad del agresor con tabla de evidencia forense, una sola implementacion de la marca de flujo, barras de agresor y prima recuperadas desde el FlowViewModel, ocho carriles con LKG, Net Drift con muros y QFLOW sobre un eje unico, auditoria del calculo de los muros, Interval Map con el hueco preservado y el signo verificado celda a celda, Monte Carlo como gate de release, cinco ficheros de acumulaciones auditados uno a uno y snapshot transaccional.",
@@ -23,20 +23,20 @@
     "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
   ],
   "tests": {
-    "collected": 3057,
-    "passed": 3008,
+    "collected": 3072,
+    "passed": 3023,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
     "files": 191,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "c393035efa86fa2812f0c0a5627ac8493f6fb39db214194afa37343bdf727d24",
+    "plan_sha256": "25d3cb606e7016cc50e6fc10f570721800c4f1b33432bfdacb2ec66af8487acc",
     "run_observed": {
-      "passed": 3008,
+      "passed": 3023,
       "skipped": 49,
       "failed": 0,
-      "collected": 3057,
+      "collected": 3072,
       "interprete": "CPython 3.13.12 (el certificado)",
       "note": "ejecucion completa en el interprete certificado, con los locks instalados con --require-hashes --only-binary=:all:. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 49 saltos reales exigen credenciales o red al proveedor"
     }

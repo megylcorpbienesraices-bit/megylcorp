@@ -4,7 +4,11 @@
 QUÉ SE CALCULA, Y CON QUÉ
 ═══════════════════════════════════════════════════════════════════════════
 
-    Gamma Exposure por strike = gamma × OI × multiplicador × precio² × 0.01
+    GEX_strike = Σ( gamma_i × OI_i × multiplicador_i × precio² × 0.01 )
+
+    La suma recorre los CONTRATOS de ese strike dentro del vencimiento
+    seleccionado. Nunca `gamma agregada × OI agregado`: agregar primero mezcla la
+    gamma de un contrato con el interés abierto de otro.
 
     Call Wall = strike con MAYOR Gamma Exposure de CALLS
     Put Wall  = strike con MAYOR Gamma Exposure de PUTS   (por valor absoluto)
@@ -17,7 +21,7 @@ comprueban uno a uno en `audit()`:
 
      1  cadena completa del activo
      2  vencimiento definido y declarado
-     3  todos los strikes, incluidos los que están fuera del precio
+     3  TODOS los strikes del vencimiento, sin filtrar por el precio
      4  OI por strike Y por tipo, calls y puts separados
      5  gamma válida por contrato en cada strike
      6  precio del subyacente con su hora de captura
@@ -90,7 +94,8 @@ MULTIPLIER_DEFAULT = 100.0
 #: La fórmula mide la exposición por un movimiento del 1 % del subyacente.
 MOVE_FRACTION = 0.01
 
-FORMULA = "gamma × OI × multiplicador × precio² × 0.01"
+FORMULA = ("Σ por contrato del strike: gamma_i × OI_i × multiplicador_i "
+           "× precio² × 0.01")
 
 #: Convención de posicionamiento. Es una CONVENCIÓN declarada, no una medición
 #: del inventario del dealer: el proveedor no publica quién está largo de qué.
@@ -122,7 +127,7 @@ PUT_WALL = "put_wall"
 CONTROL_KEYS = (
     "CADENA_COMPLETA",
     "VENCIMIENTO_DEFINIDO",
-    "STRIKES_FUERA_DEL_DINERO",
+    "TODOS_LOS_STRIKES_DEL_VENCIMIENTO",
     "OI_POR_STRIKE_Y_LADO",
     "GAMMA_VALIDA_POR_CONTRATO",
     "PRECIO_CON_HORA",
@@ -183,6 +188,23 @@ def _side_of(row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def multiplier_of(row: Dict[str, Any],
+                  default: float = MULTIPLIER_DEFAULT) -> float:
+    """El multiplicador DEL CONTRATO, no el de la cadena.
+
+    La fórmula lleva `multiplicador_i`, en singular por contrato, y hay activos
+    con más de uno en el mismo strike y vencimiento —opciones mini junto a las
+    estándar—. Aplicar 100 a todas convierte una posición de 10 contratos mini en
+    una diez veces mayor de la que existe, y el error es invisible: el número
+    sigue siendo plausible.
+    """
+    for campo in ("multiplier", "contract_size", "contractSize", "multiplicador"):
+        v = _f(row.get(campo))
+        if v is not None and v > 0:
+            return v
+    return float(default)
+
+
 def _expiry_of(row: Dict[str, Any]) -> Optional[str]:
     v = row.get("expiration") or row.get("expiry") or row.get("expiration_date")
     if v is None:
@@ -237,13 +259,24 @@ def select_expiry(rows: Sequence[Dict[str, Any]], *, policy: str = NEAREST,
 
 # ═══════════════════════════════════════════════ un contrato, una sola vez
 
-def _contract_key(row: Dict[str, Any]) -> Optional[Tuple[str, float, str]]:
+def _contract_key(row: Dict[str, Any]) -> Optional[Tuple]:
+    """Identidad del contrato, para no contar dos veces el mismo.
+
+    Cuando viene el símbolo de la opción, ÉL es la identidad: es lo que emite el
+    mercado. Sin él se reconstruye con (vencimiento, strike, tipo, multiplicador),
+    y el multiplicador entra a propósito: una mini y una estándar del mismo
+    strike y vencimiento son DOS contratos, y con la clave corta una de las dos
+    desaparecía sin dejar rastro.
+    """
+    simbolo = row.get("option_symbol") or row.get("symbol") or row.get("contract")
+    if isinstance(simbolo, str) and simbolo.strip():
+        return ("SYMBOL", simbolo.strip().upper())
     exp = _expiry_of(row)
     k = _f(row.get("strike"))
     side = _side_of(row)
     if exp is None or k is None or side is None:
         return None
-    return (exp, k, side)
+    return (exp, k, side, multiplier_of(row))
 
 
 def dedupe_contracts(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -284,6 +317,23 @@ def rank_side(contracts: Sequence[Dict[str, Any]], *, side: str, spot: float,
               multiplier: float = MULTIPLIER_DEFAULT) -> List[Dict[str, Any]]:
     """Gamma Exposure de UN lado, strike a strike, de mayor a menor.
 
+    LA SUMA ES POR CONTRATO, Y DESPUÉS POR STRIKE
+    ---------------------------------------------
+
+        GEX_strike = Σ( gammaᵢ × OIᵢ × multiplicadorᵢ × precio² × 0.01 )
+
+    Nunca `gamma agregada × OI agregado`. No es lo mismo y la diferencia no se ve
+    en el resultado: agregar primero y multiplicar después mezcla la gamma de un
+    contrato con el interés abierto de otro, y da un número plausible que no
+    corresponde a ninguna posición real. Con un solo contrato por strike —el caso
+    normal— los dos caminos coinciden, que es exactamente lo que hace peligroso
+    el atajo: funciona hasta que hay dos.
+
+    v1.57.2 · Antes esto ASIGNABA en vez de acumular (`slot["gex"] = …`). Con un
+    contrato por (vencimiento, strike, tipo) el número salía bien, pero un
+    segundo contrato en el mismo strike —una mini junto a la estándar— se perdía
+    en silencio: ganaba el último visto.
+
     Los dos lados no se tocan: esta función sólo ve calls o sólo ve puts. Es la
     razón por la que un strike con mucha call gamma y mucha put gamma no se
     cancela solo, que es lo que le pasa al método neto justo donde más cobertura
@@ -296,37 +346,80 @@ def rank_side(contracts: Sequence[Dict[str, Any]], *, side: str, spot: float,
         k = _f(r.get("strike"))
         if k is None:
             continue
+        mult = multiplier_of(r, multiplier)
         gex = gamma_exposure(gamma=r.get("gamma"),
                              open_interest=r.get("open_interest"),
-                             spot=spot, multiplier=multiplier)
+                             spot=spot, multiplier=mult)
         slot = por_strike.setdefault(k, {
             "strike": k, "side": side, "gex": None, "gamma": None,
             "open_interest": None, "contracts": 0, "iv": None, "delta": None,
-            "volume": None, "missing": [],
+            "volume": None, "missing": [], "multipliers": [],
+            "_g_oi": 0.0, "_iv_oi": 0.0, "_d_oi": 0.0, "_oi_con_g": 0.0,
         })
         slot["contracts"] += 1
-        slot["gamma"] = _f(r.get("gamma"))
-        slot["open_interest"] = _f(r.get("open_interest"))
-        slot["iv"] = _f(r.get("implied_volatility") if r.get("implied_volatility")
-                        is not None else r.get("iv"))
-        slot["delta"] = _f(r.get("delta"))
-        slot["volume"] = _f(r.get("volume"))
+        if mult not in slot["multipliers"]:
+            slot["multipliers"].append(mult)
+        oi = _f(r.get("open_interest"))
+        if oi is not None:
+            slot["open_interest"] = (oi if slot["open_interest"] is None
+                                     else slot["open_interest"] + oi)
+        vol = _f(r.get("volume"))
+        if vol is not None:
+            slot["volume"] = vol if slot["volume"] is None else slot["volume"] + vol
         if gex is None:
             # Qué factor falta, por su nombre. «Sin exposición» sin decir cuál
             # obliga a adivinar entre gamma ausente, OI ausente y precio ausente.
             faltan = [n for n, v in (("gamma", r.get("gamma")),
                                      ("open_interest", r.get("open_interest")))
                       if _f(v) is None]
-            slot["missing"] = faltan or ["precio_o_multiplicador"]
-        else:
-            slot["gex"] = round(gex, 6)
+            for f in (faltan or ["precio_o_multiplicador"]):
+                if f not in slot["missing"]:
+                    slot["missing"].append(f)
+            continue
+        # LA SUMA. Un término por contrato.
+        slot["gex"] = gex if slot["gex"] is None else slot["gex"] + gex
+        # Gamma, IV y delta son POR CONTRATO: para el strike se publica la media
+        # ponderada por interés abierto, que es la única que reproduce la suma
+        # —Σ(γᵢ·OIᵢ) = (Σγᵢ·OIᵢ/ΣOIᵢ)·ΣOIᵢ— en vez de una media a ojo.
+        g = _f(r.get("gamma"))
+        if g is not None and oi is not None:
+            slot["_g_oi"] += abs(g) * oi
+            slot["_oi_con_g"] += oi
+            iv = _f(r.get("implied_volatility") if r.get("implied_volatility")
+                    is not None else r.get("iv"))
+            if iv is not None:
+                slot["_iv_oi"] += iv * oi
+            d = _f(r.get("delta"))
+            if d is not None:
+                slot["_d_oi"] += d * oi
+
     filas = list(por_strike.values())
     for f in filas:
+        peso = f.pop("_oi_con_g", 0.0) or 0.0
+        g_oi, iv_oi, d_oi = f.pop("_g_oi", 0.0), f.pop("_iv_oi", 0.0), f.pop("_d_oi", 0.0)
+        if peso > 0:
+            f["gamma"] = round(g_oi / peso, 8)
+            f["iv"] = round(iv_oi / peso, 6) if iv_oi else None
+            f["delta"] = round(d_oi / peso, 6) if d_oi else None
+        f["gamma_method"] = ("del contrato" if f["contracts"] <= 1
+                             else "media ponderada por interés abierto")
+        f["multiplier"] = (f["multipliers"][0] if len(f["multipliers"]) == 1
+                           else None)
+        if f["gex"] is not None:
+            f["gex"] = round(f["gex"], 6)
+            # Exposición FIRMADA bajo la convención declarada: las puts restan.
+            # Viaja para poder leerla, NO para ordenar: la selección del muro es
+            # por valor absoluto, que es lo que mide cobertura. Ver `_wall_from`.
+            f["gex_signed"] = (f["gex"] if side == CALL else -f["gex"])
+        else:
+            f["gex_signed"] = None
         f["position"] = ("ABOVE" if f["strike"] > spot
                          else "BELOW" if f["strike"] < spot else "AT")
         f["distance_pct"] = round((f["strike"] - spot) / spot * 100.0, 4) if spot else None
     # Sin GEX no se ordena como cero: se va al final y se declara.
-    filas.sort(key=lambda f: (f["gex"] is None, -(f["gex"] or 0.0), f["strike"]))
+    # El orden es por |GEX|: `gex` ya es una magnitud —la fórmula toma |gamma|—
+    # así que un lado representado con signo no invierte el ranking.
+    filas.sort(key=lambda f: (f["gex"] is None, -abs(f["gex"] or 0.0), f["strike"]))
     return filas
 
 
@@ -380,7 +473,8 @@ def audit(*, contracts: Sequence[Dict[str, Any]], chain: Dict[str, Any],
           mixed_expiries: bool, spot: Optional[float],
           price_as_of: Optional[str], multiplier: Optional[float],
           convention: Optional[str], ages: Optional[Dict[str, Any]] = None,
-          sources: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+          sources: Optional[Dict[str, Any]] = None,
+          evaluados: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     """Los diez controles, uno por uno, con la evidencia de cada veredicto."""
     ages = ages or {}
     sources = sources or {}
@@ -408,16 +502,51 @@ def audit(*, contracts: Sequence[Dict[str, Any]], chain: Dict[str, Any],
         expiry=expiry, reason=expiry_reason, available=expiries_available,
         mixed=mixed_expiries))
 
-    # 3 · strikes fuera del dinero
+    # 3 · TODOS los strikes del vencimiento, sin filtrar por el precio
+    #
+    # v1.57.2 · ANTES SE LLAMABA `STRIKES_FUERA_DEL_DINERO` Y DECÍA OTRA COSA.
+    #
+    # El requisito es usar todos los strikes del vencimiento definido, incluidos
+    # los que están lejos del precio. El nombre anterior sugería lo contrario
+    # —quedarse sólo con los que están fuera del dinero— cuando lo que medía era
+    # la cobertura de la cadena. Un control cuyo nombre describe una regla
+    # distinta de la que aplica es peor que no tenerlo: se cita el nombre.
+    #
+    # Y ahora no sólo se mide la cobertura: se DEMUESTRA que no se descartó
+    # ningún strike. Los strikes que existen en el vencimiento por lado y los
+    # que entraron en el ranking tienen que ser los mismos.
+    ev = evaluados or {}
+    por_lado_strikes = {CALL: set(), PUT: set()}
+    for r in contracts:
+        lado = _side_of(r)
+        k = _f(r.get("strike"))
+        if lado in por_lado_strikes and k is not None:
+            por_lado_strikes[lado].add(k)
+    hay_calls, hay_puts = len(por_lado_strikes[CALL]), len(por_lado_strikes[PUT])
+    eval_calls = ev.get("calls")
+    eval_puts = ev.get("puts")
+    descartados = 0
+    if eval_calls is not None:
+        descartados += max(0, hay_calls - int(eval_calls))
+    if eval_puts is not None:
+        descartados += max(0, hay_puts - int(eval_puts))
     cob_a = chain.get("coverage_above_pct")
     cob_b = chain.get("coverage_below_pct")
-    otm_ok = (cob_a is not None and cob_b is not None
-              and cob_a >= MIN_OTM_COVERAGE_PCT and cob_b >= MIN_OTM_COVERAGE_PCT)
+    cobertura_ok = (cob_a is not None and cob_b is not None
+                    and cob_a >= MIN_OTM_COVERAGE_PCT and cob_b >= MIN_OTM_COVERAGE_PCT)
+    todos_ok = bool(descartados == 0 and cobertura_ok)
     filas.append(_control(
-        "STRIKES_FUERA_DEL_DINERO", otm_ok,
-        ("la cadena cubre fuera del dinero por los dos lados" if otm_ok else
-         f"cobertura insuficiente fuera del dinero (mínimo {MIN_OTM_COVERAGE_PCT} % "
-         f"por lado)"),
+        "TODOS_LOS_STRIKES_DEL_VENCIMIENTO", todos_ok,
+        ("se evaluó cada strike del vencimiento, a los dos lados del precio y "
+         "también lejos de él" if todos_ok else
+         (f"{descartados} strikes del vencimiento quedaron fuera del ranking"
+          if descartados else
+          f"la cadena no llega al menos un {MIN_OTM_COVERAGE_PCT} % a cada lado "
+          f"del precio")),
+        strikes_con_calls=hay_calls, strikes_con_puts=hay_puts,
+        evaluados_calls=eval_calls, evaluados_puts=eval_puts,
+        descartados_por_precio=descartados,
+        filtro_por_precio="NINGUNO · el muro puede caer a cualquier lado",
         coverage_above_pct=cob_a, coverage_below_pct=cob_b,
         minimum_pct=MIN_OTM_COVERAGE_PCT))
 
@@ -540,6 +669,12 @@ def _wall_from(filas: List[Dict[str, Any]], *, side: str, spot: float,
         "strike": mejor["strike"],
         # Los cinco números que sostienen el muro, juntos y a la vista.
         "gex": mejor["gex"], "gamma": mejor["gamma"],
+        # Bajo la convención declarada las puts restan. El signo viaja para poder
+        # leerlo; la SELECCIÓN es por |GEX|, que es lo que mide cobertura: con el
+        # signo crudo ganaría la put MENOS negativa, es decir la más pequeña.
+        "gex_signed": mejor.get("gex_signed"),
+        "selection": "MAYOR_VALOR_ABSOLUTO_DEL_LADO",
+        "gamma_method": mejor.get("gamma_method"),
         "open_interest": mejor["open_interest"],
         "spot": spot, "price_as_of": price_as_of,
         "expiry": expiry, "multiplier": multiplier,
@@ -588,12 +723,21 @@ def walls(symbol: str, *, contract_rows: Sequence[Dict[str, Any]],
     mezclados = len({_expiry_of(r) for r in contratos}) > 1
     cadena = chain_report(contratos, spot=px)
 
+    # El ranking va ANTES de la auditoría porque uno de los controles comprueba
+    # que no se descartó ningún strike, y para eso hay que saber cuántos
+    # entraron. Auditar primero obligaba a creerse el filtro en vez de medirlo.
+    calls = rank_side(contratos, side=CALL, spot=px, multiplier=multiplier) if (
+        px is not None and contratos) else []
+    puts = rank_side(contratos, side=PUT, spot=px, multiplier=multiplier) if (
+        px is not None and contratos) else []
+
     controles = audit(contracts=contratos, chain=cadena, expiry=venc,
                       expiry_reason=motivo,
                       expiries_available=len(available_expiries(contratos_todos)),
                       mixed_expiries=mezclados, spot=px, price_as_of=price_as_of,
                       multiplier=multiplier, convention=convention,
-                      ages=ages, sources=sources)
+                      ages=ages, sources=sources,
+                      evaluados={"calls": len(calls), "puts": len(puts)})
     fallidos = [c["control"] for c in controles if not c["ok"]]
     veredicto = CONFIRMED if not fallidos else PROVISIONAL
 
@@ -621,8 +765,6 @@ def walls(symbol: str, *, contract_rows: Sequence[Dict[str, Any]],
         out[PUT_WALL] = dict(out[CALL_WALL], side=PUT_WALL, label="PUT WALL")
         return out
 
-    calls = rank_side(contratos, side=CALL, spot=px, multiplier=multiplier)
-    puts = rank_side(contratos, side=PUT, spot=px, multiplier=multiplier)
     out[CALL_WALL] = _wall_from(calls, side=CALL, spot=px, expiry=venc,
                                 price_as_of=price_as_of, verdict=veredicto,
                                 multiplier=_f(multiplier) or MULTIPLIER_DEFAULT)
