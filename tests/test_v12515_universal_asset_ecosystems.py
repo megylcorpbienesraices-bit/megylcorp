@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 from conftest import assert_version_at_least, assert_marker_version_at_least
 
@@ -21,13 +22,15 @@ def test_canonical_ecosystems_cover_tactical_assets():
         assert eco['symbol']==sym
         # v1.42: la arquitectura es MULTI_ASSET; el ecosistema Dow es una familia, no el producto
         # al estrecharse el alcance. Contrato completo en tests/test_v1271_dow_scope_contract.py.
-        assert eco['architecture']=='MULTI_ASSET · SEPARATE INSTRUMENT MATH'
+        # El invariante es la MATEMÁTICA SEPARADA, no una cadena exacta.
+        assert 'SEPARATE INSTRUMENT MATH' in eco['architecture']
         assert set(eco['derivatives'])=={'equity_options','index_options','future_options'}
         if cfg.get('full'):
             # full means OWN derivative-chain support; a future relationship is optional
             assert any(sym in eco['derivatives'][family] for family in ('equity_options','index_options','future_options'))
 
 
+@pytest.mark.skip(reason="v1.58.0 · los futuros y los índices del Dow salieron del universo operativo. La regla que protegía —ningún activo usa la matemática de otro— la cubre test_v1580_contrato_del_universo.py sobre los 36 del universo.")
 def test_dow_ecosystem_roots_are_correct():
     """v1.27.1: reemplaza a `test_major_ecosystem_roots_are_correct`.
 
@@ -41,7 +44,10 @@ def test_dow_ecosystem_roots_are_correct():
     assert {'YM', 'MYM'} <= set(dia['futures'])
     assert 'DJX' in dia['indices'] and 'DJI' not in dia['indices']
     # Fuera del universo: degrada de forma explícita, no inventa relaciones.
-    assert public_summary('SPY')['family'] == 'UNSUPPORTED'
+    # v1.58.0 · SPY entró en el universo operativo. El caso que esta línea
+    # protege —un símbolo ajeno no se inventa un ecosistema— se comprueba con uno
+    # que siga estando fuera.
+    assert public_summary('AMC')['family'] == 'UNSUPPORTED'
 
 
 def test_tastytrade_resolves_provider_futures_and_all_derivative_families():
@@ -125,6 +131,7 @@ def test_tasty_derivative_feature_uses_observed_delta_oi_balance_without_fake_ge
     assert "gex" not in out
 
 
+@pytest.mark.skip(reason="v1.58.0 · la fusión de grupos índice/futuro no tiene sujeto: no quedan índices ni futuros. La regla que protegía —ningún activo usa la matemática de otro— la cubre test_v1580_contrato_del_universo.py sobre los 36 del universo.")
 def test_ecosystem_feature_can_fuse_index_future_related_without_raw_price_addition():
     from app.core.provider_bus import PROVIDER_BUS
     from app.core.ecosystem_runtime import AssetEcosystemRuntime

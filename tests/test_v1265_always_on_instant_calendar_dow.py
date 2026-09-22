@@ -7,14 +7,18 @@ def text(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_visible_universe_is_direct_dow_only():
-    from app.core.assets import selectable_assets, ASSETS
-    visible = [row["symbol"] for row in selectable_assets()]
-    assert visible == ["DIA", "YM", "MYM", "DJX", "VXD"]
-    assert all(ASSETS[s].get("family") in {"Dow", "Dow Volatility"} for s in visible)
-    for hidden in ("XLI", "XLF", "VIX"):
-        assert ASSETS[hidden].get("selectable") is False
-        assert ASSETS[hidden].get("internal_context") is True
+def test_visible_universe_is_the_closed_universe():
+    """v1.58.0 · El alcance pasó de «instrumentos directos del Dow» al universo
+    cerrado de 36 símbolos. El contrato completo está en
+    tests/test_v1580_contrato_del_universo.py; aquí sólo se comprueba que lo
+    VISIBLE coincida con lo permitido, que es lo que esta prueba vigilaba.
+    """
+    from app.core.assets import selectable_assets
+    from app.core import universe
+
+    visible = {row["symbol"] for row in selectable_assets()}
+    assert visible == set(universe.ALLOWED)
+    assert not [s for s in visible if not universe.is_allowed(s)]
 
 
 def test_historical_precompute_never_overwrites_live_ready(tmp_path, monkeypatch):
@@ -94,11 +98,17 @@ def test_release_identity_keeps_dow_core_while_picker_allows_dynamic_etfs():
     assert_marker_version_at_least('1.26.5')
     assert product.get("scope") == "MULTI_ASSET"
     assert str(product.get("release") or "").endswith("PRE_VPS")
-    for symbol in ("DIA", "DJX", "YM", "MYM", "VXD"):
-        assert f'"{symbol}"' in assets
+    # v1.58.0 · La identidad de release ya no se ata a los símbolos del Dow: el
+    # universo es una lista cerrada que vive en `core/universe.py`. Lo que esta
+    # prueba protege —que el catálogo y el selector hablen del MISMO universo—
+    # se comprueba contra esa lista.
+    from app.core import universe
+
+    assert "from . import universe" in assets, (
+        "el catálogo dejó de consultar la autoridad del universo")
+    assert "universe.is_allowed" in assets
+    assert len(universe.ALLOWED) == universe.EXPECTED_SIZE
     assert 'data-symbol-category="ETFs"' in html
-    assert 'Universo dinámico · ETFs de Alpaca + Quant Data' in html
-    assert 'data-symbol-category="Acciones"' not in html
 
 
 def test_persistence_identity_matches_specialized_release():

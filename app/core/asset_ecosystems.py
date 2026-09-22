@@ -28,59 +28,33 @@ def _idx(symbol: str, role: str = "BENCHMARK_INDEX", *, aliases: Iterable[str] =
 
 
 ASSET_ECOSYSTEMS: dict[str, dict[str, Any]] = {
+    # v1.58.0 · DIA ya no arrastra DJX, YM ni MYM: los tres salieron del universo
+    # operativo. Dejarlos aquí haría que el ecosistema apuntara a instrumentos que
+    # el programa ya no puede pedir, y esa es exactamente la clase de promesa
+    # vacía que el contrato del universo prohíbe.
     "DIA": {
-        "family":"DOW","primary_type":"ETF",
+        "family":"Índices amplios","primary_type":"ETF",
         "related_equities":[_eq("XLI","SECTOR_CONFIRMATION"),_eq("XLF","SECTOR_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],
-        "futures":[_fut("YM"),_fut("MYM","MICRO_FUTURE",preferred=False)],
-        "derivatives":{"equity_options":["DIA"],"index_options":["DJX"],"future_options":["YM","MYM"]},
+        "indices":[],
+        "futures":[],
+        "derivatives":{"equity_options":["DIA"],"index_options":[],"future_options":[]},
     },
-    "YM": {
-        "family":"DOW","primary_type":"FUTURE",
-        "related_equities":[_eq("DIA","REFERENCE_ETF"),_eq("XLI","SECTOR_CONFIRMATION"),_eq("XLF","SECTOR_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],
-        "futures":[_fut("YM"),_fut("MYM","MICRO_FUTURE",preferred=False)],
-        "derivatives":{"equity_options":["DIA"],"index_options":["DJX"],"future_options":["YM","MYM"]},
-    },
-    "MYM": {
-        "family":"DOW","primary_type":"FUTURE",
-        "related_equities":[_eq("DIA","REFERENCE_ETF"),_eq("XLI","SECTOR_CONFIRMATION"),_eq("XLF","SECTOR_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],
-        "futures":[_fut("MYM"),_fut("YM","REFERENCE_FUTURE",preferred=False)],
-        "derivatives":{"equity_options":["DIA"],"index_options":["DJX"],"future_options":["MYM","YM"]},
-    },
-    "DJX": {
-        "family":"DOW","primary_type":"INDEX",
-        "related_equities":[_eq("DIA","REFERENCE_ETF"),_eq("XLI","SECTOR_CONFIRMATION"),_eq("XLF","SECTOR_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],
-        "futures":[_fut("YM"),_fut("MYM","MICRO_FUTURE",preferred=False)],
-        "derivatives":{"equity_options":["DIA"],"index_options":["DJX"],"future_options":["YM","MYM"]},
-    },
+    # v1.58.0 · XLI y XLF dejan de ser «contexto del Dow» y pasan a ser ETFs
+    # operables del universo. Su cadena es la SUYA: arrastrar DIA en
+    # `equity_options` era correcto cuando sólo servían de confirmación sectorial
+    # y es un proxy cruzado ahora que el analista puede operarlos. DJX y YM
+    # salieron del universo, así que tampoco siguen aquí.
     "XLI": {
-        "family":"DOW_CONTEXT","primary_type":"ETF",
-        "related_equities":[_eq("DIA","DOW_REFERENCE_ETF"),_eq("XLF","PEER_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],"futures":[_fut("YM","DOW_FUTURE")],
-        "derivatives":{"equity_options":["XLI","DIA"],"index_options":["DJX"],"future_options":["YM"]},
+        "family":"Sectoriales","primary_type":"ETF",
+        "related_equities":[_eq("XLF","PEER_CONFIRMATION")],
+        "indices":[],"futures":[],
+        "derivatives":{"equity_options":["XLI"],"index_options":[],"future_options":[]},
     },
     "XLF": {
-        "family":"DOW_CONTEXT","primary_type":"ETF",
-        "related_equities":[_eq("DIA","DOW_REFERENCE_ETF"),_eq("XLI","PEER_CONFIRMATION")],
-        "indices":[_idx("DJX","DOW_INDEX")],"futures":[_fut("YM","DOW_FUTURE")],
-        "derivatives":{"equity_options":["XLF","DIA"],"index_options":["DJX"],"future_options":["YM"]},
-    },
-    "VIX": {
-        "family":"DOW_CONTEXT_VOLATILITY","primary_type":"INDEX",
-        "related_equities":[_eq("DIA","DOW_REFERENCE_ETF",polarity=-1)],
-        "indices":[_idx("VIX","BROAD_VOLATILITY_INDEX"),_idx("VXD","DOW_VOLATILITY_INDEX")],
-        "futures":[_fut("YM","DOW_FUTURE")],
-        "derivatives":{"equity_options":["DIA"],"index_options":[],"future_options":["YM"]},
-    },
-    "VXD": {
-        "family":"DOW_VOLATILITY","primary_type":"INDEX",
-        "related_equities":[_eq("DIA","DOW_REFERENCE_ETF",polarity=-1)],
-        "indices":[_idx("VXD","DOW_VOLATILITY_INDEX"),_idx("DJX","DOW_INDEX"),_idx("VIX","BROAD_VOLATILITY_INDEX")],
-        "futures":[_fut("YM","DOW_FUTURE")],
-        "derivatives":{"equity_options":["DIA"],"index_options":["DJX"],"future_options":["YM"]},
+        "family":"Sectoriales","primary_type":"ETF",
+        "related_equities":[_eq("XLI","PEER_CONFIRMATION")],
+        "indices":[],"futures":[],
+        "derivatives":{"equity_options":["XLF"],"index_options":[],"future_options":[]},
     },
 }
 
@@ -92,9 +66,43 @@ PROVIDER_COMPONENT_CAPABILITIES: dict[str, set[str]] = {
 }
 
 
+def _ecosistema_generico(sym: str) -> dict[str, Any]:
+    """Ecosistema de un activo del universo que no tiene ficha escrita a mano.
+
+    v1.58.0 · Con el universo cerrado a 36 símbolos, la mayoría no tiene —ni
+    necesita— una ficha propia: su ecosistema es él mismo y su cadena. Devolver
+    `UNSUPPORTED` para todos ellos hacía que la fusión de fuentes los tratara
+    como desconocidos mientras el resto del programa los daba por operativos.
+
+    Esto NO es lógica por activo: es la misma forma para todos, derivada de si el
+    símbolo es acción o ETF.
+    """
+    from . import universe
+    es_etf = sym in universe.ETFS
+    return {
+        "symbol": sym,
+        "family": "ETF" if es_etf else "Equity",
+        "primary_type": "ETF" if es_etf else "EQUITY",
+        "primary": {"symbol": sym, "role": "PRIMARY",
+                    "instrument_type": "ETF" if es_etf else "EQUITY"},
+        "related_equities": [], "indices": [], "benchmarks": [], "futures": [],
+        "derivatives": {"equity_options": [sym], "index_options": [], "future_options": []},
+        "architecture": "MULTI_ASSET · SEPARATE INSTRUMENT MATH",
+        "fusion_rule": "SEPARATE_INSTRUMENT_MATH_THEN_NORMALIZED_FEATURE_FUSION",
+        "provider_rule": "OBSERVATION_QUALITY_FRESHNESS_PROVENANCE",
+    }
+
+
 def ecosystem_for(symbol: str) -> dict[str, Any]:
     sym=str(symbol or "").upper().strip()
+    from . import universe
+    if not universe.is_allowed(sym):
+        # El universo manda sobre la tabla. Una ficha escrita a mano para un
+        # símbolo retirado no puede resucitarlo: sería un ecosistema completo
+        # para un activo que el programa no sabe pedir.
+        return {"symbol":sym,"family":"UNSUPPORTED","primary_type":"UNKNOWN","primary":{"symbol":sym,"role":"PRIMARY","instrument_type":"UNKNOWN"},"related_equities":[],"indices":[],"benchmarks":[],"futures":[],"derivatives":{"equity_options":[],"index_options":[],"future_options":[]}}
     if sym not in ASSET_ECOSYSTEMS:
+        return _ecosistema_generico(sym)
         return {"symbol":sym,"family":"UNSUPPORTED","primary_type":"UNKNOWN","primary":{"symbol":sym,"role":"PRIMARY","instrument_type":"UNKNOWN"},"related_equities":[],"indices":[],"benchmarks":[],"futures":[],"derivatives":{"equity_options":[],"index_options":[],"future_options":[]}}
     base=deepcopy(ASSET_ECOSYSTEMS[sym])
     base["symbol"]=sym

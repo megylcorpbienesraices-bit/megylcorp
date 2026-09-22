@@ -73,8 +73,21 @@ _FUT = dict(asset_class="FUTURE", session="CME_FUTURES", option_model=MODEL_FUTU
             settlement="CASH", exercise="AMERICAN")
 
 REGISTRY: Dict[str, Instrument] = {
-    **{s: Instrument(s, **_ETF) for s in ("DIA", "SPY", "QQQ", "TQQQ", "IWM", "IBIT", "XLK", "XLF", "XLI", "SMH", "SOXX", "XLC", "XLY", "GLD", "GDX", "VXX")},
-    **{s: Instrument(s, **_EQ) for s in ("AAPL", "NVDA", "MSFT", "META", "AMZN", "TSLA")},
+    # ETFs y acciones del universo operativo. Las dos plantillas son COMPARTIDAS
+    # —`_ETF` y `_EQ` sólo se diferencian en la etiqueta de clase— así que esto no
+    # es una tabla de comportamiento por activo: es decir de qué clase es cada
+    # símbolo. Un símbolo que no esté aquí cae en la plantilla genérica de abajo,
+    # que tiene el mismo multiplicador, la misma sesión y el mismo modelo.
+    **{s: Instrument(s, **_ETF) for s in (
+        "SPY", "QQQ", "IWM", "DIA",
+        "XLK", "XLF", "XLI", "XLY", "XLP", "XLE", "XLV", "XLU",
+        "SMH", "SOXX", "GLD", "GDX", "TLT", "HYG", "USO", "EEM", "FXI",
+        # Fuera del universo operativo, pero con clase conocida: si alguien los
+        # consulta desde una prueba o un archivo histórico, no se les etiqueta mal.
+        "TQQQ", "IBIT", "XLC", "VXX")},
+    **{s: Instrument(s, **_EQ) for s in (
+        "NVDA", "AAPL", "MSFT", "TSLA", "AMZN", "META", "GOOGL", "AMD", "AVGO",
+        "NFLX", "JPM", "BAC", "XOM", "PLTR", "COIN")},
     "SPX": Instrument("SPX", **_IDX),
     "NDX": Instrument("NDX", **_IDX),
     "DJX": Instrument("DJX", **_IDX),

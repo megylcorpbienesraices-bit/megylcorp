@@ -2,26 +2,72 @@ from __future__ import annotations
 
 import math
 
+from . import universe
 from .asset_ecosystems import public_summary
 from .obs import note as _obs_note
 from .expiry_clock import year_fraction
 
-# CORE UNIVERSE + DYNAMIC PROVIDER ETF CATALOG
+# CATÁLOGO DEL UNIVERSO OPERATIVO
+#
+# v1.58.0 · El universo está CERRADO a los 37 símbolos de `core.universe`. Lo que
+# no está en esa lista no se registra, y lo que no se registra no se ofrece en el
+# selector, no entra en el scanner, no se precarga y —lo que de verdad importa—
+# no gasta una sola petición del contrato del proveedor.
+#
+# El cierre es de CATÁLOGO, no de matemática: aquí no hay ni una rama por activo.
+# El motor sigue siendo genérico, y añadir un símbolo mañana es añadirlo a la
+# lista, no tocar el cálculo.
 # Static Dow instruments remain first-class. Provider-discovered ETFs are registered at
 # runtime and keep separate per-instrument math; no symbol ever borrows another symbol
 # price/Gamma/OI. `full=True` means an own-instrument options path is available.
 ASSETS = {
     "DIA": {"name":"SPDR Dow Jones Industrial Average ETF","description":"SPDR Dow Jones Industrial Average ETF","kind":"ETF","category":"ETFs","exchange":"ARCA","family":"Dow","full":True,"selectable":True,"quant_provider":"ALPACA","market_provider":"ALPACA","window":12.0,"expiry_days":21,"accent":"#39d6ff"},
-    "YM":  {"name":"E-mini Dow Futures","description":"E-mini Dow Futures","kind":"FUTURO","category":"Futuros","exchange":"CBOT","family":"Dow","full":True,"selectable":True,"quant_provider":"TASTYTRADE","market_provider":"TASTYTRADE","window":1200.0,"expiry_days":21,"accent":"#38bdf8","reason":"Futuro y opciones sobre YM propios por tastytrade/DXLink; Greeks estructurales con Black-76 sobre F. DIA/DJX son confluencia, nunca proxy."},
-    "MYM": {"name":"Micro E-mini Dow Futures","description":"Micro E-mini Dow Futures","kind":"FUTURO","category":"Futuros","exchange":"CBOT","family":"Dow","full":True,"selectable":True,"quant_provider":"TASTYTRADE","market_provider":"TASTYTRADE","window":1200.0,"expiry_days":21,"accent":"#7dd3fc","reason":"Futuro y opciones sobre MYM propios por tastytrade/DXLink; Greeks estructurales con Black-76 sobre F."},
-    "DJX": {"name":"Dow Jones Industrial Average 1/100 Index","description":"Dow Jones Industrial Average Index","kind":"ÍNDICE","category":"Índices","exchange":"CBOE","family":"Dow","full":True,"selectable":True,"quant_provider":"TASTYTRADE","market_provider":"TASTYTRADE","window":12.0,"expiry_days":14,"accent":"#38bdf8","reason":"Índice y cadena propia solo cuando tastytrade/DXLink/REST entregan observaciones autorizadas. Nunca se fabrica el spot desde DIA."},
-    "XLI": {"name":"Industrial Select Sector SPDR Fund","description":"Industrial Select Sector SPDR Fund","kind":"ETF","category":"ETFs","exchange":"ARCA","family":"Dow Context","full":True,"selectable":False,"internal_context":True,"quant_provider":"ALPACA","market_provider":"ALPACA","window":12.0,"expiry_days":21,"accent":"#f59e0b"},
-    "XLF": {"name":"Financial Select Sector SPDR Fund","description":"Financial Select Sector SPDR Fund","kind":"ETF","category":"ETFs","exchange":"ARCA","family":"Dow Context","full":True,"selectable":False,"internal_context":True,"quant_provider":"ALPACA","market_provider":"ALPACA","window":8.0,"expiry_days":21,"accent":"#22c55e"},
-    "VIX": {"name":"Cboe Volatility Index","description":"Cboe Volatility Index","kind":"ÍNDICE","category":"Volatilidad","exchange":"CBOE","family":"Volatilidad","full":False,"selectable":False,"internal_context":True,"market_provider":"TASTYTRADE","window":8.0,"accent":"#fb7185","reason":"Contexto de volatilidad general. Solo se publica precio si el proveedor lo entrega; no se modela como opción equity."},
-    "VXD": {"name":"Cboe DJIA Volatility Index","description":"Cboe DJIA Volatility Index","kind":"ÍNDICE","category":"Volatilidad","exchange":"CBOE","family":"Dow Volatility","full":False,"selectable":True,"market_provider":"TASTYTRADE","window":8.0,"accent":"#f472b6","reason":"Volatilidad específica del Dow. Se muestra UNAVAILABLE si los proveedores actuales no entregan spot autorizado; nunca se sustituye silenciosamente por VIX."},
+    "XLI": {"name":"Industrial Select Sector SPDR Fund","description":"Industrial Select Sector SPDR Fund","kind":"ETF","category":"ETFs","exchange":"ARCA","family":"Sectoriales","full":True,"selectable":True,"quant_provider":"ALPACA","market_provider":"ALPACA","window":12.0,"expiry_days":21,"accent":"#f59e0b"},
+    "XLF": {"name":"Financial Select Sector SPDR Fund","description":"Financial Select Sector SPDR Fund","kind":"ETF","category":"ETFs","exchange":"ARCA","family":"Sectoriales","full":True,"selectable":True,"quant_provider":"ALPACA","market_provider":"ALPACA","window":8.0,"expiry_days":21,"accent":"#22c55e"},
 }
 
+def _seed_universe() -> None:
+    """Siembra el catálogo con el universo operativo completo.
+
+    v1.58.0 · Antes sólo existían los activos revisados a mano y el resto llegaba
+    del descubrimiento del proveedor. Con el universo cerrado eso deja al selector
+    dependiendo de que el catálogo del proveedor se haya podido descargar: sin
+    red, sin clave o con la caché fría, el operador veía tres activos en vez de
+    los suyos.
+
+    La lista decide QUÉ EXISTE; el proveedor decide QUÉ PUEDE HACERSE con cada
+    uno. Son dos preguntas distintas y ahora cada una la contesta quien la sabe.
+    La configuración sembrada es la genérica —la misma para todos— y el
+    descubrimiento la enriquece después con la capacidad real de cadena.
+    """
+    for sym in universe.ORDERED:
+        if sym in ASSETS:
+            continue                      # revisado a mano: manda su configuración
+        es_etf = sym in universe.ETFS
+        ASSETS[sym] = {
+            "name": sym, "description": sym,
+            "kind": "ETF" if es_etf else "ACCION",
+            "category": "ETFs" if es_etf else "Acciones",
+            "exchange": "US", "family": "ETF" if es_etf else "Equity",
+            # Capacidad desconocida hasta que un proveedor la confirme: se ofrece
+            # el activo, no se promete la cadena.
+            "full": False, "selectable": True, "dynamic": True, "board_enabled": False,
+            "quant_provider": "ALPACA", "market_provider": "ALPACA",
+            "window": 12.0, "expiry_days": 21,
+            "accent": "#39d6ff" if es_etf else "#a78bfa",
+            "asset_class": "ETF" if es_etf else "EQUITY",
+            "reason": ("Del universo operativo. Los derivados quedan "
+                       "capability-gated hasta que un proveedor activo confirme "
+                       "cadena propia."),
+        }
+
+
+#: Los revisados A MANO. Se congela ANTES de sembrar: si la siembra entrara aquí,
+#: `register_provider_assets` trataría los 36 como configuración revisada y nunca
+#: les aplicaría la capacidad real de cadena que descubre el proveedor.
 STATIC_ASSET_SYMBOLS = frozenset(ASSETS)
+
+_seed_universe()
 
 def _generic_etf_ecosystem(symbol: str) -> dict:
     sym=str(symbol or "").upper().strip()
@@ -29,7 +75,7 @@ def _generic_etf_ecosystem(symbol: str) -> dict:
         "symbol":sym,"family":"ETF","primary_type":"ETF",
         "related_etfs_equities":[],"indices":[],"futures":[],
         "derivatives":{"equity_options":[sym],"index_options":[],"future_options":[]},
-        "architecture":"UNIVERSAL ETF · SEPARATE INSTRUMENT MATH",
+        "architecture":"MULTI_ASSET · SEPARATE INSTRUMENT MATH",
         "fusion_rule":"SEPARATE_INSTRUMENT_MATH_THEN_NORMALIZED_FEATURE_FUSION",
         "provider_rule":"OBSERVATION_QUALITY_FRESHNESS_PROVENANCE",
     }
@@ -47,7 +93,7 @@ def _generic_equity_ecosystem(symbol: str, cfg: dict | None = None) -> dict:
         "symbol":sym,"family":str(cfg.get("sector") or "Equity"),"primary_type":"EQUITY",
         "related_etfs_equities":[],"indices":[],"futures":[],
         "derivatives":{"equity_options":[sym],"index_options":[],"future_options":[]},
-        "architecture":"UNIVERSAL EQUITY · SEPARATE INSTRUMENT MATH",
+        "architecture":"MULTI_ASSET · SEPARATE INSTRUMENT MATH",
         "fusion_rule":"SEPARATE_INSTRUMENT_MATH_THEN_NORMALIZED_FEATURE_FUSION",
         "provider_rule":"OBSERVATION_QUALITY_FRESHNESS_PROVENANCE",
         "sector":cfg.get("sector"),"industry":cfg.get("industry"),
@@ -105,6 +151,11 @@ def register_provider_assets(rows) -> int:
             continue
         sym = str(row.get("symbol") or "").upper().strip()
         if not sym:
+            continue
+        if not universe.is_allowed(sym):
+            # El cerrojo del universo. Antes entraba aquí TODO lo que el proveedor
+            # cataloga —miles de símbolos— y cada uno acababa en el selector, en el
+            # scanner, en la precarga y en las peticiones al proveedor.
             continue
         klass = str(row.get("asset_class") or "ETF").upper()
         kind = _KIND_BY_ASSET_CLASS.get(klass, "ETF")

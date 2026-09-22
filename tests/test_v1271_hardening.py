@@ -155,9 +155,10 @@ def test_unsupported_asset_raises_typed_error_with_universe():
     from app.core.assets import UnsupportedAssetError, asset_info, is_supported
 
     assert is_supported("DIA")
-    assert not is_supported("SPY")
+    # v1.58.0 · SPY entró en el universo operativo.
+    assert not is_supported("AMC")
     with pytest.raises(UnsupportedAssetError) as ei:
-        asset_info("SPY")
+        asset_info("AMC")
     msg = str(ei.value)
     assert "SPY" in msg and "DIA" in msg, "el error debe nombrar el universo soportado"
     # Debe seguir siendo cazable como LookupError, pero NO confundirse con un

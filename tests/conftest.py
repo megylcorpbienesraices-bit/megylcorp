@@ -125,3 +125,58 @@ def _reset_per_symbol_runtime():
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture(autouse=True)
+def _catalogo_de_activos_intacto():
+    """Devuelve el catálogo de activos como estaba después de cada prueba.
+
+    v1.58.0 · `ASSETS` es un diccionario de módulo, vivo y compartido. Varias
+    pruebas registran activos, cambian `full`/`selectable` al mover proveedores
+    de roster, o recalculan capacidades. Eso deja el catálogo distinto para las
+    siguientes, y el contrato del universo —«el catálogo es EXACTAMENTE estos
+    símbolos»— pasaba o fallaba según el orden de ejecución.
+
+    Un contrato que depende del orden no es un contrato. Se restaura aquí en vez
+    de en cada prueba porque el que ensucia no siempre es el que falla.
+    """
+    # Por el MÓDULO, no por referencia: varias pruebas hacen
+    # `importlib.reload(app.core.assets)` y eso crea un diccionario nuevo. Guardar
+    # la referencia vieja y restaurarla ahí dejaría el catálogo bueno en un objeto
+    # que ya no mira nadie.
+    import app.core.assets as _A
+
+    copia = {k: dict(v) for k, v in _A.ASSETS.items()}
+    try:
+        yield
+    finally:
+        _A.ASSETS.clear()
+        _A.ASSETS.update(copia)
+
+
+@pytest.fixture()
+def universo_ampliado():
+    """Admite símbolos sintéticos en el universo durante una prueba.
+
+    v1.58.0 · El universo está cerrado, y eso es lo correcto en producción: nada
+    entra sin estar en la lista. Pero varias pruebas comprueban el CAMINO de
+    registro —que una acción y un ETF entren por la misma puerta, que la cadena
+    sólo se prometa cuando el proveedor la confirma— y para eso necesitan
+    símbolos que no existen de verdad.
+
+    Usar tickers reales para eso sería peor: ataría la prueba a que ese símbolo
+    siga en el universo mañana. Aquí se abre el cerrojo lo justo y se cierra al
+    terminar, pasa lo que pase.
+    """
+    import app.core.universe as U
+
+    original = U.ALLOWED
+
+    def _admitir(*simbolos: str):
+        U.ALLOWED = frozenset(set(original) | {s.upper() for s in simbolos})
+        return U.ALLOWED
+
+    try:
+        yield _admitir
+    finally:
+        U.ALLOWED = original

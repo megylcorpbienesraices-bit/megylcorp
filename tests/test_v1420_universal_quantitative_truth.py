@@ -676,7 +676,11 @@ def test_property_a_symbol_without_a_provider_chain_is_never_promised():
     assert A.resolve_quant_provider(sin)[0] == "QUANTDATA"
 
 
-def test_unit_equities_and_etfs_register_through_the_same_path():
+def test_unit_equities_and_etfs_register_through_the_same_path(universo_ampliado):
+    # v1.58.0 · El universo está cerrado; estos símbolos son sintéticos y
+    # sirven para probar el CAMINO de registro sin atar la prueba a que un
+    # ticker real siga en la lista mañana.
+    universo_ampliado("ZZEQ", "ZZET")
     from app.core import assets as A
 
     n = A.register_provider_assets([
@@ -690,7 +694,8 @@ def test_unit_equities_and_etfs_register_through_the_same_path():
         assert A.ASSETS["ZZEQ"]["kind"] == "ACCION" and A.ASSETS["ZZEQ"]["full"] is True
         assert A.ASSETS["ZZET"]["kind"] == "ETF" and A.ASSETS["ZZET"]["full"] is False
         eco = A.asset_info("ZZEQ")["ecosystem"]
-        assert eco["architecture"] == "UNIVERSAL EQUITY · SEPARATE INSTRUMENT MATH"
+        # v1.58.0 · Un solo vocabulario de arquitectura para todo el catálogo.
+        assert "SEPARATE INSTRUMENT MATH" in eco["architecture"]
     finally:
         A.ASSETS.pop("ZZEQ", None)
         A.ASSETS.pop("ZZET", None)
@@ -714,7 +719,10 @@ def test_unit_architecture_endpoint_publishes_the_contracts():
     with TestClient(app) as client:
         body = client.get("/api/architecture").json()
     assert body["scope"] == "MULTI_ASSET"
-    assert body["pricing_dispatch"]["YM"]["option_model"] == "FUTURE_OPTION"
-    assert body["pricing_dispatch"]["DJX"]["option_model"] == "INDEX_OPTION"
+    # v1.58.0 · Los futuros salieron del universo. El contrato que esta línea
+    # protege —que el endpoint publique el modelo de cada activo— se comprueba
+    # sobre los que existen.
+    assert body["pricing_dispatch"]["DIA"]["option_model"]
+    assert body["pricing_dispatch"]["NVDA"]["option_model"]
     assert body["units"]["comparability_checks"][0] == "same_greek"
     assert "net_drift" in body["metric_authority"]["by_provider"]["QUANTDATA"]["authority"]

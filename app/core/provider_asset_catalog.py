@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from app.persistence import PERSISTENT_ROOT
+from . import universe
 from .obs import note as _obs_note
 from . import alpaca_data
 from .provider_etf_catalog import _looks_like_etf, _discover_quantdata_etfs
@@ -145,7 +146,15 @@ def _publication_rank(row: dict[str, Any]) -> tuple:
 
 
 def select_published(rows: list[dict[str, Any]], limit: int = MAX_PUBLISHED) -> list[dict[str, Any]]:
-    return sorted(rows, key=_publication_rank)[: max(int(limit), 0)]
+    """Lo que se publica y se cachea del descubrimiento.
+
+    v1.58.0 · El cerrojo del universo se aplica AQUÍ además de en el registro, y
+    a propósito: así la caché en disco tampoco engorda con miles de símbolos que
+    nadie va a mirar. Dos cerrojos para la misma regla no es duplicar lógica; es
+    que el catálogo no llegue a escribirse con lo que el registro va a rechazar.
+    """
+    permitidos = [r for r in rows if universe.is_allowed(r.get("symbol"))]
+    return sorted(permitidos, key=_publication_rank)[: max(int(limit), 0)]
 
 
 def load_cached_universe() -> list[dict[str, Any]]:
@@ -161,7 +170,10 @@ def load_cached_universe() -> list[dict[str, Any]]:
     try:
         payload = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
         rows = payload.get("assets") if isinstance(payload, dict) else []
-        return [dict(x) for x in rows if isinstance(x, dict) and x.get("symbol")]
+        # Una caché escrita por una versión anterior puede traer el universo
+        # entero. Se filtra al leerla, no sólo al escribirla.
+        return [dict(x) for x in rows
+                if isinstance(x, dict) and universe.is_allowed(x.get("symbol"))]
     except Exception as exc:
         _obs_note("provider_asset_catalog:cache_read", exc)
         return []

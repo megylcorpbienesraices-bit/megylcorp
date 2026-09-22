@@ -148,14 +148,19 @@ def test_scanner_authority_remains_final_and_new_layers_are_context_only():
 
 def test_dow_ecosystems_have_own_primary_and_dow_futures_only():
     from app.core.asset_ecosystems import ecosystem_for
-    expected={"DIA":"YM","YM":"YM","MYM":"MYM","DJX":"YM","VXD":"YM"}
-    for sym,fut in expected.items():
+    # v1.58.0 · Los futuros y los índices salieron del universo operativo, así que
+    # ya no hay ecosistemas con rama de futuros que comprobar. Lo que sigue en pie
+    # —y es lo que esta prueba protege— es que cada ecosistema se refiera a SU
+    # símbolo y que uno ajeno al universo no se invente uno.
+    from app.core import universe
+
+    for sym in universe.ORDERED:
         e=ecosystem_for(sym)
-        assert e["primary"]["symbol"]==sym
-        assert fut in {x["product"] for x in e["futures"]}, (sym,fut)
-    for retired in ("SPY","QQQ","GLD","AAPL","NVDA"):
-        e=ecosystem_for(retired)
-        assert e["family"]=="UNSUPPORTED" and e["futures"]==[]
+        assert e["primary"]["symbol"]==sym, sym
+        assert e["family"]!="UNSUPPORTED", sym
+    for ajeno in ("AMC","GME","TQQQ","SPXL","YM"):
+        e=ecosystem_for(ajeno)
+        assert e["family"]=="UNSUPPORTED" and e["futures"]==[], ajeno
 
 def test_provider_coverage_page_exposes_channel_health_and_temporal_truth():
     main=(ROOT/"app/main.py").read_text();html=(ROOT/"app/templates/provider_coverage.html").read_text()

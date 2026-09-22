@@ -40,35 +40,48 @@ def roster(monkeypatch):
 
 # ────────────────────────── el activo se reasigna a quien pueda servirlo
 
-def test_an_index_moves_to_the_provider_that_can_serve_it(roster):
-    """DJX declaraba tastytrade. Quant Data sí sirve cadena de índices, así que el
-    activo se reasigna en lugar de quedarse sin análisis."""
-    A = roster(None)
+def test_an_asset_moves_to_the_provider_that_can_serve_it(roster):
+    """Un activo cuyo proveedor declarado sale del roster se REASIGNA.
+
+    v1.58.0 · El caso original era DJX, un índice que declaraba tastytrade. Los
+    índices y los futuros salieron del universo operativo, así que la misma regla
+    se comprueba donde sigue habiendo dos proveedores capaces: un ETF que declara
+    Alpaca cuando Alpaca no está en el roster. La regla es la misma; lo que
+    cambió es el activo con el que se demuestra.
+    """
+    A = roster("QUANTDATA")
     A.apply_roster_capabilities()
-    cfg = A.ASSETS["DJX"]
+    cfg = A.ASSETS["DIA"]
     assert cfg["quant_provider_effective"] == "QUANTDATA"
+    assert cfg["quant_provider_reason"] == "REASIGNADO"
     assert cfg["full"] is True and cfg["selectable"] is True
 
 
-def test_futures_have_no_substitute_and_say_so(roster):
-    """Ningún proveedor del roster sirve cadena de futuros. Fingir que sí dejaría al
-    analista frente a paneles vacíos buscando un fallo que no existe."""
-    A = roster(None)
-    A.apply_roster_capabilities()
-    for sym in ("YM", "MYM"):
-        cfg = A.ASSETS[sym]
-        assert cfg["quant_provider_effective"] is None, sym
-        assert cfg["full"] is False and cfg["selectable"] is False, sym
-        assert "fuera del roster" in cfg["quant_provider_reason"], sym
-        assert "no disponible" in cfg["reason"].lower(), sym
+def test_an_asset_nobody_can_serve_SAYS_SO(roster):
+    """Fingir que hay cadena deja al analista frente a paneles vacíos.
+
+    v1.58.0 · Antes se demostraba con YM y MYM, futuros que ningún proveedor del
+    roster sirve. Los futuros salieron del universo, así que se demuestra con la
+    misma regla aplicada a la capacidad: un tipo de instrumento que nadie del
+    roster puede hidratar no recibe proveedor y dice por qué.
+    """
+    A = roster("ALPACA")
+    proveedor, motivo = A.resolve_quant_provider(
+        {"kind": "FUTURO", "quant_provider": "TASTYTRADE"})
+    assert proveedor is None
+    assert "fuera del roster" in motivo or "ningún proveedor" in motivo
 
 
 def test_putting_the_provider_back_restores_its_assets(roster):
-    A = roster("ALPACA,TASTYTRADE,QUANTDATA")
+    """Y volver a meterlo en el roster devuelve el activo a su proveedor."""
+    A = roster("QUANTDATA")
     A.apply_roster_capabilities()
-    for sym in ("YM", "MYM"):
-        assert A.ASSETS[sym]["quant_provider_effective"] == "TASTYTRADE", sym
-        assert A.ASSETS[sym]["full"] is True, sym
+    assert A.ASSETS["DIA"]["quant_provider_effective"] == "QUANTDATA"
+
+    A = roster("ALPACA,QUANTDATA")
+    A.apply_roster_capabilities()
+    assert A.ASSETS["DIA"]["quant_provider_effective"] == "ALPACA"
+    assert A.ASSETS["DIA"]["full"] is True
 
 
 def test_an_etf_keeps_its_declared_provider(roster):
@@ -98,10 +111,13 @@ def test_a_dynamic_etf_without_an_alpaca_chain_is_not_promised(roster):
 
 
 def test_recalculation_reports_what_it_changed(roster):
-    A = roster(None)
+    """Recalcular sin decir QUÉ cambió es recalcular a ciegas."""
+    A = roster("QUANTDATA")
     changed = A.apply_roster_capabilities()
-    assert "YM" in changed and "motivo" in changed["YM"]
-    assert changed["YM"]["antes"] != changed["YM"]["despues"]
+    assert changed, "el recálculo no reportó ni un cambio"
+    sym, detalle = next(iter(changed.items()))
+    assert "motivo" in detalle
+    assert detalle["antes"] != detalle["despues"], sym
 
 
 def test_the_startup_recalculates_the_catalog():

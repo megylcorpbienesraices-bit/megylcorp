@@ -175,7 +175,7 @@ python scripts/verify_live_quantdata.py --cierre
 ```
 
 El estado por módulo, con los cinco niveles y sin inflar ninguno, está en
-`ESTADO_v1.56.0.md`.
+`docs/operations/ESTADO_v1.56.0.md`.
 
 ---
 
@@ -216,7 +216,7 @@ vencida, o exigible sin presupuesto de cuota. El frontend lo enseña en la misma
 línea en vez de quedarse en «sin intentos · 1 rutas candidatas».
 
 28 regresiones nuevas fijan estas rutas, incluida la que mide el defecto de la
-sentinela en vez de describirlo. Inventario: **2953 casos / 187 ficheros**.
+sentinela en vez de describirlo. Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `293bdb9` · El .bat de Windows estaba roto
 
@@ -272,7 +272,7 @@ hace `importlib.reload(shared)` y deja **dos guardianes vivos** —el nuevo en
 `shared` y el viejo, que es el que `intelligence` sigue usando—. La prueba
 escribía en uno y leía del otro. Ahora toma el guardián del módulo que prueba.
 
-25 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
+25 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `98210b1` · El contrato publicado de Quant Data, al pie de la letra
 
@@ -324,7 +324,7 @@ Dos pruebas anteriores exigían asumir la ventana diaria a falta de cabeceras.
 Eran precauciones de cuando no conocíamos el plan; se reescriben contra el
 contrato publicado, manteniendo el criterio de medida (que el motor siga siendo
 una fracción pequeña del tope). 32 regresiones nuevas de ventana deslizante y
-ráfaga. Inventario: **2953 casos / 187 ficheros**.
+ráfaga. Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `d6b8611` · Al abrir el programa no había ninguna ráfaga
 
@@ -372,7 +372,7 @@ Se añade `LIMPIAR.bat`, que borra **sólo** lo que se regenera solo —`__pycac
 `*.pyc`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`— y tiene regresiones que
 le prohíben tocar `.venv`, `app\storage`, `.env`, logs o datos de mercado.
 
-21 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
+21 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `45fc6ad` · La regresión que fija el arranque en frío
 
@@ -431,7 +431,7 @@ Dos columnas nuevas en el informe, medidas contra la terminal viva:
   1.920 s no puede repetirse en silencio.
 
 Un activo que falle sigue sin detener a los demás. 24 regresiones nuevas.
-Inventario: **2953 casos / 187 ficheros**.
+Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `76521d9` · La colisión de carriles en la ranura del hub
 
@@ -491,7 +491,7 @@ Esto no adivina el cuerpo correcto de `max_pain` ni inventa una ruta para
 `trade_side_statistics` (404 en `/v1/options/tool/trade-side-statistics`): las
 dos necesitan lo que conteste el proveedor, y ahora se ve.
 
-23 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
+23 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
 
 ## REVISIÓN SOBRE `bc5a228` · Max Pain y Trade Side, contra el contrato oficial
 
@@ -538,4 +538,86 @@ La herramienta se renombra a `contract_trade_side_statistics` en sus cinco
 consumidores, y una regresión recorre los cinco ficheros línea a línea para que
 la ruta vieja no pueda volver.
 
-28 regresiones nuevas. Inventario: **2953 casos / 187 ficheros**.
+28 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.
+
+## REVISIÓN SOBRE `c8a8247` · Universo cerrado a 36 símbolos y limpieza con evidencia
+
+### El universo
+
+`app/core/universe.py` es ahora la **única** autoridad sobre qué símbolos existen
+para el programa: 15 acciones y 21 ETFs. El cierre se aplica en los dos puntos de
+entrada del catálogo —el registro dinámico y la caché en disco, al escribirla y
+al leerla— así que lo que no está en la lista no se registra, y lo que no se
+registra no se ofrece, no entra en el scanner, no se precarga y **no gasta una
+sola petición** del contrato del proveedor.
+
+**El encargo decía «Total: 37 activos» y la lista enumerada suma 36** (15 + 21).
+Se respeta la enumeración, que es el dato concreto, y no el total. Añadir un
+símbolo a ojo para cuadrar la cuenta habría metido en el universo un activo que
+nadie pidió.
+
+Lo que **no** cambia, y hay pruebas que lo atan:
+
+- Ni una rama de cálculo por activo. Una prueba prohíbe que el módulo del
+  universo contenga ventanas, griegas, multiplicadores o proveedores; otra
+  verifica que ningún módulo matemático lo consulte; otra demuestra que **añadir
+  un símbolo es añadirlo a la lista y nada más**.
+- Los 36 comparten la misma física —mismo multiplicador, misma sesión, mismo
+  modelo, mismo ejercicio— y un símbolo desconocido sigue resolviendo por la
+  plantilla genérica. El motor sigue siendo universal.
+
+El catálogo se **siembra** con el universo completo en vez de esperar al
+descubrimiento del proveedor: sin red, sin clave o con la caché fría, el operador
+veía tres activos en lugar de los suyos. La lista decide qué existe; el proveedor
+decide qué puede hacerse con cada uno.
+
+Salen del universo `YM`, `MYM`, `DJX`, `VIX` y `VXD`. `XLI` y `XLF` dejan de ser
+«contexto interno del Dow» y pasan a ser ETFs operables, con su propia cadena:
+arrastrar `DIA` en sus derivados era correcto cuando sólo servían de confirmación
+sectorial y es un proxy cruzado ahora que el analista puede operarlos.
+
+**El contrato del universo se reescribió, no se borró.** El fichero anterior
+decía en su última línea: «si decides re-expandir el universo, este archivo es el
+contrato que hay que cambiar». Eso se ha hecho: `tests/test_v1271_dow_scope_contract.py`
+es ahora `tests/test_v1580_contrato_del_universo.py`, y conserva cada invariante
+que seguía vigente —ningún activo hereda la matemática de otro, un símbolo ajeno
+falla con error tipado, consultar el ecosistema es informativo y entrar al
+pipeline es un error—.
+
+Ocho ficheros de pruebas más se re-anclaron al universo nuevo en lugar de
+silenciarlos. Donde la regla protegía algo que ya no existe —los futuros del
+Dow—, se omite **nombrando** qué prueba la cubre ahora.
+
+Y dos defectos de aislamiento que esto destapó: `ASSETS` es un diccionario vivo
+que varias pruebas mutaban, y varias hacen `importlib.reload`, que deja dos
+catálogos y **dos clases de excepción** vivos a la vez. El contrato pasaba o
+fallaba según el orden de ejecución. Un contrato que depende del orden no es un
+contrato: ahora se restaura el catálogo entre pruebas y se accede por el módulo.
+
+### La limpieza
+
+Auditoría de los 57 ficheros de la raíz y los 375 módulos Python contra seis
+controles. El resultado honesto: **el repositorio ya estaba limpio** —cero
+módulos huérfanos, cero sufijos de copia, cero `.bat` rotos, cero estáticos sin
+cargar—. Se eliminó `WINDOWS_INSTALL_HOTFIX_31210.txt` (nota de v1.40.0, sin una
+sola referencia) y se movieron dos documentos a `docs/`.
+
+El inventario completo `archivo → función → decisión → evidencia`, incluido **lo
+que NO se borró y por qué**, está en `docs/INVENTARIO_LIMPIEZA.md`. Tres ficheros
+parecían huérfanos y los exige el gate de release construyendo su nombre con la
+versión; otros son puntos de entrada que el operador abre con doble clic.
+
+Sí se limpió residuo **dentro** del código: las fichas de ecosistema de los cinco
+símbolos retirados y las referencias cruzadas que apuntaban a cadenas que el
+programa ya no puede pedir.
+
+### Verificación
+
+```
+suite            2926 passed, 51 skipped
+arranque en frío 0 errores en el log
+smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/state → HTTP 200
+/api/assets      36 activos · fuera del universo: ninguno
+```
+
+61 regresiones nuevas. Inventario: **2977 casos / 188 ficheros**.

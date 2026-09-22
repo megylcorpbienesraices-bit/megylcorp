@@ -1338,7 +1338,10 @@ async def api_architecture():
         "metric_authority": metric_authority.authority_map(),
         "pricing_dispatch": {
             sym: greeks_service.describe_dispatch(sym)
-            for sym in ("DIA", "AAPL", "DJX", "YM", "VIX")
+            # v1.58.0 · Una muestra del universo operativo, no una lista escrita a
+            # mano: DJX, YM y VIX salieron del universo y el diagnóstico seguía
+            # preguntando por ellos.
+            for sym in ("DIA", "SPY", "QQQ", "NVDA", "AAPL")
         },
         "dispatcher_usage": greeks_service.usage_stats(),
         "macro_factors": macro_factor_engine.factor_contract(),

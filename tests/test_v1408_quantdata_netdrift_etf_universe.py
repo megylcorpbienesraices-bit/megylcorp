@@ -96,7 +96,11 @@ def test_provider_etf_merge_is_union_not_intersection():
     assert by_symbol["QQQ"]["quantdata"] is True
 
 
-def test_dynamic_provider_etfs_are_searchable_and_full_only_with_own_alpaca_options(monkeypatch):
+def test_dynamic_provider_etfs_are_searchable_and_full_only_with_own_alpaca_options(monkeypatch, universo_ampliado):
+    # v1.58.0 · El universo está cerrado; estos símbolos son sintéticos y
+    # sirven para probar el CAMINO de registro sin atar la prueba a que un
+    # ticker real siga en la lista mañana.
+    universo_ampliado("ZZZA", "ZZZB")
     before = set(ASSETS)
     rows = [
         {"symbol": "ZZZA", "name": "Test ETF A", "alpaca": True, "quantdata": True, "alpaca_has_options": True},
@@ -152,5 +156,11 @@ def test_nextgen_net_drift_mini_uses_quantdata_call_put_net_names():
     assert "provider:'QUANTDATA'" in fn
 
 
-def test_static_core_universe_is_not_redefined_by_provider_catalog():
-    assert {"DIA", "YM", "MYM", "DJX", "XLI", "XLF", "VIX", "VXD"}.issubset(STATIC_ASSET_SYMBOLS)
+def test_static_core_universe_is_not_redefined_by_provider_catalog(universo_ampliado):
+    # v1.58.0 · El universo está cerrado; estos símbolos son sintéticos y
+    # sirven para probar el CAMINO de registro sin atar la prueba a que un
+    # ticker real siga en la lista mañana.
+    universo_ampliado("ZZZA", "ZZZB", "ZZZC")
+    # v1.58.0 · Los revisados a mano son ahora tres; el resto del universo se
+    # siembra con configuración genérica y el proveedor la enriquece.
+    assert {"DIA", "XLI", "XLF"}.issubset(STATIC_ASSET_SYMBOLS)

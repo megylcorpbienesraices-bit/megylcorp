@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -125,6 +127,11 @@ def test_future_engine_uses_own_multiplier_and_black76_model():
     assert mym.option_model == MODEL_FUTURE
 
 
+@pytest.mark.skip(reason="v1.58.0 · YM y MYM salieron del universo operativo. La "
+                         "regla que protegían —ningún activo usa la matemática de "
+                         "otro— la cubre ahora "
+                         "test_v1580_contrato_del_universo.py::"
+                         "test_no_asset_maps_to_another_instruments_math sobre los 36.")
 def test_ym_and_mym_are_full_own_chain_assets_without_dia_proxy():
     for sym in ("YM", "MYM"):
         cfg = asset_info(sym)

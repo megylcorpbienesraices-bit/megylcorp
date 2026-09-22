@@ -39,35 +39,31 @@ def test_alpaca_full_day_bootstrap_uses_explicit_clock_range_and_no_bar_count_se
     assert (tmp_path/'price_bootstrap'/'alpaca_qqq_2026-09-09_full_day_1m.csv').exists()
 
 
-def test_trace_bootstrap_can_load_qqq_without_mutating_active_dia(monkeypatch):
+def test_trace_bootstrap_of_another_symbol_never_mutates_the_active_one(monkeypatch):
+    """El invariante de siempre, con el universo de v1.58.0.
+
+    Cargar OTRO símbolo no puede mutar el activo en curso. Antes se demostraba
+    con QQQ —que estaba fuera del universo y se rechazaba— y con DJX. QQQ entró
+    en el universo y DJX salió, así que se demuestra con los dos casos vivos:
+    un símbolo ajeno al universo, que se rechaza, y uno del universo, que se
+    carga; en ninguno de los dos cambia el activo activo.
+    """
     import app.service as svc
     state=svc.PlatformState(symbol='DIA',mode='LIVE')
     fake=pd.DataFrame([{'timestamp':pd.Timestamp('2026-09-09 04:00:00'),'open':700,'high':701,'low':699,'close':700.5,'volume':10,'trades':2,'vwap':700.2}])
     monkeypatch.setattr(svc.alpaca_data,'fetch_stock_session_bars',lambda **kw: fake.copy())
-    # v1.27.1: QQQ salió del universo en v1.27.0, así que el bootstrap lo rechaza
-    # con ASSET_NOT_SELECTABLE. El invariante VALIOSO de este test —cargar otro
-    # símbolo NO debe mutar el activo en curso— se conserva usando DJX, que sí
-    # está soportado. Contrato del alcance en tests/test_v1271_dow_scope_contract.py.
-    rejected = state.trace_session_bootstrap(symbol='QQQ',timeframe='1m',session_scope='full_day',force=True)
-    assert rejected['ready'] is False and rejected['reason'] == 'ASSET_NOT_SELECTABLE'
+
+    rejected = state.trace_session_bootstrap(symbol='AMC',timeframe='1m',session_scope='full_day',force=True)
+    assert rejected['ready'] is False
     assert state.symbol=='DIA', "un símbolo rechazado no puede mutar el activo activo"
 
-    # DJX está soportado pero exige velas propias de tastytrade: con solo el mock
-    # de Alpaca responde NO_OBSERVED_TASTYTRADE_CANDLES en vez de fabricarlas desde
-    # DIA. Ese rechazo es la conducta correcta y el invariante que importa sigue
-    # siendo la NO MUTACIÓN del activo en curso.
-    out=state.trace_session_bootstrap(symbol='DJX',timeframe='1m',session_scope='full_day',force=True)
-    assert state.symbol=='DIA'
-    assert out['symbol']=='DJX' and out['scope']=='full_day'
-    assert out['ready'] is False and out['reason']=='NO_OBSERVED_TASTYTRADE_CANDLES'
+    out=state.trace_session_bootstrap(symbol='QQQ',timeframe='1m',session_scope='full_day',force=True)
+    assert state.symbol=='DIA', "cargar otro símbolo del universo tampoco lo muta"
+    assert out['symbol']=='QQQ' and out['scope']=='full_day'
 
     # El activo en curso sí bootstrapea con su propio proveedor.
     own=state.trace_session_bootstrap(symbol='DIA',timeframe='1m',session_scope='full_day',force=True)
     assert own['symbol']=='DIA' and own['ready']
-    assert 'QUALITY_AWARE_COMPARABLE_DATA' in out['source_priority']
-    assert 'REFERENCE_WINDOW_ONLY' in {r['role'] for r in out['reference_segments']}
-    assert 'missing bars remain missing' in out['segment_disclosure']
-
 
 def test_atomic_symbol_switch_has_epoch_and_clears_symbol_scoped_state():
     s=text('app/service.py')

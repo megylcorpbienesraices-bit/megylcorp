@@ -758,7 +758,7 @@
     "test_browser_switch_is_progressive_symbol_scoped_and_discards_stale_responses",
     "test_internal_structural_flow_native_structure_and_opra_diagnostics_are_visibly_separate",
     "test_itm_structural_flow_is_symbol_scoped_context_not_external_orderflow",
-    "test_trace_bootstrap_can_load_qqq_without_mutating_active_dia",
+    "test_trace_bootstrap_of_another_symbol_never_mutates_the_active_one",
     "test_trace_pulse_filters_opra_to_active_underlying_and_has_epoch_guards",
     "test_universal_trace_scale_not_replaced_by_fixed_plus_minus_four_percent",
     "test_version_and_universal_contract_metadata"
@@ -898,7 +898,7 @@
     "test_historical_precompute_never_overwrites_live_ready",
     "test_persistence_identity_matches_specialized_release",
     "test_release_identity_keeps_dow_core_while_picker_allows_dynamic_etfs",
-    "test_visible_universe_is_direct_dow_only"
+    "test_visible_universe_is_the_closed_universe"
    ]
   },
   "tests/test_v1270_sophia_aggression.py": {
@@ -1088,22 +1088,6 @@
     "test_svi_exposes_slice_and_global_calendar_readiness_separately",
     "test_tasty_rest_missing_event_time_is_receive_proxy_and_presentation_only",
     "test_vps_env_example_uses_conservative_release_defaults"
-   ]
-  },
-  "tests/test_v1271_dow_scope_contract.py": {
-   "casos": 20,
-   "tests": [
-    "test_architecture_string_matches_the_declared_scope",
-    "test_context_only_assets_are_not_selectable",
-    "test_dia_index_root_is_the_optionable_one",
-    "test_ecosystem_of_unsupported_symbol_degrades_instead_of_raising",
-    "test_every_asset_declares_its_own_provider_and_window",
-    "test_full_assets_have_their_own_option_chain_path",
-    "test_no_asset_maps_to_another_instruments_math",
-    "test_product_marker_declares_the_same_scope",
-    "test_retired_symbols_raise_typed_error_not_silent_fallback",
-    "test_unsupported_error_names_the_visible_universe",
-    "test_visible_universe_is_exactly_the_dow_set"
    ]
   },
   "tests/test_v1271_hardening.py": {
@@ -2037,11 +2021,11 @@
    "casos": 18,
    "tests": [
     "test_a_dynamic_etf_without_an_alpaca_chain_is_not_promised",
+    "test_an_asset_moves_to_the_provider_that_can_serve_it",
+    "test_an_asset_nobody_can_serve_SAYS_SO",
     "test_an_etf_keeps_its_declared_provider",
-    "test_an_index_moves_to_the_provider_that_can_serve_it",
     "test_an_unclassifiable_tape_explains_itself_instead_of_drawing_nothing",
     "test_capability_is_by_instrument_type_not_by_preference",
-    "test_futures_have_no_substitute_and_say_so",
     "test_putting_the_provider_back_restores_its_assets",
     "test_recalculation_reports_what_it_changed",
     "test_sophia_answers_by_the_same_channel_she_was_asked",
@@ -3520,8 +3504,50 @@
     "test_un_vencimiento_viejo_CADUCA",
     "test_una_fecha_con_formato_raro_NO_entra"
    ]
+  },
+  "tests/test_v1580_contrato_del_universo.py": {
+   "casos": 19,
+   "tests": [
+    "test_architecture_string_matches_the_declared_scope",
+    "test_context_only_assets_are_not_selectable",
+    "test_dia_index_root_is_the_optionable_one",
+    "test_ecosystem_of_unsupported_symbol_degrades_instead_of_raising",
+    "test_every_asset_declares_its_own_provider_and_window",
+    "test_full_assets_have_their_own_option_chain_path",
+    "test_no_asset_maps_to_another_instruments_math",
+    "test_product_marker_declares_the_same_scope",
+    "test_retired_symbols_raise_typed_error_not_silent_fallback",
+    "test_unsupported_error_names_the_visible_universe",
+    "test_visible_universe_is_exactly_the_closed_universe"
+   ]
+  },
+  "tests/test_v1580_universo_cerrado.py": {
+   "casos": 25,
+   "tests": [
+    "test_añadir_un_simbolo_es_añadirlo_a_la_LISTA_y_nada_mas",
+    "test_cada_simbolo_del_universo_tiene_su_clase_correcta",
+    "test_el_catalogo_estatico_solo_tiene_permitidos",
+    "test_el_cerrojo_del_universo_vive_en_UN_solo_modulo",
+    "test_el_registro_dinamico_RECHAZA_lo_que_no_esta",
+    "test_el_registro_dinamico_SI_admite_los_permitidos",
+    "test_el_selector_solo_ofrece_permitidos",
+    "test_el_universo_es_inmutable",
+    "test_el_universo_no_aparece_en_el_nucleo_de_calculo",
+    "test_el_universo_no_lleva_NI_UN_parametro_de_calculo",
+    "test_el_universo_tiene_el_tamaño_declarado",
+    "test_la_cache_del_catalogo_tampoco_engorda",
+    "test_las_quince_acciones_estan",
+    "test_los_dos_puntos_de_entrada_consultan_el_cerrojo",
+    "test_los_instrumentos_del_universo_comparten_la_MISMA_fisica",
+    "test_los_retirados_ya_no_pertenecen_al_universo",
+    "test_los_veintiun_etfs_estan",
+    "test_ninguna_lista_visible_nombra_un_retirado",
+    "test_no_hay_duplicados_entre_acciones_y_etfs",
+    "test_un_simbolo_desconocido_sigue_resolviendo",
+    "test_una_cache_VIEJA_se_filtra_al_leerla"
+   ]
   }
  },
- "total_minimo": 2953,
+ "total_minimo": 2977,
  "version": "1.56.0"
 }
