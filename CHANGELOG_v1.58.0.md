@@ -1,6 +1,116 @@
-# ITM QUANT MULTI ASSET · v1.57.2 — La suma por contrato, el módulo y el nombre
+# ITM QUANT MULTI ASSET · v1.58.0 — Timeouts reales y concurrencia real
 
-Release: `ITM_QUANT_v1.57.2_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+Release: `ITM_QUANT_v1.58.0_PRE_VPS` · Base: `v1.56.0` · Alcance: `MULTI_ASSET`
+
+**No se modifican fórmulas, pesos del Scanner ni autoridad direccional.** La
+metodología de Call Wall y Put Wall de v1.57.2 queda intacta.
+
+---
+
+## 0 · BLOQUE 1+2 · EL TRANSPORTE, DE RAÍZ
+
+### El defecto, demostrado en producción
+
+La consola de Windows mostró ocho endpoints muriendo **exactamente a 5.0 s**:
+`delta`, `gamma`, `net_flow`, `net_drift`, `market_share`,
+`contract_trade_side_statistics`, `options_order_flow` y `options_order_flow_raw`.
+
+El plazo «adaptativo» de v1.57.x no gobernaba esas llamadas. Tres líneas lo
+explican:
+
+```python
+ENDPOINT_RUNTIME.set_default_timeout(self.settings.request_timeout_seconds)  # ← 5
+_plazo = _rt.timeout()        # sin muestras → devuelve el default → 5.0
+timeout=httpx.Timeout(self.settings.request_timeout_seconds)                 # ← 5
+```
+
+El arranque en frío salía de `QUANTDATA_TIMEOUT_SECONDS`, y el instalador
+reparte `=5`. Aprender de ahí es lento **por construcción**: hacen falta ocho
+muestras para calibrar, un timeout aporta una, y el cortacircuitos abre a los
+cuatro fallos seguidos con esperas que se duplican. En una sesión recién
+arrancada, los endpoints pesados mueren a 5.0 s durante minutos.
+
+Y `httpx.Timeout(plazo)` ponía **el mismo número en connect, read, write y
+pool**: un endpoint que conecta en 80 ms y calcula en 9 s se cortaba por lectura
+con un presupuesto pensado para la conexión.
+
+### Lo que cambia
+
+```
+warm start        12 s de POLÍTICA, no del .env
+connect / read    dos plazos, dos causas, dos escalas
+autoridad         p95 medido por endpoint
+EWMA              solo declara DERIVA, nunca fija el plazo
+concurrencia      techo de peticiones VIVAS, compartido por los dos carriles
+clases            ligero / pesado, con techo propio para las pesadas
+escalonado        por reserva de turno, no por «mirar y dormir»
+retry             una vez, y solo con las cinco condiciones
+telemetría        queue_wait_ms · request_ms · total_ms · timeout_budget_ms
+```
+
+### `QUANTDATA_TIMEOUT_SECONDS` deja de ser la autoridad
+
+No se elimina —hay `.env` en marcha con ella— pero cambia de significado y **se
+declara en el Auditor**:
+
+* valor **más largo** que el warm start → se respeta (alguien pide paciencia);
+* valor **más corto** → se **ignora**, y la pantalla dice que se ignoró.
+
+Nadie tiene que editar su `.env` para que el producto se comporte bien.
+
+### El límite de concurrencia no es opcional
+
+Respetar 240/60 s y 20/1 s **no basta**: veinte peticiones en un segundo cumplen
+el contrato y, si las veinte son mapas por intervalo, están las veinte **vivas**
+a la vez compitiendo entre ellas. La congestión la provocamos nosotros y se lee
+como lentitud del proveedor.
+
+Y subir plazos **sin** límite de concurrencia lo empeora: los sockets viven más
+y se solapan más. Por eso los bloques 1 y 2 son una sola medida.
+
+El escalonado tenía además un defecto propio que la suite destapó: comprobar
+cuánto ha pasado desde el último arranque y dormir la diferencia **no
+serializa** —tres pesadas leen el mismo instante y despiertan juntas—. Ahora
+cada una **reserva** su hueco sobre un reloj que sólo avanza.
+
+### El reintento tiene presupuesto, no solo jitter
+
+Reintentar un timeout duplica la petición contra la misma cuenta. Las cinco
+condiciones, y el motivo cuando falta alguna:
+
+```
+clase reintentable · cortacircuitos cerrado · fuera de la ráfaga
+hueco de concurrencia AHORA · cabe en lo que queda de ciclo
+```
+
+Nunca para 400/401/403/404. Uno por endpoint y por ciclo.
+
+### Dónde se va el tiempo
+
+`queue_wait_ms` es congestión **nuestra**; `request_ms` es lentitud **suya**. Sin
+separarlas, «tardó nueve segundos» no distingue las dos, y los arreglos son
+opuestos: al proveedor lento se le da más plazo; a la cola propia, menos
+concurrencia. Panel nuevo en AUDITOR: **QUANT DATA · TIEMPOS Y CONCURRENCIA**.
+
+### Lo que esto NO demuestra
+
+44 pruebas de caos —timeout, 429, 5xx, cuerpo vacío, respuesta lenta,
+recuperación, aislamiento— reproducen los fallos **sin tocar la red**. Demuestran
+la conducta del código; no pueden demostrar la del proveedor.
+
+Las siete afirmaciones del bloque se cierran **sólo** con tráfico real:
+
+```
+CERTIFICAR_TRANSPORTE.bat        →  JSON + MD con las siete medidas
+```
+
+Mide masa de timeouts por plazo (la firma del 5.0 s), concurrencia máxima
+observada, recuperación tras timeout, aislamiento entre endpoints y entre
+activos, y el reparto cola/proveedor. **Ningún criterio LIVE se cierra aquí.**
+
+---
+
+## 1 · Los muros, la suma por contrato y el nombre del control
 
 **No cambia la metodología de walls.** El concepto de Call Wall y Put Wall es el
 mismo de v1.57.0; esto cierra tres condiciones del contrato que no estaban
@@ -8,7 +118,7 @@ cumplidas al pie de la letra.
 
 ---
 
-## 0 · LAS TRES CONDICIONES DEL CONTRATO DE WALLS
+### LAS TRES CONDICIONES DEL CONTRATO (v1.57.2)
 
 ### 1 · El GEX se SUMA por contrato dentro del strike
 
@@ -85,7 +195,7 @@ precio, se publica con `crossed: true` y su posición declarada, no se filtra.
 
 ---
 
-## 1 · RUNTIME CERTIFICADO · un Python que Windows puede instalar
+## 2 · RUNTIME CERTIFICADO · un Python que Windows puede instalar
 
 ---
 
@@ -156,9 +266,9 @@ La rama 3.13 hay que revisarla **antes del 2026-10-31**.
 
 ---
 
-## 2 · Los muros, con su fórmula y su veredicto
+## 3 · HISTORIAL · los muros, con su fórmula y su veredicto
 
-## 2.0 · CAMBIO DE FÓRMULA DECLARADO
+### CAMBIO DE FÓRMULA DECLARADO (v1.57.0)
 
 **Una fórmula sí cambia**, y con ella un número en pantalla: el strike de Call
 Wall y Put Wall. El método anterior —media geométrica de la exposición agregada
@@ -182,7 +292,7 @@ El changelog de v1.56.0 vive en el historial de git (`CHANGELOG_v1.56.0.md`, en
 
 ---
 
-## 2.1 · CALL WALL Y PUT WALL · el contrato, entero
+### CALL WALL Y PUT WALL · el contrato, entero (v1.57.0)
 
 ### La fórmula, y sólo la fórmula
 
@@ -306,7 +416,7 @@ veredicto. Nunca disfrazada del resultado principal.
 
 ---
 
-## 3 · PLAZOS · cinco segundos apagaban media pantalla
+## 4 · PLAZOS · primer intento, incompleto
 
 El registro del motor, media hora seguida, con la cuota en **7 de 240**:
 
@@ -401,6 +511,31 @@ smoke test       / · /legacy · /api/assets · /api/terminal/bundle · /api/sta
 
 24 regresiones nuevas en `tests/test_v1581_plazo_del_transporte.py`. Inventario:
 **3001 casos / 189 ficheros**.
+
+## Verificación de v1.58.0
+
+```
+intérprete       CPython 3.13.12 · el certificado
+suite            3068 passed, 49 skipped, 0 failed
+caos             44 pruebas nuevas en tests/test_v1580_caos_transporte.py
+ruff del gate    E9,F63,F7,F82 -> All checks passed
+eslint           no-undef limpio · sintaxis OK
+arranque en frío 0 degradaciones · 6 rutas -> HTTP 200
+```
+
+**Pendiente, y dicho como tal:** las siete afirmaciones LIVE del transporte
+—incluida «ninguna llamada muere sistemáticamente a 5.0 s»— **no están
+cerradas**. Se cierran ejecutando `CERTIFICAR_TRANSPORTE.bat` en Windows contra
+la API real. El manifiesto de release lo registra como
+`live_certification.status: PENDIENTE_DE_EJECUCION_EN_WINDOWS`.
+
+Bloques **3, 4, 5, 7** (criticidad por consumidor, WallSnapshot, dark pool con
+estados separados, máquina de estados del scheduler) y el **6** (unidades
+tipadas detrás de un adaptador) no entran en esta versión.
+
+Inventario: **3117 casos / 192 ficheros**.
+
+---
 
 ## Verificación de v1.57.2
 

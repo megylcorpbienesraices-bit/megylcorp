@@ -27,6 +27,7 @@ from collections import deque
 from typing import Any, Dict, Tuple
 
 from ...core.endpoint_runtime import EndpointRegistry
+from ...core.request_governor import HEAVY, LIGHT, RequestGovernor
 
 
 def _env_float(name: str, default: float | None) -> float | None:
@@ -583,7 +584,61 @@ QUOTA = QuotaGuard()
 #: acumulaba en el registro— no tenía plazo medido ni podía aprender de ellos.
 #: El plazo configurado se inyecta con `set_default_timeout` al arrancar: el
 #: registro se crea al importar, cuando todavía no hay settings.
-ENDPOINT_RUNTIME = EndpointRegistry(default_timeout=10.0)
+ENDPOINT_RUNTIME = EndpointRegistry()
+
+# ── clases de coste · v1.58.0 ─────────────────────────────────────────────
+#
+# Respetar 240/60 s y 20/1 s no basta: veinte peticiones en un segundo cumplen
+# el contrato y, si las veinte son mapas por intervalo, están las veinte VIVAS a
+# la vez compitiendo entre ellas. La congestión la provocamos nosotros y se lee
+# como lentitud del proveedor.
+#
+# PESADAS son las que recorren la cadena entera, la cinta del día o una serie
+# temporal completa. El gobernador limita cuántas de éstas pueden estar en vuelo
+# a la vez y las escalona.
+HEAVY_TOOLS = frozenset({
+    # exposición por strike y por vencimiento: la cadena entera, greek a greek
+    "gex_by_strike", "dex_by_strike", "vex_by_strike", "chex_by_strike",
+    "gex_by_expiration", "dex_by_expiration", "vex_by_expiration",
+    "chex_by_expiration", "oi_by_strike", "oi_by_expiration",
+    # mapas por intervalo: serie temporal × strike
+    "interval_map_gamma", "interval_map_delta", "interval_map_vanna",
+    "interval_map_charm",
+    # la cinta completa del día
+    "options_order_flow", "options_order_flow_raw",
+    # estadísticas y series largas
+    "market_share", "contract_statistics", "contract_trade_side_statistics",
+    "max_pain", "max_pain_over_time", "oi_over_time", "oi_change",
+    "stock_price_over_time", "equity_prints",
+    # dark pool: ventana completa de intervalos
+    "dark_flow", "dark_pool_levels",
+    # volatilidad con histórico
+    "term_structure", "volatility_skew", "iv_rank", "volatility_drift",
+})
+
+#: Los nombres del carril del MOTOR, que no coinciden con las claves de página.
+HEAVY_ENGINE_JOBS = frozenset({
+    "gamma", "delta", "vanna", "charm", "interval_gamma", "max_pain", "iv_rank",
+})
+
+
+def weight_of(key: str) -> str:
+    """LIGHT o HEAVY. Una sola tabla, para los dos carriles."""
+    k = str(key or "")
+    if k.startswith("engine:"):
+        return HEAVY if k.split(":", 1)[1] in HEAVY_ENGINE_JOBS else LIGHT
+    if k in HEAVY_TOOLS:
+        return HEAVY
+    # El nombre DESNUDO del carril del motor también cuenta: `gamma`, `delta` y
+    # `max_pain` son los nombres con los que el Data Hub los publica y con los
+    # que aparecieron en la consola. Clasificarlos ligeros por no llevar prefijo
+    # dejaría fuera del techo de pesadas justo a los que se ahogaban entre ellos.
+    return HEAVY if k in HEAVY_ENGINE_JOBS else LIGHT
+
+
+#: Gobernador de peticiones en vuelo, COMPARTIDO por los dos carriles: el techo
+#: de concurrencia no serviría de nada si cada carril tuviera el suyo.
+GOVERNOR = RequestGovernor()
 
 
 # Herramienta de página -> clave con la que el carril del motor publica su payload.

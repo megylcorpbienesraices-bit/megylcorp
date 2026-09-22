@@ -776,6 +776,14 @@
       </article>
     </div>
     <article class="card">
+      <header><h2>QUANT DATA · TIEMPOS Y CONCURRENCIA</h2>
+        <small>Dónde se va el tiempo de cada petición. <b>COLA</b> es congestión nuestra y se arregla bajando concurrencia; <b>PETICIÓN</b> es lentitud del proveedor y se arregla con más plazo. Sin separarlas, «tardó nueve segundos» no distingue las dos.</small></header>
+      <div class="body"><p class="note" id="qdTimingPolicy">—</p><div class="table-wrap"><table class="data" id="tblQdTimings">
+        <thead><tr><th>ENDPOINT</th><th>CLASE</th><th>COLA ms</th><th>PETICIÓN ms</th><th>TOTAL ms</th><th>PRESUPUESTO ms</th><th>CUELLO</th><th>PLAZO</th><th>TIMEOUTS</th><th>DERIVA</th></tr></thead><tbody></tbody>
+      </table></div></div>
+    </article>
+
+    <article class="card">
       <header><h2>MUROS · CÁLCULO Y VEREDICTO</h2>
         <small>Gamma Exposure = gamma × OI × multiplicador × precio² × 0.01. El muro de cada lado es su MÁXIMO, con los dos lados separados. Los cinco números que lo sostienen —strike, gamma, OI, precio y hora— están aquí para poder comprobarlo sin abrir el código.</small></header>
       <div class="body"><div class="table-wrap"><table class="data" id="tblWallVerdict">

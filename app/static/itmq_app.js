@@ -1890,6 +1890,56 @@
         : (q.remaining === null || q.remaining === undefined ? 'cuota —'
           : `cuota ${q.remaining}${q.limit ? '/' + q.limit : ''}`));
 
+    // v1.58.0 · TIEMPOS Y CONCURRENCIA · dónde se va el tiempo de verdad.
+    //
+    // La consola de producción mostraba ocho endpoints muriendo exactamente a
+    // 5.0 s y no había forma de saber, desde la pantalla, si el proveedor
+    // tardaba o si nos estábamos ahogando nosotros con nuestras propias
+    // peticiones simultáneas. Estas cuatro cifras lo responden.
+    const gov = cov.governor || {};
+    const drift = {};
+    for (const d of (cov.drift || [])) drift[d.key] = d;
+    const runtimeByKey = {};
+    for (const e of ((cov.endpoint_runtime || {}).endpoints || [])) runtimeByKey[e.key] = e;
+    fillTable('tblQdTimings', (gov.endpoints || []), t => {
+      const rt = runtimeByKey[t.key] || {};
+      const dr = drift[t.key] || {};
+      return [
+        `<code class="mute">${esc(t.key)}</code>`,
+        t.weight === 'HEAVY' ? '<span class="warn">PESADO</span>' : '<span class="dim">ligero</span>',
+        Q.isNum(Q.num(t.queue_wait_ms, NaN)) ? Q.num(t.queue_wait_ms).toFixed(0) : '—',
+        Q.isNum(Q.num(t.request_ms, NaN)) ? Q.num(t.request_ms).toFixed(0) : '—',
+        Q.isNum(Q.num(t.total_ms, NaN)) ? Q.num(t.total_ms).toFixed(0) : '—',
+        Q.isNum(Q.num(t.timeout_budget_ms, NaN)) ? Q.num(t.timeout_budget_ms).toFixed(0) : '—',
+        // El diagnóstico, no el dato: quién causó la espera.
+        t.bottleneck === 'COLA_PROPIA'
+          ? '<span class="warn">COLA</span>'
+          : '<span class="dim">PETICIÓN</span>',
+        rt.timeout_source === 'MEASURED_P95'
+          ? `<span class="pos">p95 ${Q.num(rt.read_timeout_seconds, 0).toFixed(1)}s</span>`
+          : `<span class="dim">warm ${Q.num(rt.read_timeout_seconds, 0).toFixed(1)}s</span>`,
+        Q.num(t.timeouts, 0) > 0 ? `<span class="neg">${Q.num(t.timeouts)}</span>` : '0',
+        dr.drifting ? '<span class="warn">DERIVANDO</span>' : '<span class="dim">—</span>',
+      ];
+    }, 'Sin peticiones medidas en este ciclo', true);
+    const tp = el('qdTimingPolicy');
+    if (tp) {
+      const pol = cov.timeout_policy || {};
+      const legacy = pol.legacy_ignored
+        ? `<span class="warn">${esc(pol.legacy_env)}=${esc(String(pol.legacy_value))} IGNORADO</span> · ${esc(pol.legacy_note || '')}`
+        : `<span class="dim">${esc(pol.legacy_env || '')}: ${esc(pol.legacy_note || '—')}</span>`;
+      tp.innerHTML = `conexión ${esc(String(pol.connect_timeout_s ?? '—'))}s · warm start lectura `
+        + `${esc(String(pol.read_warm_start_s ?? '—'))}s · autoridad del plazo: ${esc(pol.authority || '—')}`
+        + `<br>concurrencia ${Q.num(gov.inflight, 0)}/${Q.num(gov.max_inflight, 0)}`
+        + ` (pesadas ${Q.num(gov.inflight_heavy, 0)}/${Q.num(gov.max_heavy_inflight, 0)})`
+        + ` · máximo observado ${Q.num(gov.max_observed_inflight, 0)}`
+        + ` · escalonado ${esc(String(gov.stagger_seconds ?? '—'))}s`
+        + ((gov.self_congested || []).length
+          ? `<br><span class="warn">congestión propia en: ${esc((gov.self_congested || []).join(' · '))}</span>`
+          : '')
+        + `<br>${legacy}`;
+    }
+
     // v1.57.0 · MUROS · EL CÁLCULO Y SU VEREDICTO.
     //
     // El cálculo de los muros ya viajaba en el JSON del auditor y no se pintaba

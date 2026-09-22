@@ -3586,6 +3586,47 @@
     "test_una_fecha_con_formato_raro_NO_entra"
    ]
   },
+  "tests/test_v1580_caos_transporte.py": {
+   "casos": 44,
+   "tests": [
+    "test_caos_429_llega_con_su_retry_after",
+    "test_caos_5xx_es_del_proveedor_y_reintentable",
+    "test_caos_cuerpo_vacio_es_respuesta_valida_no_error",
+    "test_caos_recuperacion_tras_timeout_vuelve_a_LIVE",
+    "test_caos_respuesta_lenta_dentro_del_plazo_se_acepta",
+    "test_caos_timeout_de_conexion_no_se_confunde_con_lentitud_del_endpoint",
+    "test_caos_timeout_de_lectura_dice_su_fase_y_su_plazo",
+    "test_caos_un_endpoint_caido_no_toca_a_los_demas",
+    "test_caos_un_timeout_de_conexion_no_infla_el_plazo_de_lectura",
+    "test_dos_pesadas_no_arrancan_en_el_mismo_instante",
+    "test_el_carril_de_paginas_consulta_el_presupuesto_antes_de_reintentar",
+    "test_el_ciclo_devuelve_el_reintento_a_cada_endpoint",
+    "test_el_gobernador_limita_las_peticiones_VIVAS_no_las_hechas",
+    "test_el_gobernador_mide_donde_se_va_el_tiempo",
+    "test_el_lkg_es_independiente_por_herramienta",
+    "test_el_motivo_del_no_reintento_viaja_siempre",
+    "test_el_plazo_de_conexion_es_independiente_del_de_lectura",
+    "test_el_transporte_recibe_los_dos_plazos_por_separado",
+    "test_el_turno_se_libera_aunque_la_peticion_reviente",
+    "test_la_autoridad_del_plazo_es_el_p95_no_la_ewma",
+    "test_la_clasificacion_separa_lo_pesado_de_lo_ligero",
+    "test_la_ewma_declara_la_deriva_sin_mover_el_plazo",
+    "test_la_variable_vieja_no_fija_el_warm_start_en_ningun_sitio",
+    "test_las_pesadas_tienen_su_propio_techo",
+    "test_los_dos_carriles_piden_turno_al_mismo_gobernador",
+    "test_ningun_endpoint_sin_historia_arranca_por_debajo_del_warm_start",
+    "test_no_se_reintenta_con_el_cortacircuitos_abierto",
+    "test_no_se_reintenta_si_no_cabe_en_el_ciclo",
+    "test_no_se_reintenta_sin_hueco_de_concurrencia",
+    "test_nunca_se_reintenta_durante_la_rafaga_de_arranque",
+    "test_sin_muestras_no_hay_deriva_que_declarar",
+    "test_solo_se_reintenta_lo_que_un_reintento_puede_arreglar",
+    "test_un_env_de_cinco_segundos_no_gobierna_el_arranque_en_frio",
+    "test_un_env_mas_largo_si_se_respeta",
+    "test_un_solo_reintento_por_endpoint_y_ciclo",
+    "test_una_respuesta_tardia_de_un_activo_no_contamina_a_otro"
+   ]
+  },
   "tests/test_v1580_contrato_del_universo.py": {
    "casos": 19,
    "tests": [
@@ -3629,7 +3670,7 @@
    ]
   },
   "tests/test_v1581_plazo_del_transporte.py": {
-   "casos": 24,
+   "casos": 25,
    "tests": [
     "test_el_carril_de_paginas_aprende_de_sus_timeouts",
     "test_el_carril_de_paginas_da_la_holgura_al_ciclo_no_a_la_peticion",
@@ -3637,7 +3678,6 @@
     "test_el_carril_del_motor_da_la_holgura_al_ciclo_no_a_la_peticion",
     "test_el_carril_del_motor_no_mezcla_sus_latencias_con_las_de_las_paginas",
     "test_el_plazo_configurado_entra_en_el_registro_ya_creado",
-    "test_el_plazo_configurado_respeta_el_suelo",
     "test_el_plazo_de_la_peticion_es_el_que_se_le_pasa",
     "test_el_plazo_por_defecto_del_codigo_coincide_con_el_que_se_reparte",
     "test_el_plazo_que_se_reparte_cabe_en_el_ciclo_del_motor",
@@ -3645,12 +3685,14 @@
     "test_el_timeout_es_reconocible_por_TIPO_no_por_texto",
     "test_el_ultimo_valor_bueno_no_se_anota_como_latencia_de_exito",
     "test_la_holgura_del_ciclo_es_positiva",
+    "test_la_latencia_medida_excluye_la_cola_del_gobernador",
     "test_los_dos_carriles_comparten_el_registro",
     "test_los_dos_carriles_ponen_el_plazo_configurado_al_arrancar",
     "test_los_timeouts_se_publican_para_poder_leerlos_en_el_auditor",
-    "test_sin_plazo_explicito_manda_el_configurado",
+    "test_sin_plazo_explicito_manda_el_warm_start_de_las_settings",
     "test_subir_el_plazo_no_es_llamar_para_siempre",
     "test_un_endpoint_lento_ya_no_se_queda_clavado_en_el_plazo_corto",
+    "test_un_env_mas_corto_no_puede_rebajar_el_warm_start",
     "test_un_fallo_que_NO_es_de_plazo_sigue_sin_tocar_las_latencias",
     "test_un_fallo_tardio_no_se_cuenta_como_una_segunda_degradacion",
     "test_un_plazo_agotado_dice_QUE_plazo_expiro",
@@ -3658,6 +3700,6 @@
    ]
   }
  },
- "total_minimo": 3072,
- "version": "1.57.2"
+ "total_minimo": 3117,
+ "version": "1.58.0"
 }

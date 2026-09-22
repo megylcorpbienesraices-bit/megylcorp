@@ -32,7 +32,7 @@ from app.core.endpoint_runtime import (
 
 def test_sin_muestra_suficiente_se_usa_el_plazo_configurado():
     """Calibrar con tres datos es peor que no calibrar."""
-    rt = EndpointRuntime("x", default_timeout=10.0)
+    rt = EndpointRuntime("x", default_timeout=10.0)   # warm start explícito
     assert rt.calibrated() is False
     assert rt.timeout() == pytest.approx(10.0)
     for _ in range(ER.MIN_SAMPLES_TO_CALIBRATE - 1):
@@ -273,10 +273,11 @@ def test_el_fetch_usa_el_plazo_medido_y_registra_la_latencia():
     """
     from pathlib import Path
     src = Path("app/providers/quantdata/intelligence.py").read_text(encoding="utf-8")
-    assert "_plazo = _rt.timeout()" in src
-    assert "timeout_s=_plazo + CHANNEL_SLACK_S," in src
+    # v1.58.0 · el plazo es un `Deadline` con conexión y lectura separadas.
+    assert "_plazo = _rt.deadline()" in src
+    assert "timeout_s=_plazo.total + CHANNEL_SLACK_S," in src
     assert "_client.post(path, body, timeout=_plazo)" in src
-    assert "_rt.record_success(time.monotonic() - _t0)" in src
+    assert "_rt.record_success(fila[\"request_ms\"] / 1000.0)" in src
     assert "_rt.record_failure(detail, status=STATUS_TRANSIENT)" in src
 
 

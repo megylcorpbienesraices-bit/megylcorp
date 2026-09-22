@@ -37,7 +37,7 @@ pedía comprobarlos antes de borrar.
 
 | archivo | por qué se queda |
 |---|---|
-| `QUANT_ENGINE_AUDIT_v1.57.2.md`, `VALIDACION_PRE_VPS_v1.57.2.md`, `RELEASE_MANIFEST_v1.57.2.json` | **Los exige el gate de release.** No aparecen en ningún grep porque el nombre se construye con la versión: `ROOT / f"QUANT_ENGINE_AUDIT_v{version}.md"`. Borrarlos rompe el empaquetado. |
+| `QUANT_ENGINE_AUDIT_v1.58.0.md`, `VALIDACION_PRE_VPS_v1.58.0.md`, `RELEASE_MANIFEST_v1.58.0.json` | **Los exige el gate de release.** No aparecen en ningún grep porque el nombre se construye con la versión: `ROOT / f"QUANT_ENGINE_AUDIT_v{version}.md"`. Borrarlos rompe el empaquetado. |
 | `ABRIR_AUDITOR_DATOS.bat`, `DESINSTALAR_AUTOINICIO_MOTOR_24_7.bat`, `MIGRAR_MEMORIA_ANTERIOR.bat`, `LIMPIAR.bat`, `CERTIFICAR_LIVE.bat` | **Son puntos de entrada.** Nadie los llama desde código porque los abre el operador con doble clic. Un punto de entrada sin referencias internas es lo normal, no un residuo. |
 | `requirements-ultralowlatency.txt` | Ruta opcional de aceleración, con su prueba (`tests/test_v1230_ultralowlatency.py`), su documento (`docs/ULTRA_LOW_LATENCY_DEPLOYMENT.md`) y su lanzador. El fichero no se nombra en ellos, pero la función existe: borrarlo dejaría la ruta sin sus dependencias declaradas. |
 | `app/core/provider_etf_catalog.py` | Parece legado —lo sustituyó `provider_asset_catalog`— pero éste **importa de él** (`_looks_like_etf`, `_discover_quantdata_etfs`, `load_cached_provider_etfs`). Es una dependencia viva, no un resto. |

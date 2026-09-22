@@ -1,6 +1,6 @@
 {
-  "version": "1.57.2",
-  "release": "ITM_QUANT_v1.57.2_PRE_VPS",
+  "version": "1.58.0",
+  "release": "ITM_QUANT_v1.58.0_PRE_VPS",
   "scope": "MULTI_ASSET",
   "base_version": "1.55.0",
   "focus": "CIERRE INTEGRAL POR GATES: tradeSideCode como autoridad del agresor con tabla de evidencia forense, una sola implementacion de la marca de flujo, barras de agresor y prima recuperadas desde el FlowViewModel, ocho carriles con LKG, Net Drift con muros y QFLOW sobre un eje unico, auditoria del calculo de los muros, Interval Map con el hueco preservado y el signo verificado celda a celda, Monte Carlo como gate de release, cinco ficheros de acumulaciones auditados uno a uno y snapshot transaccional.",
@@ -23,22 +23,22 @@
     "PUNTO 6 CERRADO: la UI deja de leer `trace.option_prints` y la rama que recalculaba las tarjetas desde la cinta local desaparece. Era la UI consumiendo las estructuras internas del motor, y hacia que un bundle roto se viera SANO porque las tarjetas se rellenaban por el otro camino."
   ],
   "tests": {
-    "collected": 3072,
-    "passed": 3023,
+    "collected": 3117,
+    "passed": 3068,
     "failed": 0,
     "skipped": 0,
     "errors": 0,
-    "files": 191,
+    "files": 192,
     "status": "PASS",
     "partitions": 21,
-    "plan_sha256": "25d3cb606e7016cc50e6fc10f570721800c4f1b33432bfdacb2ec66af8487acc",
+    "plan_sha256": "45607865fb44cbd8610a163e94034e8f971c54a11b3e14df4f53810536efbc3c",
     "run_observed": {
-      "passed": 3023,
+      "passed": 3068,
       "skipped": 49,
       "failed": 0,
-      "collected": 3072,
+      "collected": 3117,
       "interprete": "CPython 3.13.12 (el certificado)",
-      "note": "ejecucion completa en el interprete certificado, con los locks instalados con --require-hashes --only-binary=:all:. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 49 saltos reales exigen credenciales o red al proveedor"
+      "note": "ejecucion completa en el interprete certificado. `skipped` del contrato es 0 porque ningun salto se presenta como auditado; los 49 reales exigen credenciales o red al proveedor"
     }
   },
   "certification_status": "FUNCTIONAL_VERIFIED_LIVE_PENDING",
@@ -185,5 +185,20 @@
     "declaracion": ".python-runtime.json",
     "determinacion": "docs/RUNTIME_CERTIFICADO.md",
     "anterior": "3.12.14 (source-only; sin instalador de Windows desde 3.12.10)"
+  },
+  "live_certification": {
+    "script": "scripts/certificar_transporte_live.py",
+    "entrypoint_windows": "CERTIFICAR_TRANSPORTE.bat",
+    "status": "PENDIENTE_DE_EJECUCION_EN_WINDOWS",
+    "note": "Las siete afirmaciones del transporte solo se cierran con trafico real. La suite de caos demuestra la conducta del codigo, no la del proveedor, y no las sustituye.",
+    "assertions": [
+      "SIN_MUERTE_SISTEMATICA_EN_5S",
+      "SIN_AVALANCHA_DE_PESADOS",
+      "RECUPERACION_TRAS_TIMEOUT",
+      "UN_FALLO_NO_BLOQUEA_A_LOS_DEMAS",
+      "SIN_CONTAMINACION_ENTRE_ACTIVOS",
+      "EL_PLAZO_LO_FIJA_EL_p95_MEDIDO",
+      "COLA_PROPIA_SEPARADA_DE_LA_LATENCIA_DEL_PROVEEDOR"
+    ]
   }
 }

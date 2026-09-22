@@ -75,6 +75,41 @@ TIMEOUT_SAFETY_FACTOR = 1.5
 TIMEOUT_FLOOR_S = 2.0
 TIMEOUT_CEILING_S = 20.0
 
+# ── warm start · v1.58.0 ───────────────────────────────────────────────────
+#: Plazo de LECTURA de un endpoint SIN historia. Es una política del producto,
+#: no una variable de entorno.
+#:
+#: Hasta v1.57.2 este valor salía de `QUANTDATA_TIMEOUT_SECONDS`, y con el 5 que
+#: reparte el instalador TODO endpoint sin muestras empezaba en cinco segundos.
+#: El plazo «adaptativo» no gobernaba nada: los endpoints pesados morían a 5.0 s
+#: en cada ciclo y, como un timeout sólo aporta UNA muestra y el cortacircuitos
+#: abre a los cuatro fallos seguidos, calibrar tardaba minutos. La consola de
+#: producción lo demostró: `delta`, `gamma`, `net_flow`, `net_drift`,
+#: `market_share`, `contract_trade_side_statistics` y los dos order flow, todos
+#: cortados exactamente en 5.0 s.
+#:
+#: Doce segundos es el arranque seguro: cabe en el ciclo de 15 s con su holgura y
+#: da margen a `interval-map`, `order-flow-raw` y la exposición por vencimiento.
+#: En cuanto hay muestras manda el p95 medido, que baja solo a los rápidos.
+WARM_START_READ_S = 12.0
+
+#: Plazo de CONEXIÓN, independiente del de lectura.
+#:
+#: Son dos fallos distintos y cada uno tiene su escala: establecer la conexión es
+#: un ida y vuelta de red —si no ocurre en cuatro segundos, no va a ocurrir— y
+#: leer la respuesta depende de cuánto tarde el proveedor en calcularla. Un solo
+#: número para los dos obliga a elegir: con cinco segundos se corta al endpoint
+#: que iba a responder en nueve; con doce se esperan doce a un host que no
+#: resuelve.
+CONNECT_TIMEOUT_S = 4.0
+
+#: Peso de la última muestra en la EWMA. La EWMA NO fija el plazo: sirve para
+#: detectar que un endpoint se está degradando antes de que el p95 lo note.
+EWMA_ALPHA = 0.3
+
+#: Cuánto tiene que superar la EWMA al p95 para declarar deriva.
+DRIFT_FACTOR = 1.5
+
 # ── backoff ────────────────────────────────────────────────────────────────
 BACKOFF_BASE_S = 2.0
 BACKOFF_CAP_S = 300.0
@@ -95,6 +130,39 @@ OPEN_SECONDS = 30.0
 OPEN_SECONDS_MAX = 600.0
 
 
+class Deadline:
+    """Plazo de una petición, con la conexión separada de la lectura.
+
+    Viaja como objeto y no como número porque son dos plazos con dos causas: uno
+    mide alcanzar al proveedor, el otro mide que conteste. Aplanarlos a un solo
+    float es el defecto que este módulo existe para cerrar.
+    """
+
+    __slots__ = ("connect", "read", "source")
+
+    def __init__(self, *, connect: float, read: float, source: str = "") -> None:
+        self.connect = max(0.5, float(connect))
+        self.read = max(TIMEOUT_FLOOR_S, float(read))
+        self.source = str(source)
+
+    @property
+    def total(self) -> float:
+        """Lo máximo que puede vivir la petición: conectar y después leer."""
+        return self.connect + self.read
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"connect_s": round(self.connect, 3), "read_s": round(self.read, 3),
+                "total_s": round(self.total, 3), "source": self.source}
+
+    def __repr__(self) -> str:   # pragma: no cover - diagnóstico
+        return (f"Deadline(connect={self.connect:.2f}s, read={self.read:.2f}s, "
+                f"source={self.source!r})")
+
+    def __eq__(self, other: Any) -> bool:
+        return (isinstance(other, Deadline) and self.connect == other.connect
+                and self.read == other.read)
+
+
 def _percentile(valores: List[float], q: float) -> Optional[float]:
     """Percentil por interpolación lineal. `None` sin muestras."""
     if not valores:
@@ -107,6 +175,80 @@ def _percentile(valores: List[float], q: float) -> Optional[float]:
     hi = min(lo + 1, len(xs) - 1)
     frac = pos - lo
     return float(xs[lo] * (1.0 - frac) + xs[hi] * frac)
+
+
+# ── presupuesto de reintento · v1.58.0 ────────────────────────────────────
+#: Clases de fallo que un reintento PUEDE arreglar: el mismo cuerpo, la misma
+#: ruta y las mismas credenciales, con otro momento.
+RETRYABLE = frozenset({"TIMEOUT", "TRANSIENT", "PROVIDER_ERROR", "RATE_LIMITED"})
+
+#: Clases que un reintento NO arregla nunca. Reintentar un 400 es repetir un
+#: cuerpo que el proveedor ya rechazó; reintentar un 401/403 es volver a
+#: presentar la misma credencial; un 404 es una ruta que no existe. Los tres
+#: gastan cuota para obtener el mismo error, y encima ensucian el diagnóstico.
+NEVER_RETRY = frozenset({"REQUEST_INVALID", "UNAUTHORIZED", "FORBIDDEN",
+                         "MISSING_TOOL", "NO_DATA"})
+
+#: Un reintento por endpoint y por ciclo. Dos reintentos del mismo endpoint en el
+#: mismo ciclo son tres peticiones para un dato: es la congestión que el
+#: gobernador existe para impedir.
+MAX_RETRIES_PER_CYCLE = 1
+
+
+def retry_plan(runtime: "EndpointRuntime", *, status: str, in_burst: bool,
+               cycle_remaining_s: Optional[float],
+               deadline: Optional[Deadline] = None,
+               free_slot: bool = True,
+               rng: Optional[random.Random] = None) -> Dict[str, Any]:
+    """¿Se reintenta? Devuelve la decisión, el motivo y la espera.
+
+    ═══════════════════════════════════════════════════════════════════════
+    UN REINTENTO SIN PRESUPUESTO ES OTRA PETICIÓN, NO UNA CORRECCIÓN
+    ═══════════════════════════════════════════════════════════════════════
+
+    Reintentar un timeout duplica la petición contra la misma cuenta: dos
+    sockets vivos, dos unidades de cuota y dos veces la latencia, para un dato.
+    Cuando el proveedor va lento —que es cuando hay timeouts— eso es exactamente
+    la avalancha que provoca los siguientes timeouts.
+
+    Así que el reintento exige las CINCO condiciones a la vez, y cuando falta
+    una se dice cuál:
+
+        1. el fallo es de una clase que un reintento pueda arreglar;
+        2. el cortacircuitos está CERRADO —si está abierto, el endpoint ya está
+           declarado caído y el reintento es ruido—;
+        3. no estamos en la ráfaga de arranque —ahí la prioridad es cubrir la
+           pantalla entera una vez, no insistir en un endpoint—;
+        4. queda tiempo de ciclo para que el reintento termine dentro;
+        5. hay hueco de concurrencia AHORA; un reintento que espera cola compite
+           con el ciclo siguiente.
+    """
+    st = str(status or "").upper()
+    espera = 0.0
+    def _no(motivo: str) -> Dict[str, Any]:
+        return {"retry": False, "reason": motivo, "delay_seconds": 0.0,
+                "status": st}
+
+    if st in NEVER_RETRY:
+        return _no(f"{st} no se arregla reintentando")
+    if st not in RETRYABLE:
+        return _no(f"clase de fallo no reintentable: {st or 'DESCONOCIDA'}")
+    if in_burst:
+        return _no("ráfaga de arranque: primero se cubre la pantalla entera")
+    estado = runtime.snapshot()["breaker"]
+    if estado != CLOSED:
+        return _no(f"cortacircuitos {estado}: el endpoint ya está declarado caído")
+    if not free_slot:
+        return _no("sin hueco de concurrencia: el reintento haría cola")
+    if runtime.retried_this_cycle():
+        return _no(f"ya se reintentó en este ciclo (máximo {MAX_RETRIES_PER_CYCLE})")
+    espera = backoff_delay(1, rng=rng)
+    necesario = espera + (deadline.total if deadline is not None else 0.0)
+    if cycle_remaining_s is not None and cycle_remaining_s < necesario:
+        return _no(f"no cabe en el ciclo: hacen falta {necesario:.1f} s y quedan "
+                   f"{float(cycle_remaining_s):.1f} s")
+    return {"retry": True, "reason": "presupuesto disponible",
+            "delay_seconds": round(espera, 3), "status": st}
 
 
 def backoff_delay(failures: int, *, base: float = BACKOFF_BASE_S,
@@ -134,11 +276,16 @@ class EndpointRuntime:
     __slots__ = ("key", "default_timeout", "_lat", "_failures", "_state",
                  "_open_until", "_open_for", "_probe_in_flight", "_last_error",
                  "_last_status", "_last_success_at", "_last_attempt_at",
-                 "_opens", "_timeouts", "_lock")
+                 "_opens", "_timeouts", "_ewma", "_connect", "_retried_at",
+                 "_lock")
 
-    def __init__(self, key: str, *, default_timeout: float = 10.0) -> None:
+    def __init__(self, key: str, *, default_timeout: float = WARM_START_READ_S,
+                 connect_timeout: float = CONNECT_TIMEOUT_S) -> None:
         self.key = str(key)
+        # `default_timeout` es el WARM START de lectura: el plazo mientras no hay
+        # muestras. Nunca por debajo del suelo de política.
         self.default_timeout = max(TIMEOUT_FLOOR_S, float(default_timeout))
+        self._connect = max(0.5, float(connect_timeout))
         self._lat: List[float] = []
         self._failures = 0
         self._state = CLOSED
@@ -151,11 +298,21 @@ class EndpointRuntime:
         self._last_attempt_at: Optional[float] = None
         self._opens = 0
         self._timeouts = 0
+        self._ewma: Optional[float] = None
+        self._retried_at: Optional[float] = None
         self._lock = threading.Lock()
 
     # ── plazo ──────────────────────────────────────────────────────────────
     def timeout(self) -> float:
-        """Plazo vigente: medido si hay muestra, configurado si no."""
+        """Plazo de LECTURA vigente: el p95 medido, o el warm start si no hay.
+
+        La autoridad es el **p95**, no la EWMA. Son dos preguntas distintas: el
+        p95 dice «cuánto tarda este endpoint cuando va bien, con margen» y es
+        estable; la EWMA dice «cómo va AHORA» y se mueve con cada muestra. Un
+        plazo gobernado por la EWMA oscila, y un plazo que oscila corta
+        peticiones sanas en cuanto hay una racha lenta. La EWMA se publica y se
+        usa para declarar DERIVA —ver `drift()`—, nunca para fijar el plazo.
+        """
         with self._lock:
             if len(self._lat) < MIN_SAMPLES_TO_CALIBRATE:
                 return self.default_timeout
@@ -163,6 +320,44 @@ class EndpointRuntime:
         if p95 is None or p95 <= 0:
             return self.default_timeout
         return max(TIMEOUT_FLOOR_S, min(TIMEOUT_CEILING_S, p95 * TIMEOUT_SAFETY_FACTOR))
+
+    def deadline(self) -> Deadline:
+        """El plazo completo de una petición: conexión y lectura, por separado."""
+        with self._lock:
+            calibrado = len(self._lat) >= MIN_SAMPLES_TO_CALIBRATE
+            conexion = self._connect
+        return Deadline(connect=conexion, read=self.timeout(),
+                        source=("MEASURED_P95" if calibrado else "WARM_START"))
+
+    def drift(self) -> Dict[str, Any]:
+        """¿Se está degradando? EWMA contra p95, sin tocar el plazo.
+
+        Detectar la degradación y reaccionar a ella son cosas distintas: esto la
+        NOMBRA para que el Auditor la enseñe y el operador decida, en vez de
+        dejar que el plazo la persiga y acabe cortando a todos.
+        """
+        with self._lock:
+            ewma = self._ewma
+            p50 = _percentile(self._lat, 0.50)
+            p95 = _percentile(self._lat, 0.95)
+            muestras = len(self._lat)
+        # La deriva se mide contra la MEDIANA, no contra el p95. El p95 de una
+        # ventana de cuarenta muestras salta en cuanto dos van lentas —su cola es
+        # el 5 %, o sea dos muestras—, así que comparar la EWMA con él no avisa
+        # de nada: los dos suben juntos. La mediana aguanta un par de valores
+        # atípicos, y eso es justo lo que permite ver el deterioro EMPEZANDO.
+        derivando = bool(ewma is not None and p50 and muestras >= MIN_SAMPLES_TO_CALIBRATE
+                         and ewma > p50 * DRIFT_FACTOR)
+        return {
+            "ewma_seconds": None if ewma is None else round(ewma, 4),
+            "latency_p50": None if p50 is None else round(p50, 4),
+            "latency_p95": None if p95 is None else round(p95, 4),
+            "drifting": derivando,
+            "factor": DRIFT_FACTOR,
+            "compared_against": "latency_p50",
+            "detail": ("la latencia reciente supera la mediana con margen: el endpoint "
+                       "se está degradando" if derivando else ""),
+        }
 
     def calibrated(self) -> bool:
         with self._lock:
@@ -208,6 +403,8 @@ class EndpointRuntime:
             self._open_until = 0.0
             self._open_for = OPEN_SECONDS      # la próxima apertura vuelve a empezar corta
             if lat == lat and lat >= 0:
+                self._ewma = (lat if self._ewma is None
+                              else EWMA_ALPHA * lat + (1.0 - EWMA_ALPHA) * self._ewma)
                 self._lat.append(lat)
                 if len(self._lat) > LATENCY_WINDOW:
                     del self._lat[0:len(self._lat) - LATENCY_WINDOW]
@@ -275,6 +472,21 @@ class EndpointRuntime:
         self.record_failure(f"plazo agotado a los {lim:.1f}s",
                             status="TIMEOUT", now=now)
 
+    def mark_retry(self, now: Optional[float] = None) -> None:
+        """Anota que este endpoint ya gastó su reintento del ciclo."""
+        t = time.monotonic() if now is None else float(now)
+        with self._lock:
+            self._retried_at = t
+
+    def retried_this_cycle(self) -> bool:
+        with self._lock:
+            return self._retried_at is not None
+
+    def start_cycle(self) -> None:
+        """Devuelve el reintento al endpoint. Lo llama el programador por ciclo."""
+        with self._lock:
+            self._retried_at = None
+
     def next_retry_in(self, rng: Optional[random.Random] = None) -> float:
         with self._lock:
             n = self._failures
@@ -301,7 +513,13 @@ class EndpointRuntime:
                 "consecutive_failures": self._failures,
                 "failure_threshold": FAILURE_THRESHOLD,
                 "timeout_seconds": round(plazo, 3),
-                "timeout_source": "MEASURED_P95" if calibrado else "CONFIGURED_DEFAULT",
+                "connect_timeout_seconds": round(self._connect, 3),
+                "read_timeout_seconds": round(plazo, 3),
+                "timeout_budget_ms": round((plazo + self._connect) * 1000.0, 1),
+                "timeout_source": ("MEASURED_P95" if calibrado else "WARM_START"),
+                "warm_start_seconds": round(self.default_timeout, 3),
+                "ewma_seconds": (None if self._ewma is None else round(self._ewma, 4)),
+                "retried_this_cycle": self._retried_at is not None,
                 "samples": len(self._lat),
                 "samples_needed": MIN_SAMPLES_TO_CALIBRATE,
                 "latency_p50": None if p50 is None else round(p50, 4),
@@ -317,7 +535,7 @@ class EndpointRuntime:
 class EndpointRegistry:
     """Un runtime por clave, creado al vuelo. Nada se comparte entre endpoints."""
 
-    def __init__(self, *, default_timeout: float = 10.0) -> None:
+    def __init__(self, *, default_timeout: float = WARM_START_READ_S) -> None:
         self.default_timeout = float(default_timeout)
         self._by_key: Dict[str, EndpointRuntime] = {}
         self._lock = threading.Lock()
@@ -330,6 +548,30 @@ class EndpointRegistry:
                 rt = self._by_key[k] = EndpointRuntime(k, default_timeout=self.default_timeout)
             return rt
 
+    def start_cycle(self) -> None:
+        """Nuevo ciclo: cada endpoint recupera su reintento."""
+        with self._lock:
+            runtimes = list(self._by_key.values())
+        for rt in runtimes:
+            rt.start_cycle()
+
+    def set_warm_start(self, seconds: float) -> float:
+        """Fija el warm start de lectura, con SUELO de política.
+
+        v1.58.0 · Aquí estaba el defecto: cualquier valor entraba, incluido el
+        `QUANTDATA_TIMEOUT_SECONDS=5` del instalador, y con él todo endpoint sin
+        historia arrancaba en cinco segundos. Ahora el suelo lo pone el producto
+        —`WARM_START_READ_S`— y una configuración más CORTA no puede bajarlo. Una
+        más LARGA sí se respeta: quien pide más paciencia la tiene.
+        """
+        pedido = float(seconds)
+        efectivo = max(WARM_START_READ_S, pedido)
+        with self._lock:
+            self.default_timeout = efectivo
+            for rt in self._by_key.values():
+                rt.default_timeout = efectivo
+        return efectivo
+
     def set_default_timeout(self, seconds: float) -> None:
         """Fija el plazo configurado, también en los runtimes YA creados.
 
@@ -339,11 +581,10 @@ class EndpointRegistry:
         recalculaba el suyo por su cuenta: dos autoridades para un mismo plazo,
         que es como se deslizan las discrepancias.
         """
-        v = max(TIMEOUT_FLOOR_S, float(seconds))
-        with self._lock:
-            self.default_timeout = v
-            for rt in self._by_key.values():
-                rt.default_timeout = v
+        # v1.58.0 · Alias compatible de `set_warm_start`, con su mismo suelo: un
+        # llamador antiguo ya no puede rebajar el warm start por debajo de la
+        # política. Es lo que hacía el carril de páginas con el valor del `.env`.
+        self.set_warm_start(float(seconds))
 
     def snapshot(self, now: Optional[float] = None) -> Dict[str, Any]:
         with self._lock:
@@ -370,7 +611,9 @@ class EndpointRegistry:
 
 
 __all__ = [
-    "EndpointRuntime", "EndpointRegistry", "backoff_delay",
+    "EndpointRuntime", "EndpointRegistry", "backoff_delay", "Deadline",
+    "retry_plan", "RETRYABLE", "NEVER_RETRY", "MAX_RETRIES_PER_CYCLE",
+    "WARM_START_READ_S", "CONNECT_TIMEOUT_S", "EWMA_ALPHA", "DRIFT_FACTOR",
     "CLOSED", "OPEN", "HALF_OPEN", "BREAKER_STATES",
     "FAILURE_THRESHOLD", "OPEN_SECONDS", "OPEN_SECONDS_MAX",
     "LATENCY_WINDOW", "MIN_SAMPLES_TO_CALIBRATE", "TIMEOUT_SAFETY_FACTOR",

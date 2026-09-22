@@ -9,7 +9,7 @@ from typing import Any
 
 from .shared import (RAW_CACHE, QUOTA, ENGINE_FAST_JOBS, ENGINE_SLOW_JOBS,
                      ENGINE_FAST_REQUESTS, ENGINE_SLOW_EVERY_N_CYCLES,
-                     ENDPOINT_RUNTIME)
+                     ENDPOINT_RUNTIME, GOVERNOR, weight_of)
 from .client import QuantDataClient, QuantDataTimeout
 from .settings import QuantDataSettings, load_settings
 from ...core.provider_bus import FEATURE_BUS
@@ -287,6 +287,8 @@ class QuantDataRuntime:
         self._wake = asyncio.Event()
         self._stop = False
         self._lock = asyncio.Lock()
+        #: Las cuatro cifras de la última petición de cada endpoint del motor.
+        self._timings: dict[str, dict[str, Any]] = {}
         self._status: dict[str, Any] = {
             "configured": self.settings.configured,
             "running": False,
@@ -337,7 +339,7 @@ class QuantDataRuntime:
         # El plazo configurado entra en el registro, que es quien decide el de
         # cada endpoint. Lo hacen los DOS carriles porque cualquiera de los dos
         # puede arrancar primero, y el que arranque tiene que dejarlo puesto.
-        ENDPOINT_RUNTIME.set_default_timeout(self.settings.request_timeout_seconds)
+        ENDPOINT_RUNTIME.set_warm_start(self.settings.read_warm_start_seconds)
         self._status["configured"] = self.settings.configured
         self._symbol = str(symbol or "DIA").upper()
         if not self.settings.configured:
@@ -412,9 +414,27 @@ class QuantDataRuntime:
                 _obs_expected("quantdata.loop.clock_timeout")
 
     async def _post(self, path: str, body: dict[str, Any], *,
-                    timeout: float | None = None) -> dict[str, Any]:
+                    timeout: Any = None, key: str = "") -> dict[str, Any]:
+        """Una petición del carril del motor, con turno del gobernador.
+
+        v1.58.0 · El techo de concurrencia es COMPARTIDO con el carril de
+        páginas. Mientras cada carril tenía su propio semáforo había dos techos
+        independientes para un mismo proveedor, que no es un techo: nueve
+        endpoints del motor y ocho de páginas podían salir a la vez cumpliendo
+        los dos límites y ahogándose entre ellos.
+        """
         assert self.client is not None
-        response = await self.client.post(path, body, timeout=timeout)
+        turno = await GOVERNOR.acquire(key or path, weight=weight_of(key or ""),
+                                       budget_s=getattr(timeout, "total", None))
+        try:
+            response = await self.client.post(path, body, timeout=timeout)
+        except QuantDataTimeout:
+            turno.done("TIMEOUT")
+            raise
+        except BaseException:
+            turno.done("ERROR")
+            raise
+        self._timings[key or path] = turno.done("OK")
         self._status["remaining"] = response.remaining
         self._status["limit"] = response.limit
         self._status["reset_seconds"] = response.reset_seconds
@@ -449,6 +469,7 @@ class QuantDataRuntime:
                 "max_pain": ("/v1/options/tool/max-pain-over-time", base_filter),
                 "iv_rank": ("/v1/options/tool/iv-rank", {"filter": {"ticker": ticker}, "lookBackPeriod": self.settings.iv_lookback_days, "maturity": self.settings.iv_maturity_days}),
             }
+            ENDPOINT_RUNTIME.start_cycle()
             slow_due = (self._cycle % max(1, ENGINE_SLOW_EVERY_N_CYCLES)) == 0
             due_names = list(ENGINE_FAST_JOBS) + (list(ENGINE_SLOW_JOBS) if slow_due else [])
             self._cycle += 1
@@ -479,20 +500,26 @@ class QuantDataRuntime:
             # sus latencias con las de la herramienta homónima falsearía las dos.
             async def _channel(name: str):
                 path, payload_body = requests[name]
-                rt = ENDPOINT_RUNTIME.get(f"engine:{name}")
-                plazo = rt.timeout()
+                clave = f"engine:{name}"
+                rt = ENDPOINT_RUNTIME.get(clave)
+                plazo = rt.deadline()
                 t0 = time.monotonic()
                 gate = await HUB_RUNTIME.fetch(
                     name, target.active_symbol,
-                    lambda: self._post(path, payload_body, timeout=plazo),
-                    timeout_s=plazo + CHANNEL_SLACK_S)
+                    lambda: self._post(path, payload_body, timeout=plazo,
+                                       key=clave),
+                    timeout_s=plazo.total + CHANNEL_SLACK_S)
 
                 def _anotar_fallo() -> str:
                     detalle = str(gate.get("detail") or "canal no disponible")
                     inner = gate.get("exception")
                     if isinstance(inner, QuantDataTimeout):
-                        rt.record_timeout(
-                            getattr(inner, "limit_seconds", None) or plazo)
+                        # Sólo la LECTURA agotada dice cuánto tarda el endpoint.
+                        if str(getattr(inner, "phase", "READ") or "READ").upper() == "READ":
+                            rt.record_timeout(
+                                getattr(inner, "limit_seconds", None) or plazo.read)
+                        else:
+                            rt.record_failure(detalle, status="CONNECT_TIMEOUT")
                     else:
                         rt.record_failure(detalle)
                     return detalle
@@ -503,7 +530,13 @@ class QuantDataRuntime:
                     # metería una latencia de microsegundos en la calibración y
                     # hundiría el plazo del endpoint justo cuando va lento.
                     if gate.get("source") == "LIVE":
-                        rt.record_success(time.monotonic() - t0)
+                        # La latencia que calibra es la de la PETICIÓN, sin la
+                        # cola del gobernador: incluirla haría que el plazo
+                        # persiguiera nuestra propia congestión.
+                        fila = self._timings.get(clave) or {}
+                        propia = fila.get("request_ms")
+                        rt.record_success((propia / 1000.0) if propia is not None
+                                          else (time.monotonic() - t0))
                     else:
                         _anotar_fallo()
                     return gate["payload"]

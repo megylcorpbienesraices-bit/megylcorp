@@ -58,7 +58,10 @@ def test_el_hub_funde_por_dataset_y_simbolo():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_el_carril_de_paginas_mete_el_PAYLOAD_no_la_respuesta():
-    bloque = FUENTE.split("_t0 = time.monotonic()", 1)[1].split("except QuantDataError", 1)[0]
+    # v1.58.0 · el ancla era `_t0 = time.monotonic()`, que desapareció al medir
+    # los tiempos en el gobernador. El invariante que defiende esta prueba no
+    # cambia: lo que entra en el hub es el PAYLOAD, no el objeto de respuesta.
+    bloque = FUENTE.split("_plazo = _rt.deadline()", 1)[1].split("except QuantDataError", 1)[0]
     assert "async def _pedir_payload" in bloque
     assert "return respuesta.payload" in bloque
     assert "lambda: _client.post(path, body)" not in bloque, (

@@ -76,6 +76,9 @@ def _settings(plazo: float = 5.0) -> QuantDataSettings:
         request_timeout_seconds=plazo,
         iv_lookback_days=30,
         iv_maturity_days=30,
+        # v1.58.0 · el plazo de LECTURA y el de CONEXIÓN son dos campos.
+        read_warm_start_seconds=plazo,
+        connect_timeout_seconds=3.0,
     )
 
 
@@ -115,13 +118,16 @@ def test_el_plazo_de_la_peticion_es_el_que_se_le_pasa():
         "dijera 14")
 
 
-def test_sin_plazo_explicito_manda_el_configurado():
+def test_sin_plazo_explicito_manda_el_warm_start_de_las_settings():
+    """v1.58.0 · el plazo por defecto es el warm start de LECTURA."""
     cliente = QuantDataClient(_settings(plazo=7.5))
     cliente._client = transporte = _Transporte()
 
     asyncio.run(cliente.post("/v1/options/tool/net-flow", {}))
 
     assert transporte.ultimo_plazo_s == pytest.approx(7.5)
+    # Y la conexión NO hereda el plazo de lectura: es un campo aparte.
+    assert transporte.plazos[-1].connect == pytest.approx(3.0)
 
 
 def test_un_plazo_agotado_dice_QUE_plazo_expiro():
@@ -221,10 +227,18 @@ def test_el_plazo_configurado_entra_en_el_registro_ya_creado():
     assert reg.get("otro").timeout() == pytest.approx(12.0)
 
 
-def test_el_plazo_configurado_respeta_el_suelo():
-    reg = EndpointRegistry(default_timeout=10.0)
-    reg.set_default_timeout(0.1)
-    assert reg.get("x").timeout() == pytest.approx(ER.TIMEOUT_FLOOR_S)
+def test_un_env_mas_corto_no_puede_rebajar_el_warm_start():
+    """v1.58.0 · EL DEFECTO QUE ESTO CIERRA.
+
+    Hasta v1.57.2 cualquier valor entraba, incluido el `=5` del instalador, y
+    con él TODO endpoint sin historia arrancaba en cinco segundos: el plazo
+    «adaptativo» no gobernaba nada. Ahora el suelo lo pone el producto.
+    """
+    reg = EndpointRegistry()
+    assert reg.set_warm_start(5.0) == pytest.approx(ER.WARM_START_READ_S)
+    assert reg.get("gamma").timeout() == pytest.approx(ER.WARM_START_READ_S)
+    # Pedir MÁS paciencia sí se respeta: quien la pide la tiene.
+    assert reg.set_warm_start(25.0) == pytest.approx(25.0)
 
 
 def test_los_dos_carriles_ponen_el_plazo_configurado_al_arrancar():
@@ -234,8 +248,8 @@ def test_los_dos_carriles_ponen_el_plazo_configurado_al_arrancar():
         src = _texto(ruta)
         bloque = src[src.index("async def start(self, symbol: str)"):]
         bloque = bloque[:bloque.index("self._wake.set()")]
-        assert ("ENDPOINT_RUNTIME.set_default_timeout("
-                "self.settings.request_timeout_seconds)") in bloque, ruta
+        assert ("ENDPOINT_RUNTIME.set_warm_start("
+                "self.settings.read_warm_start_seconds)") in bloque, ruta
 
 
 def test_los_dos_carriles_comparten_el_registro():
@@ -258,7 +272,8 @@ def test_los_dos_carriles_comparten_el_registro():
 
 def test_el_carril_del_motor_no_mezcla_sus_latencias_con_las_de_las_paginas():
     src = _texto("app/providers/quantdata/runtime.py")
-    assert 'ENDPOINT_RUNTIME.get(f"engine:{name}")' in src
+    assert 'clave = f"engine:{name}"' in src
+    assert "ENDPOINT_RUNTIME.get(clave)" in src
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -274,19 +289,34 @@ def test_la_holgura_del_ciclo_es_positiva():
 def test_el_carril_de_paginas_da_la_holgura_al_ciclo_no_a_la_peticion():
     src = _texto("app/providers/quantdata/intelligence.py")
     assert "_client.post(path, body, timeout=_plazo)" in src
-    assert "timeout_s=_plazo + CHANNEL_SLACK_S," in src
+    # v1.58.0 · el plazo del ciclo se mide sobre el TOTAL de la petición
+    # (conexión + lectura), que es lo que puede vivir de verdad.
+    assert "timeout_s=_plazo.total + CHANNEL_SLACK_S," in src
 
 
 def test_el_carril_del_motor_da_la_holgura_al_ciclo_no_a_la_peticion():
     src = _texto("app/providers/quantdata/runtime.py")
-    assert "self._post(path, payload_body, timeout=plazo)" in src
-    assert "timeout_s=plazo + CHANNEL_SLACK_S)" in src
+    assert "self._post(path, payload_body, timeout=plazo," in src
+    assert "timeout_s=plazo.total + CHANNEL_SLACK_S)" in src
 
 
 def test_el_carril_del_motor_aprende_de_sus_timeouts():
     src = _texto("app/providers/quantdata/runtime.py")
     assert "rt.record_timeout(" in src
-    assert "rt.record_success(time.monotonic() - t0)" in src
+    # v1.58.0 · la latencia que calibra es la de la PETICIÓN, sin la cola del
+    # gobernador: incluirla haría que el plazo persiguiera nuestra congestión.
+    assert "fila.get(\"request_ms\")" in src
+    assert "rt.record_success(" in src
+
+
+def test_la_latencia_medida_excluye_la_cola_del_gobernador():
+    """Si el plazo persigue nuestra propia cola, crece sin que el proveedor
+    haya empeorado, y el techo acaba absorbiendo la congestión propia."""
+    for ruta in ("app/providers/quantdata/intelligence.py",
+                 "app/providers/quantdata/runtime.py"):
+        src = _texto(ruta)
+        assert "request_ms" in src, ruta
+        assert "queue_wait" not in src.split("record_success")[1][:200], ruta
 
 
 def test_el_ultimo_valor_bueno_no_se_anota_como_latencia_de_exito():

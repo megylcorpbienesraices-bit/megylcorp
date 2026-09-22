@@ -1,4 +1,4 @@
-# RUNTIME CERTIFICADO · ITM QUANT v1.57.2
+# RUNTIME CERTIFICADO · ITM QUANT v1.58.0
 
 > La determinación técnica de qué CPython certifica esta release, con la
 > evidencia medida y lo que queda pendiente. Lo que aquí se declara es lo que

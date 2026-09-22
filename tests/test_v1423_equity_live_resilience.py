@@ -98,11 +98,18 @@ def test_windows_atomic_store_does_not_attempt_directory_fsync():
 def test_quantdata_page_lane_is_bounded_and_not_motor_authority():
     src = text("app/providers/quantdata/intelligence.py")
     assert "PAGE_MAX_CONCURRENCY = 2" in src
-    # v1.52.0 · La concurrencia sigue acotada, pero ahora tiene DOS valores: el
-    # de régimen permanente y el de la ráfaga que se abre al cambiar de activo,
-    # donde no hay nada en pantalla que proteger. Sigue siendo un semáforo con
-    # una constante declarada, nunca ilimitado.
-    assert "asyncio.Semaphore(BURST_CONCURRENCY if burst else PAGE_MAX_CONCURRENCY)" in src
+    # v1.58.0 · LA COTA SIGUE, Y AHORA ES COMPARTIDA.
+    #
+    # Hasta aquí cada carril tenía su propio semáforo: dos techos independientes
+    # para un mismo proveedor, que no son un techo. Nueve peticiones del motor y
+    # ocho de páginas podían salir a la vez cumpliendo los dos límites y
+    # ahogándose entre ellas. Ahora el número de peticiones VIVAS lo gobierna
+    # `shared.GOVERNOR`, con un tope aparte para las pesadas y escalonado entre
+    # ellas. Sigue siendo acotado y declarado, nunca ilimitado.
+    assert "GOVERNOR.acquire(" in src
+    from app.providers.quantdata.shared import GOVERNOR
+    assert GOVERNOR.max_inflight >= 1
+    assert GOVERNOR.max_heavy_inflight <= GOVERNOR.max_inflight
     # v1.57.4 · La constante ya no es un número a ojo: sale del contrato
     # publicado —20 peticiones por segundo menos la reserva del motor—, así que
     # la ráfaga no puede rozar el límite por mucho que cambie el plan.

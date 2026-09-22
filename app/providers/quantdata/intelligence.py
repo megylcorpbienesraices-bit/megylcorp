@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from .client import QuantDataClient, QuantDataError, QuantDataTimeout
+from ...core.endpoint_runtime import retry_plan
 from .settings import load_settings, QuantDataSettings
 from ...core import session_resolver
 from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_validation_error,
@@ -28,10 +29,15 @@ from .tools import (FaltaRequisito, build_catalog, is_missing_tool_error, is_val
                     ROUTE_OK, ROUTE_INVALID, route_diagnostic)
 from .shared import (RAW_CACHE, QUOTA, ENGINE_SHARED_KEYS, describir_pausa,
                      BURST_LIMIT, BURST_WINDOW_S, ENGINE_RESERVE,
-                     ENDPOINT_RUNTIME)
+                     ENDPOINT_RUNTIME, GOVERNOR, weight_of)
 from ...core.obs import note as _obs_note, expected as _obs_expected
+from ...core.obs import get_logger as _get_logger
 from ...core.data_hub_runtime import HUB_RUNTIME, CHANNEL_SLACK_S
 
+_LOG = _get_logger("quantdata.intelligence")
+
+#: Conservado para compatibilidad de lectura: la concurrencia real la gobierna
+#: `shared.GOVERNOR`, que cuenta peticiones VIVAS y no peticiones hechas.
 PAGE_MAX_CONCURRENCY = 2
 
 # ── Arranque tras un cambio de activo ────────────────────────────────────────
@@ -147,6 +153,20 @@ class QuantDataIntelligence:
     def __init__(self) -> None:
         self.settings: QuantDataSettings = load_settings()
         self.catalog: Dict[str, QuantDataTool] = build_catalog()
+        #: Las cuatro cifras de la última petición de cada herramienta, para el
+        #: Auditor: cola propia, red del proveedor, total y presupuesto.
+        self._timings: Dict[str, Dict[str, Any]] = {}
+        #: Cuándo debe acabar este ciclo. Lo necesita el presupuesto de
+        #: reintento: un reintento que no cabe en el ciclo no es un reintento,
+        #: es una petición que compite con el ciclo siguiente.
+        self._cycle_ends_at: float = 0.0
+        #: Clase del último fallo por herramienta. Un timeout y un 400 no se
+        #: reintentan igual, y `provider_status` no distingue el timeout del
+        #: resto de lo transitorio.
+        self._fail_class: Dict[str, str] = {}
+        #: Última decisión de reintento por herramienta, con su motivo, para que
+        #: el Auditor pueda enseñar por qué NO se reintentó.
+        self._retry_notes: Dict[str, Dict[str, Any]] = {}
         self.client: QuantDataClient | None = None
         self._symbol = "DIA"
         self._task: asyncio.Task | None = None
@@ -179,10 +199,23 @@ class QuantDataIntelligence:
 
     async def start(self, symbol: str) -> None:
         self.settings = load_settings()
-        # El plazo configurado entra en el registro, que es el único que decide
-        # el plazo de cada endpoint. Mientras cada llamador lo calculaba por su
-        # cuenta había dos autoridades para un mismo número.
-        ENDPOINT_RUNTIME.set_default_timeout(self.settings.request_timeout_seconds)
+        # v1.58.0 · El WARM START entra con su suelo de política: un `.env` con
+        # un plazo más corto ya no puede rebajarlo, que es lo que hacía que todo
+        # endpoint sin historia muriera a los cinco segundos.
+        ENDPOINT_RUNTIME.set_warm_start(self.settings.read_warm_start_seconds)
+        GOVERNOR.max_inflight = max(1, int(self.settings.max_inflight))
+        GOVERNOR.max_heavy_inflight = max(
+            1, min(int(self.settings.max_heavy_inflight), GOVERNOR.max_inflight))
+        if self.settings.legacy_timeout_ignored:
+            # Se dice UNA vez, al arrancar, en vez de dejar que el operador
+            # descubra por qué su `.env` no manda.
+            _obs_expected("quantdata.timeout.legacy_ignored")
+            _LOG.info(
+                "QUANTDATA_TIMEOUT_SECONDS=%s ignorado: por debajo del warm start "
+                "de politica (%.0f s). El plazo lo fija el p95 medido por "
+                "endpoint; no hace falta editar el .env.",
+                self.settings.legacy_timeout_value,
+                self.settings.read_warm_start_seconds)
         self._symbol = str(symbol or "DIA").upper().strip()
         if not self.settings.configured:
             return
@@ -311,6 +344,11 @@ class QuantDataIntelligence:
                 self.client = QuantDataClient(self.settings)
                 await self.client.start()
             now = time.time()
+            # Nuevo ciclo: cada endpoint recupera su reintento y se fija cuándo
+            # termina el turno, que es lo que acota el presupuesto.
+            ENDPOINT_RUNTIME.start_cycle()
+            self._cycle_ends_at = time.monotonic() + (
+                BURST_CYCLE_SECONDS if self._bursting() else CADENCE["FAST"])
             due = [t for t in self.catalog.values() if self._due(t, now)]
             if not due:
                 return {"ready": True, "skipped": True}
@@ -373,18 +411,19 @@ class QuantDataIntelligence:
                            key=lambda t: (effective_priority(t.key, self._waited(t.key, now)),
                                           self._fetched_at.get(t.key, self._eligible_since)))[:allowed]
             if batch:
-                # Las páginas son corroboración, no autoridad del motor. Lanzar ocho
-                # POST pesados a la vez contra una cuenta pequeña aumenta timeouts y
-                # puede hacer parecer degradado al proveedor aunque el carril del motor
-                # siga sano. Dos en paralelo mantiene la UI diligente sin martillar la
-                # API ni consumir conexiones innecesarias.
-                sem = asyncio.Semaphore(BURST_CONCURRENCY if burst else PAGE_MAX_CONCURRENCY)
-
-                async def _bounded(tool: QuantDataTool) -> None:
-                    async with sem:
-                        await self._fetch(tool)
-
-                results = await asyncio.gather(*[_bounded(t) for t in batch], return_exceptions=True)
+                # v1.58.0 · LA CONCURRENCIA LA GOBIERNA EL GOBERNADOR, NO ESTE LOTE.
+                #
+                # Aquí había un semáforo local por carril, y el del motor tenía el
+                # suyo: dos techos independientes para un mismo proveedor no son
+                # un techo. Ahora el límite de peticiones VIVAS es uno y es
+                # compartido, con un tope aparte para las pesadas y escalonado
+                # entre ellas. Este lote sólo decide QUIÉN entra —eso es cuota y
+                # prioridad—; CUÁNTAS a la vez es del gobernador.
+                #
+                # La ráfaga sigue hidratando rápido: entra más gente en el lote,
+                # pero sale escalonada en vez de toda en el mismo milisegundo.
+                results = await asyncio.gather(*[self._fetch(t) for t in batch],
+                                               return_exceptions=True)
                 for tool, res in zip(batch, results):
                     if isinstance(res, Exception):
                         _obs_note(f"quantdata_intelligence:{tool.key}", res, severity="DEGRADED")
@@ -520,6 +559,34 @@ class QuantDataIntelligence:
                 if outcome == "ROUTE_INVALID":
                     last_err = detail
                     break
+                # v1.58.0 · UN REINTENTO, Y SÓLO CON PRESUPUESTO.
+                #
+                # Reintentar un timeout duplica la petición contra la misma
+                # cuenta: dos sockets vivos y dos unidades de cuota para un
+                # dato. Cuando el proveedor va lento —que es cuando hay
+                # timeouts— eso es justo la avalancha que provoca los
+                # siguientes. Las cinco condiciones, y el motivo cuando falta
+                # alguna, están en `endpoint_runtime.retry_plan`.
+                rt = ENDPOINT_RUNTIME.get(tool.key)
+                plan = retry_plan(
+                    rt,
+                    status=self._fail_class.get(tool.key, ""),
+                    in_burst=self._bursting(),
+                    cycle_remaining_s=max(0.0, self._cycle_ends_at - time.monotonic()),
+                    deadline=rt.deadline(),
+                    free_slot=GOVERNOR.has_free_slot())
+                self._retry_notes[tool.key] = plan
+                if not plan["retry"]:
+                    return
+                rt.mark_retry()
+                _obs_expected(f"quantdata.{tool.key}.retry")
+                await asyncio.sleep(plan["delay_seconds"])
+                outcome, detail = await self._attempt(tool, path, body, ticker, epoch)
+                if outcome == "OK":
+                    return
+                if outcome == "ROUTE_INVALID":
+                    last_err = detail
+                    break
                 return
             else:
                 # Se agotaron las correcciones sin que el proveedor aceptara.
@@ -554,46 +621,54 @@ class QuantDataIntelligence:
             # Hasta tener muestra suficiente se usa el configurado: calibrar con
             # tres datos es peor que no calibrar.
             _rt = ENDPOINT_RUNTIME.get(tool.key)
-            # v1.58.1 · UN SOLO PLAZO, Y EL DE LA PETICIÓN.
+            # v1.58.0 · EL PLAZO LO FIJA EL p95 MEDIDO; EL WARM START ES POLÍTICA.
             #
-            # Aquí se sumaba un segundo al plazo configurado para dar margen al
-            # ciclo, pero el margen se le daba al lado equivocado: la PETICIÓN
-            # seguía muriendo al plazo del constructor del cliente, así que el
-            # canal se rendía antes en cuanto el plazo calibrado bajaba de ése,
-            # y el mismo fallo se contaba dos veces. El registro se llenaba de
-            # `:late` con «request timed out» mientras la cuota estaba intacta.
+            # Hasta v1.57.2 el plazo de un endpoint sin historia salía de
+            # `QUANTDATA_TIMEOUT_SECONDS`. Con el `=5` del instalador, TODO
+            # endpoint sin muestras moría a los cinco segundos y el plazo
+            # «adaptativo» no gobernaba nada: ocho endpoints cortados
+            # exactamente en 5.0 s en la consola de producción.
             #
-            # Ahora el plazo es UNO, lo fija el registro —medido si hay muestra,
-            # configurado si no—, y la holgura va donde corresponde: al ciclo,
-            # que espera un pelo más que la petición para recogerla clasificada.
-            _plazo = _rt.timeout()
-            _t0 = time.monotonic()
+            # Ahora el warm start son doce segundos de política —no se puede
+            # rebajar desde el entorno— y el plazo trae la CONEXIÓN separada de
+            # la LECTURA, que son dos fallos distintos.
+            _plazo = _rt.deadline()
+            _peso = weight_of(tool.key)
 
-            # v1.57.6 · LO QUE ENTRA EN EL HUB ES SIEMPRE EL PAYLOAD CRUDO.
-            #
-            # El hub funde las peticiones duplicadas de los dos carriles por
-            # `(dataset, símbolo)`. Tres claves coinciden palabra por palabra
-            # entre carriles —`net_flow`, `net_drift` e `iv_rank`—, y cada carril
-            # metía un tipo distinto en la misma ranura: el del motor guardaba el
-            # `dict` del payload y éste guardaba el objeto `QuantDataResponse`.
-            #
-            # Quien llegaba segundo recibía el objeto del otro. De ahí el
-            # `AttributeError: 'dict' object has no attribute 'payload'` en
-            # net_flow y net_drift, que además se volvió sistemático al hidratar
-            # los dos carriles a la vez en el arranque.
-            #
-            # Se arregla en el origen, no envolviendo la lectura: los dos carriles
-            # meten el MISMO tipo, así que la fusión de peticiones —que ahorra
-            # cuota de verdad— sigue funcionando y ya no puede mentir sobre el
-            # tipo de lo que devuelve.
             async def _pedir_payload() -> Dict[str, Any]:
-                respuesta = await _client.post(path, body, timeout=_plazo)
+                # v1.57.6 · LO QUE ENTRA EN EL HUB ES SIEMPRE EL PAYLOAD CRUDO:
+                # los dos carriles meten el MISMO tipo en la ranura, así que la
+                # fusión de peticiones no puede mentir sobre lo que devuelve.
+                #
+                # v1.58.0 · Y pasa por el GOBERNADOR, que limita cuántas
+                # peticiones están VIVAS a la vez —la cuota sólo cuenta cuántas
+                # se hacen— y mide dónde se va el tiempo: la cola es nuestra, la
+                # petición es del proveedor, y son dos arreglos opuestos.
+                turno = await GOVERNOR.acquire(tool.key, weight=_peso,
+                                               budget_s=_plazo.total)
+                try:
+                    respuesta = await _client.post(path, body, timeout=_plazo)
+                except QuantDataTimeout:
+                    turno.done("TIMEOUT")
+                    raise
+                except BaseException:
+                    turno.done("ERROR")
+                    raise
+                fila = turno.done("OK")
+                self._timings[tool.key] = fila
+                # La latencia que calibra el plazo es la de la PETICIÓN, sin la
+                # cola: sumarle nuestra espera haría que el plazo persiguiera
+                # nuestra propia congestión y creciera sin motivo.
+                _rt.record_success(fila["request_ms"] / 1000.0)
                 return respuesta.payload
 
             gate = await HUB_RUNTIME.fetch(
                 tool.key, ticker,
                 _pedir_payload,
-                timeout_s=_plazo + CHANNEL_SLACK_S,
+                # El ciclo espera un pelo más que la petición —conexión y lectura
+                # más la holgura— para recogerla clasificada en vez de contar el
+                # mismo fallo dos veces.
+                timeout_s=_plazo.total + CHANNEL_SLACK_S,
                 accept_stale=False)
             if not gate.get("ready"):
                 inner = gate.get("exception")
@@ -604,11 +679,10 @@ class QuantDataIntelligence:
                 tool.provider_status = STATUS_TRANSIENT
                 tool.mark_transient(detail)
                 _rt.record_failure(detail, status=STATUS_TRANSIENT)
+                self._fail_class[tool.key] = STATUS_TRANSIENT
                 self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
                 self._fetched_at[tool.key] = time.time()
                 return "STOP", detail
-            # Latencia REAL de esta llamada: es la que calibra el plazo futuro.
-            _rt.record_success(time.monotonic() - _t0)
             payload = gate["payload"]
             if not isinstance(payload, dict):
                 # Cinturón: si algo vuelve a meter otro tipo en la ranura, se dice
@@ -620,6 +694,7 @@ class QuantDataIntelligence:
                 tool.provider_status = STATUS_TRANSIENT
                 tool.mark_transient(detail)
                 _rt.record_failure(detail, status=STATUS_TRANSIENT)
+                self._fail_class[tool.key] = STATUS_TRANSIENT
                 self._note_fault(tool, STATUS_TRANSIENT, detail, body=body)
                 self._fetched_at[tool.key] = time.time()
                 return "STOP", detail
@@ -635,11 +710,24 @@ class QuantDataIntelligence:
                 # cuánto tarda el endpoint: que tarda MÁS que el plazo con el que
                 # se le llamó. Se guarda como cota inferior para que el siguiente
                 # intento le dé el tiempo que pide, en vez de repetir el corte.
-                ENDPOINT_RUNTIME.get(tool.key).record_timeout(
-                    getattr(exc, "limit_seconds", None)
-                    or ENDPOINT_RUNTIME.get(tool.key).timeout())
+                #
+                # v1.58.0 · Sólo cuenta como cota si expiró la LECTURA. Un plazo
+                # de conexión agotado no dice nada sobre lo que tarda el endpoint
+                # en calcular: subir la lectura por eso sería perseguir el
+                # síntoma equivocado.
+                self._fail_class[tool.key] = "TIMEOUT"
+                if str(getattr(exc, "phase", "READ") or "READ").upper() == "READ":
+                    ENDPOINT_RUNTIME.get(tool.key).record_timeout(
+                        getattr(exc, "limit_seconds", None)
+                        or ENDPOINT_RUNTIME.get(tool.key).timeout())
+                else:
+                    ENDPOINT_RUNTIME.get(tool.key).record_failure(
+                        msg, status="CONNECT_TIMEOUT")
             elif status != STATUS_REQUEST_INVALID:
+                self._fail_class[tool.key] = status
                 ENDPOINT_RUNTIME.get(tool.key).record_failure(msg, status=status)
+            else:
+                self._fail_class[tool.key] = STATUS_REQUEST_INVALID
 
             if status == STATUS_REQUEST_INVALID:
                 fields = getattr(exc, "validation_fields", None) or []
@@ -948,6 +1036,21 @@ class QuantDataIntelligence:
             # Resumen accionable: qué hay que hacer y con cuántas herramientas.
             "pending_by_verdict": {k: sorted(v) for k, v in sorted(por_veredicto.items())},
             "endpoint_runtime": ENDPOINT_RUNTIME.snapshot(),
+            # v1.58.0 · DÓNDE SE VA EL TIEMPO, por endpoint.
+            #
+            # `queue_wait_ms` es congestión NUESTRA y `request_ms` es lentitud
+            # del PROVEEDOR. Sin separarlas, «tardó nueve segundos» no distingue
+            # las dos y los arreglos son opuestos: al proveedor lento se le da
+            # más plazo; a la cola propia, menos concurrencia.
+            "governor": GOVERNOR.snapshot(),
+            "timings": [dict(v, key=k) for k, v in sorted(self._timings.items())],
+            "timeout_policy": self.settings.timeout_policy(),
+            # Por qué NO se reintentó, herramienta a herramienta. Un «no» sin
+            # causa no se puede diagnosticar.
+            "retry_decisions": [dict(v, key=k)
+                                for k, v in sorted(self._retry_notes.items())],
+            "drift": [dict(ENDPOINT_RUNTIME.get(k).drift(), key=k)
+                      for k in sorted(self._timings)],
             "tools": sorted(tools, key=lambda t: (t["page"], t["title"])),
             "pages": pages,
             "live_tools": sum(1 for t in tools if t["state"] == "LIVE"),

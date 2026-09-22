@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from .settings import QuantDataSettings
+from ...core.endpoint_runtime import Deadline
 from .shared import QUOTA
 from ...version import APP_VERSION
 
@@ -37,6 +38,8 @@ class QuantDataTimeout(QuantDataError):
     """
 
     limit_seconds: float | None = None
+    #: CONNECT o READ. Son dos causas distintas y dos arreglos distintos.
+    phase: str | None = None
 
 
 @dataclass
@@ -163,7 +166,13 @@ class QuantDataClient:
                     "Accept": "application/json",
                     "User-Agent": f"ITM-QUANT/{APP_VERSION}",
                 },
-                timeout=httpx.Timeout(self.settings.request_timeout_seconds),
+                # Plazo por DEFECTO del cliente, con la conexión separada de la
+                # lectura. Cada petición trae el suyo (ver `post`), pero el del
+                # constructor ya no puede ser un número plano que se aplique a
+                # los dos: son dos fallos distintos con dos escalas distintas.
+                timeout=httpx.Timeout(
+                    self.settings.read_warm_start_seconds,
+                    connect=self.settings.connect_timeout_seconds),
                 follow_redirects=False,
             )
 
@@ -187,7 +196,7 @@ class QuantDataClient:
             return None
 
     async def post(self, path: str, body: dict[str, Any], *,
-                   timeout: float | None = None) -> QuantDataResponse:
+                   timeout: float | "Deadline" | None = None) -> QuantDataResponse:
         """Una petición. `timeout` es el plazo DE ESTA petición, en segundos.
 
         v1.58.1 · EL PLAZO MEDIDO NO LLEGABA AL TRANSPORTE.
@@ -219,18 +228,41 @@ class QuantDataClient:
         # calculaba con telemetría a medias. Se anota ANTES de pedir, porque una
         # petición en vuelo ya ocupa sitio en la ventana deslizante.
         QUOTA.spend(1)
-        plazo = (self.settings.request_timeout_seconds if timeout is None
-                 else max(0.1, float(timeout)))
+        # v1.58.0 · `timeout` admite un `Deadline` —conexión y lectura por
+        # separado— o un float por compatibilidad. Con el float se conserva el
+        # plazo de conexión de las settings en vez de aplicar el mismo número a
+        # los dos, que era la forma de cortar por lectura a un endpoint que
+        # conectaba en 80 ms.
+        if timeout is None:
+            plazo = Deadline(connect=self.settings.connect_timeout_seconds,
+                             read=self.settings.read_warm_start_seconds,
+                             source="CLIENT_DEFAULT")
+        elif isinstance(timeout, Deadline):
+            plazo = timeout
+        else:
+            plazo = Deadline(connect=self.settings.connect_timeout_seconds,
+                             read=max(0.1, float(timeout)), source="FLOAT_COMPAT")
         try:
-            response = await self._client.post(path, json=body,
-                                               timeout=httpx.Timeout(plazo))
+            response = await self._client.post(
+                path, json=body,
+                timeout=httpx.Timeout(plazo.read, connect=plazo.connect))
+        except httpx.ConnectTimeout as exc:
+            # Un plazo de CONEXIÓN agotado no dice nada sobre lo que tarda el
+            # endpoint en calcular: dice que no se llegó al proveedor. Subir el
+            # plazo de lectura por esto sería perseguir el síntoma equivocado.
+            error = QuantDataTimeout(
+                f"Quant Data connect timed out after {plazo.connect:.1f}s")
+            error.limit_seconds = plazo.connect
+            error.phase = "CONNECT"
+            raise error from exc
         except httpx.TimeoutException as exc:
             # El plazo que expiró viaja en el error. Sin él, aguas arriba no se
             # puede distinguir «este endpoint está muerto» de «se le dieron
             # cinco segundos y necesita doce», que son dos arreglos opuestos.
             error = QuantDataTimeout(
-                f"Quant Data request timed out after {plazo:.1f}s")
-            error.limit_seconds = plazo
+                f"Quant Data request timed out after {plazo.read:.1f}s")
+            error.limit_seconds = plazo.read
+            error.phase = "READ"
             raise error from exc
         except httpx.HTTPError as exc:
             raise QuantDataError(f"Quant Data transport error: {type(exc).__name__}") from exc
